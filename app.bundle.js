@@ -1503,11 +1503,8 @@ async function carregarDoSupabase() {
           }
         }
         // Último caso: item local não tem operação pendente, não é recente, não está na lista negra
-        // → pode ser reintroduzido (comportamento anterior)
-        resultado.push(local);
-        itensParaSync.push(local);
-      }
-
+// → como não existe no remoto, deve ser removido localmente (ignorar)
+// Não fazer nada – o item é descartado
       return resultado;
     };
 

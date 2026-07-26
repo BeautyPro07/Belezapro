@@ -8,4 +8,4 @@
 // service worker não mexe nisso, só garante que o ficheiro da app em si
 // carrega offline.
 
-const CACHE_NAME = 'beautypro-shell-v22';
+const CACHE_NAME = 'beautypro-shell-v23';
