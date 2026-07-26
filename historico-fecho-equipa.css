@@ -45,7 +45,7 @@
 }
 .fecho-row.total-row .fr-label { font-weight: 700; font-size: .95rem; color: var(--text-primary); }
 .fecho-row.total-row .fr-val {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.3rem;
   color: var(--green);
   text-align: right;

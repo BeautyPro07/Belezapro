@@ -1,35 +1,38 @@
 // ====================================================================
 //  CORE — ESTADO GLOBAL (extraído do app.js na Fase B da modularização)
+//  Fase D: integrado com core-store.js (subscribe / setState / batch)
 // ====================================================================
 let state = {
-  config: { storeName: 'Glamour Beauty', fundo: 50000, plano: 'trial', trialInicio: null, salaoId: null },
+  config: {
+    storeName: 'Glamour Beauty',
+    fundo: 0,
+    plano: 'trial',
+    trialInicio: null,
+    salaoId: null,
+    userRole: null,
+    userId: null,
+  },
   clientes: [],
   agendamentos: [],
   movimentos: [],
   profissionais: [],
   servicos: [],
   fechos_caixa: [],
-  agendaDataAtual: hoje(),
+  agendaDataAtual: (typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10)),
   histPeriodo: 'hoje',
-  carrinho: [],
+  // NOTA: o carrinho de vendas vive em cartItems (vendas-modais.js) + localStorage.
+  // A chave "carrinho" foi removida para eliminar estado morto/duplicado.
   filtroClientes: 'todos',
   chartPeriodo: 'semana',
   chartOffset: 0,
   chartMostrarValores: false,
-  
-  // ============================================================
-  //  FILTRO DO DASHBOARD (discreto, via ícone + Bottom Sheet)
-  //  - dashPeriodo: 'dia', 'semana', '7dias', 'mes', '30dias', 'ano', 'custom'
-  //  - dashOffset: deslocamento para trás (0 = atual, 1 = anterior, etc.)
-  //  - dashCustomInicio/Fim: datas personalizadas (YYYY-MM-DD)
-  // ============================================================
+
+  // Filtro do Dashboard
   dashPeriodo: localStorage.getItem('bp_dash_periodo') || 'dia',
   dashOffset: parseInt(localStorage.getItem('bp_dash_offset')) || 0,
   dashCustomInicio: localStorage.getItem('bp_dash_custom_inicio') || null,
   dashCustomFim: localStorage.getItem('bp_dash_custom_fim') || null,
 };
 
-// ✅ Ponto 4 — restaura a última aba visitada neste dispositivo; a troca
-// visual (classes .active nos tab-pane/nav-item) é reaplicada em
-// ui-events-navegacao.js depois do primeiro loadState(), ver ativarAbaAtiva().
+// Restaura a última aba visitada neste dispositivo
 let activeTab = localStorage.getItem('bp_active_tab') || 'dashboard';

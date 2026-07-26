@@ -193,7 +193,10 @@ function renderizarGrafico() {
   };
 }
 
+let _chartControlsBound = false;
 function initChartControls() {
+  if (_chartControlsBound) return;
+  _chartControlsBound = true;
   document.querySelectorAll('.chart-filter').forEach(btn => {
     btn.addEventListener('click', function() {
       const periodo = this.dataset.periodo;

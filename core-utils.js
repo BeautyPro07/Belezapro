@@ -5,9 +5,18 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ([1e7]+-1e3+-4e3+-
 let reciboCounter = parseInt(localStorage.getItem('bp_recibo_counter') || '0', 10);
 
 function nextReciboNum() {
-  reciboCounter++;
-  localStorage.setItem('bp_recibo_counter', String(reciboCounter));
-  return String(reciboCounter).padStart(4, '0');
+  // Contador local por salão (evita colisão entre salões no mesmo dispositivo).
+  // Unicidade multi-dispositivo requer sequência no Supabase (ver GUIA).
+  const salaoKey = (typeof state !== 'undefined' && state.config && state.config.salaoId)
+    ? String(state.config.salaoId).slice(0, 8)
+    : 'local';
+  const storageKey = 'bp_recibo_counter_' + salaoKey;
+  let n = parseInt(localStorage.getItem(storageKey) || localStorage.getItem('bp_recibo_counter') || '0', 10);
+  n++;
+  localStorage.setItem(storageKey, String(n));
+  reciboCounter = n;
+  const prefix = salaoKey !== 'local' ? salaoKey.slice(-4).toUpperCase() + '-' : '';
+  return prefix + String(n).padStart(4, '0');
 }
 
 function hoje() {
@@ -25,12 +34,22 @@ const fmtKz = v => {
 const escHtml = s => String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
   "'": '&#39;' })[m] || m);
 
+/** Log de erros não críticos (fila sync, localStorage). Nunca lança. */
+function logErroSilencioso(contexto, err) {
+  try {
+    const msg = (err && (err.message || String(err))) || 'erro desconhecido';
+    console.warn('[BeautyPro]', contexto + ':', msg);
+  } catch (_) {}
+}
+
+
+
 let toastTimer;
 
 function toast(msg, type) {
   const el = document.getElementById('toast');
   if (!el) return;
-  const icons = { success: '✅ ', error: '❌ ', warning: '⚠️ ' };
+  const icons = { success: '', error: '', warning: '' };
   el.textContent = (icons[type] || '') + msg;
   el.className = 'toast' + (type ? ' ' + type : '');
   el.classList.add('show');
@@ -117,4 +136,55 @@ function mostrarErro(mensagem, acaoTentar = null) {
   cancelarBtn.onclick = newCancelar;
   modal.onclick = (e) => { if (e.target === modal) closeModal('modal-erro'); };
   openModal('modal-erro');
+}
+
+
+/** Observabilidade cliente: contexto estruturado para debug (P2) */
+function logContexto(acao, extra) {
+  try {
+    const ctx = {
+      acao,
+      tab: (typeof activeTab !== 'undefined' ? activeTab : null),
+      salao: (state && state.config && state.config.salaoId) ? String(state.config.salaoId).slice(0, 8) : null,
+      online: navigator.onLine,
+      ts: new Date().toISOString(),
+      ...(extra || {})
+    };
+    console.info('[BeautyPro:ctx]', ctx);
+    return ctx;
+  } catch (_) { return null; }
+}
+
+function reportarErro(acao, err, extra) {
+  try {
+    const msg = err && (err.message || String(err));
+    logContexto(acao, { nivel: 'error', erro: msg, ...(extra || {}) });
+    console.error('[BeautyPro]', acao, err);
+  } catch (_) {}
+}
+
+/**
+ * Armazenamento com ofuscação básica (P2). Não substitui RLS nem HTTPS.
+ * Protege leitura casual de extensão; não é criptografia forte.
+ */
+function storageSetSecure(key, value) {
+  try {
+    const raw = typeof value === 'string' ? value : JSON.stringify(value);
+    const encoded = btoa(unescape(encodeURIComponent(raw)));
+    localStorage.setItem(key, 'bp1:' + encoded);
+  } catch (e) {
+    try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); } catch (_) {}
+  }
+}
+function storageGetSecure(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v == null) return fallback;
+    if (v.startsWith('bp1:')) {
+      return decodeURIComponent(escape(atob(v.slice(4))));
+    }
+    return v;
+  } catch (_) {
+    return fallback;
+  }
 }

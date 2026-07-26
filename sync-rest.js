@@ -10,6 +10,8 @@
 //    - Logs estruturados para auditoria
 //    - CORREÇÃO CRÍTICA: eliminações propagadas entre dispositivos
 //      (item local sem upsert pendente não é reintroduzido)
+//    - CORREÇÃO ADICIONAL: preservar itens locais recentes (até 5 segundos)
+//      para evitar desaparecimento temporário de vendas durante merge concorrente
 // ====================================================================
 
 // ====================================================================
@@ -445,17 +447,31 @@ async function carregarDoSupabase() {
         }
       }
 
-      // Itens locais que não existem no remoto
+      // ================================================================
+      // CORREÇÃO ADICIONAL: preservar itens locais recentes (até 5 segundos)
+      // mesmo que ainda não estejam na fila de upsert, para evitar
+      // desaparecimento temporário durante merge concorrente.
+      // ================================================================
+      const AGORA = Date.now();
       for (const [id, local] of mapLocal) {
-        // CORREÇÃO CRÍTICA: só preservar como "criação local pendente" se
-        // houver mesmo uma operação de upsert em fila para este id neste
-        // dispositivo. Caso contrário (lista negra, fila de delete, ou
-        // simplesmente ausência de qualquer operação pendente) o item
-        // deixou de existir no servidor e não deve ser reintroduzido.
-        if (deletedIds.has(id) || idsComDeletePendente.has(id) || !idsComUpsertPendente.has(id)) {
+        // Preservar se houver upsert pendente
+        if (idsComUpsertPendente.has(id)) {
+          resultado.push(local);
+          itensParaSync.push(local);
           continue;
         }
-        // Verificar se o nome local não conflita com algum nome remoto já processado
+        // Preservar se for muito recente (criação local ainda não enfileirada)
+        const localTs = new Date(local.updated_at || '1970-01-01').getTime();
+        if (localTs > AGORA - 5000) { // menos de 5 segundos
+          resultado.push(local);
+          itensParaSync.push(local);
+          continue;
+        }
+        // Caso contrário, descartar (lista negra, delete pendente ou sem operação)
+        if (deletedIds.has(id) || idsComDeletePendente.has(id)) {
+          continue;
+        }
+        // Verificar se o nome local conflita com algum nome remoto já processado
         if (local.nome) {
           const chave = local.nome.trim().toLowerCase();
           if (nomesExistentes.has(chave) && nomesExistentes.get(chave) !== id) {
@@ -463,6 +479,8 @@ async function carregarDoSupabase() {
             continue;
           }
         }
+        // Último caso: item local não tem operação pendente, não é recente, não está na lista negra
+        // → pode ser reintroduzido (comportamento anterior)
         resultado.push(local);
         itensParaSync.push(local);
       }

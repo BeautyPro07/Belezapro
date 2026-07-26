@@ -138,6 +138,23 @@
   flex-wrap: wrap;
   align-items: center;
 }
+/* CORREÇÃO (botão "Realizar"/Finalizar mal enquadrado): as ações
+   competiam com os pills de informação na mesma linha flex-wrap,
+   quebrando de forma imprevisível dependendo do nome do profissional
+   e do preço. Passam a ter a sua própria linha, com espaçamento fixo. */
+.timeline-item .event .timeline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.timeline-item .event .timeline-actions .btn-success { flex: 1; }
+.btn-icon-only {
+  width: 40px;
+  min-width: 40px;
+  padding: 0 !important;
+  flex: 0 0 auto;
+}
 .pill {
   display: inline-block;
   padding: 2px 10px;
@@ -148,3 +165,74 @@
   color: var(--gold-dark);
 }
 .pill.green { background: #E6F4EC; color: var(--green); }
+/* ===== PILLS DA AGENDA (sem emojis, mais profissionais) ===== */
+.pill-success {
+  background: var(--green);
+  color: #fff;
+}
+.pill-danger {
+  background: var(--red);
+  color: #fff;
+}
+.pill-warning {
+  background: var(--gold);
+  color: #fff;
+}
+.pill-gray {
+  background: var(--neutral-200, #E5E1D8);
+  color: var(--text-muted);
+}
+/* ===== POPOVER DE FILTRO DA AGENDA ===== */
+/* CORREÇÃO: os botões usavam estilo inline para indicar qual estava
+   ativo — o inline nunca era substituído pela classe "active" (o JS
+   já a alternava, mas nada de CSS lhe dava efeito visual), por isso
+   depois do primeiro clique o botão "Hoje" continuava sempre dourado
+   mesmo com outro período selecionado. Passa a ser tudo via classe. */
+.agenda-filter-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-strong);
+  padding: 10px;
+  z-index: 200;
+  min-width: 172px;
+}
+.agenda-periodo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.agenda-periodo-separador {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 8px 0;
+}
+.agenda-periodo-filter {
+  padding: 5px 6px;
+  font-family: inherit;
+  font-size: .68rem;
+  font-weight: 600;
+  border-radius: 4px;
+  background: var(--card-white);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.agenda-periodo-filter.active {
+  background: var(--gold);
+  color: #fff;
+  border-color: var(--gold);
+}
+.agenda-periodo-filter--dia {
+  grid-column: span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.agenda-periodo-filter--status.active { background: var(--text-primary); border-color: var(--text-primary); }

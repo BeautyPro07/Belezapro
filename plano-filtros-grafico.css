@@ -16,7 +16,7 @@
 }
 .plano-card.destaque { border-color: var(--gold); background: var(--gold-light); }
 .plano-card .preco {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.2rem;
   font-weight: 600;
   color: var(--gold-dark);

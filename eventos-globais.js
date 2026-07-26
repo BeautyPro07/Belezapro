@@ -32,7 +32,7 @@ document.getElementById('store-name-display')?.addEventListener('dblclick', () =
 document.addEventListener('click', function(e) {
   const target = e.target.closest('.btn, .list-item, .card, .kpi-card, .nav-item, .venda-cta-bar, .fab, .prof-card');
   if (target && !target.closest('.btn.is-loading')) {
-    addRipple(target, e);
+    /* ripple desactivado */
   }
 });
 
@@ -132,8 +132,16 @@ document.addEventListener('click', async function(e) {
     const ag = state.agendamentos.find(a => a.id === id);
     if (!ag) return;
     const confirmed = await showConfirmModal('Cancelar Agendamento?', `Tem a certeza que quer cancelar o agendamento de ${ag.cliente} para ${ag.servico}? Esta acção não pode ser desfeita.`, true);
-    if (confirmed) { await deleteAgendamento(id);
-      toast('Agendamento cancelado', 'warning'); }
+    if (confirmed) {
+      // CORREÇÃO: antes eliminava-se o agendamento por completo
+      // (deleteAgendamento), o que impedia qualquer vista de
+      // "Cancelados" e zerava sempre as métricas de cancelamento já
+      // calculadas em ia-module.js. Agora fica marcado como cancelado,
+      // continua a existir (histórico), só deixa de contar como
+      // pendente/realizado.
+      await updateAgendamento(id, { status: 'cancelado' });
+      toast('Agendamento cancelado', 'warning');
+    }
     return;
   }
 

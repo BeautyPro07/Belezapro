@@ -201,6 +201,24 @@
   color: var(--text-secondary);
   margin-top: 2px;
 }
+/* Perfil do cliente com mais contexto (em vez de "Nome e X visitas") */
+.cliente-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.cliente-stat {
+  font-size: .65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.cliente-stat--gasto { color: var(--gold-dark); background: var(--gold-light); }
+.cliente-stat--novo { color: var(--green); background: #E6F4EC; }
 .list-item .action {
   font-weight: 700;
   font-size: .8rem;
@@ -213,4 +231,48 @@
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+/* Resumo de estatísticas no topo do perfil do cliente (modal de edição) */
+.cliente-perfil-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-md);
+  padding: 12px 8px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+.cliente-perfil-stats .stat-valor {
+  font-size: .95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cliente-perfil-stats .stat-legenda {
+  font-size: .62rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ===== FORMULÁRIO DO PROFISSIONAL (Idade/Data + dados opcionais) ===== */
+.prof-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.prof-form-separador {
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  border-top: 1px solid var(--border-soft);
+  margin: 14px 0 10px;
+  padding-top: 12px;
+}
+.prof-form-separador span {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
 }

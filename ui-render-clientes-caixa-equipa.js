@@ -5,6 +5,75 @@
 //  Carregar depois de core-*.js, db-indexeddb.js, sync-*.js, auth-supabase.js
 // ====================================================================
 
+// ====================================================================
+//  ESTATÍSTICAS DO CLIENTE (partilhado entre a lista e o modal de perfil)
+// ====================================================================
+// Cache O(1) por render — invalidado quando mudam tamanhos das listas
+let _statsCache = { key: '', map: null };
+
+function _buildStatsMap() {
+  const map = {};
+  (state.agendamentos || []).forEach(a => {
+    if (a.status === 'cancelado' || !a.cliente) return;
+    if (!map[a.cliente]) map[a.cliente] = { visitas: 0, totalGasto: 0, datas: [] };
+    map[a.cliente].visitas++;
+    if (a.data) map[a.cliente].datas.push(a.data);
+  });
+  (state.movimentos || []).forEach(m => {
+    if (m.tipo !== 'venda' || !m.cliente) return;
+    if (!map[m.cliente]) map[m.cliente] = { visitas: 0, totalGasto: 0, datas: [] };
+    map[m.cliente].visitas++;
+    map[m.cliente].totalGasto += Number(m.valor) || 0;
+    if (m.data) map[m.cliente].datas.push(m.data);
+  });
+  Object.keys(map).forEach(k => {
+    map[k].datas.sort();
+    map[k].ultimaVisita = map[k].datas.length ? map[k].datas[map[k].datas.length - 1] : null;
+    delete map[k].datas;
+  });
+  return map;
+}
+
+function getEstatisticasCliente(nomeCliente) {
+  const key = (state.agendamentos || []).length + ':' + (state.movimentos || []).length;
+  if (!_statsCache.map || _statsCache.key !== key) {
+    _statsCache = { key, map: _buildStatsMap() };
+  }
+  return _statsCache.map[nomeCliente] || { visitas: 0, totalGasto: 0, ultimaVisita: null };
+}
+
+function formatarUltimaVisita(iso) {
+  if (!iso) return 'Sem visitas registadas';
+  const dias = Math.floor((new Date(hoje() + 'T00:00:00') - new Date(iso + 'T00:00:00')) / 86400000);
+  if (dias === 0) return 'Hoje';
+  if (dias === 1) return 'Ontem';
+  if (dias < 30) return `Há ${dias} dias`;
+  return new Date(iso + 'T00:00:00').toLocaleDateString('pt-AO', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+
+/** Insere HTML de linhas via DocumentFragment (menos reflow que innerHTML repetido) */
+function appendRowsHtml(container, htmlStrings) {
+  if (!container || !htmlStrings || !htmlStrings.length) return;
+  const frag = document.createDocumentFragment();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = htmlStrings.join('');
+  while (wrap.firstChild) frag.appendChild(wrap.firstChild);
+  container.appendChild(frag);
+}
+
+/** Sentinel IntersectionObserver para "carregar mais" */
+function observeLoadMore(sentinel, onVisible) {
+  if (!sentinel || typeof IntersectionObserver === 'undefined') return null;
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(en => {
+      if (en.isIntersecting) onVisible();
+    });
+  }, { root: null, rootMargin: '120px', threshold: 0 });
+  io.observe(sentinel);
+  return io;
+}
+
 function renderClientes() {
   const cont0 = document.getElementById('clientes-list');
   if (!state.clientes || !Array.isArray(state.clientes)) {
@@ -14,7 +83,7 @@ function renderClientes() {
   const search = document.getElementById('search-cliente')?.value.toLowerCase() || '';
   const filtro = state.filtroClientes || 'todos';
   const freqMap = {};
-  (state.agendamentos || []).forEach(a => { freqMap[a.cliente] = (freqMap[a.cliente] || 0) + 1; });
+  (state.agendamentos || []).filter(a => a.status !== 'cancelado').forEach(a => { freqMap[a.cliente] = (freqMap[a.cliente] || 0) + 1; });
   (state.movimentos || []).filter(m => m.tipo === 'venda').forEach(v => { freqMap[v.cliente] = (freqMap[v.cliente] || 0) + 1; });
 
   let filtered = state.clientes.filter(c => c.nome.toLowerCase().includes(search));
@@ -27,23 +96,61 @@ function renderClientes() {
     return;
   }
 
-  cont.innerHTML = filtered.map(c => {
-    const freq = freqMap[c.nome] || 0;
+  // Progressive render: primeiros 60 itens, resto sob demanda (P1 performance)
+  const INITIAL = 60;
+  const rowHtml = (c) => {
+    const { visitas, totalGasto, ultimaVisita } = getEstatisticasCliente(c.nome);
+    const clienteNovo = visitas === 0;
     return `
-      <div class="list-item" style="cursor:default;">
-        <div class="avatar">${c.nome.charAt(0).toUpperCase()}</div>
+      <div class="list-item cliente-item" data-cliente-id="${c.id}" style="cursor:pointer;">
+        <div class="avatar">${(c.nome||'?').charAt(0).toUpperCase()}</div>
         <div class="info">
           <div class="title">${escHtml(c.nome)}</div>
-          <div class="sub">${escHtml(c.telefone || '')}${c.notas ? ' · ' + escHtml(c.notas) : ''} · ${freq} visitas</div>
+          <div class="sub">${escHtml(c.telefone || 'Sem contacto')}${c.notas ? ' · ' + escHtml(c.notas) : ''}</div>
+          <div class="cliente-stats">
+            <span class="cliente-stat">${visitas} ${visitas === 1 ? 'visita' : 'visitas'}</span>
+            ${totalGasto > 0 ? `<span class="cliente-stat cliente-stat--gasto">${fmtKz(totalGasto)} gastos</span>` : ''}
+            ${clienteNovo ? `<span class="cliente-stat cliente-stat--novo">Novo</span>` : `<span class="cliente-stat">${formatarUltimaVisita(ultimaVisita)}</span>`}
+          </div>
         </div>
         <div class="actions">
           <button class="row-menu-btn" data-action="row-menu" data-tipo="cliente" data-id="${c.id}" aria-label="Mais ações" aria-haspopup="menu">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="12" cy="19" r="1.75"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
           </button>
         </div>
-      </div>
-    `;
-  }).join('');
+      </div>`;
+  };
+  const first = filtered.slice(0, INITIAL);
+  cont.innerHTML = first.map(rowHtml).join('');
+  if (filtered.length > INITIAL) {
+    const more = document.createElement('div');
+    more.className = 'list-load-more';
+    more.style.cssText = 'padding:12px;text-align:center;';
+    more.innerHTML = '<button type="button" class="btn btn-secondary btn-sm" id="clientes-load-more">Mostrar mais (' + (filtered.length - INITIAL) + ')</button><div id="clientes-io-sentinel" style="height:1px;" aria-hidden="true"></div>';
+    cont.appendChild(more);
+    const btn = more.querySelector('#clientes-load-more');
+    if (btn) {
+      let offset = INITIAL;
+      btn.onclick = () => {
+        const next = filtered.slice(offset, offset + INITIAL);
+        offset += next.length;
+        const htmls = next.map(rowHtml);
+        if (typeof appendRowsHtml === 'function') appendRowsHtml(cont, htmls);
+        else next.forEach(c => cont.insertAdjacentHTML('beforeend', rowHtml(c)));
+        cont.appendChild(more);
+        if (offset >= filtered.length) more.remove();
+        else btn.textContent = 'Mostrar mais (' + (filtered.length - offset) + ')';
+        if (typeof bindClienteRowEvents === 'function') bindClienteRowEvents(cont);
+      };
+      const sent = more.querySelector('#clientes-io-sentinel');
+      if (sent && typeof observeLoadMore === 'function') {
+        observeLoadMore(sent, function() {
+          if (btn && document.body.contains(btn)) btn.click();
+        });
+      }
+    }
+  }
+
 }
 
 function renderCaixa() {
@@ -75,28 +182,55 @@ function renderCaixa() {
     variacaoEl.style.color = subiu ? 'var(--green)' : 'var(--red)';
   }
 
-  const periodo = state.histPeriodo;
+  const periodo = state.histPeriodo || 'hoje';
   const movs = getMovimentosPeriodo(periodo).sort((a, b) => b.data.localeCompare(a.data) || b.hora.localeCompare(a.hora));
-  const titulos = { hoje: 'Movimentos de Hoje', '7dias': 'Últimos 7 dias', '30dias': 'Últimos 30 dias', mes: 'Este Mês',
-    tudo: 'Histórico Completo' };
-  document.getElementById('hist-titulo').textContent = titulos[periodo] || 'Movimentos';
+  const titEl = document.getElementById('hist-titulo');
+  if (titEl) titEl.textContent = (typeof tituloPeriodoCaixa === 'function' ? tituloPeriodoCaixa(periodo) : 'Movimentos');
 
   const cont = document.getElementById('movimentos-list');
   if (movs.length === 0) { cont.innerHTML = `<div class="empty-state">${svgCarteira}<p>Sem movimentos neste período</p></div>`; return; }
-  cont.innerHTML = movs.map(m => {
+  const MOV_INITIAL = 80;
+  const movRow = (m) => {
     const isV = m.tipo === 'venda';
-    const nomeProf = getProfissionalNome(m.profissional_id);
+    const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(m.profissional_id) : '';
     return `
       <div class="list-item${isV ? ' list-item-venda' : ''}" data-id="${m.id}" data-tipo="${m.tipo}" style="padding-right:${isV ? '32px' : '16px'};">
-        <div class="avatar" style="background:${isV ? '#E6F4EC' : '#FDE8E8'};color:${isV ? 'var(--green)' : 'var(--red)'}">${isV ? '💰' : '💸'}</div>
+        <div class="avatar" style="background:${isV ? '#E6F4EC' : '#FDE8E8'};color:${isV ? 'var(--green)' : 'var(--red)'};font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
         <div class="info">
-          <div class="title">${escHtml(m.descricao)}</div>
-          <div class="sub">${m.data !== hojeStr ? m.data + ' · ' : ''}${m.hora}${isV ? ' · ' + escHtml(m.cliente || 'Anónimo') + ' · ' + escHtml(m.metodoPagamento || '') : ''}
-          </div>
+          <div class="title">${escHtml(m.descricao||'')}</div>
+          <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}</div>
         </div>
-        <div class="action" style="color:${isV ? 'var(--green)' : 'var(--red)'};">${isV ? '+' : '-'}${fmtKz(m.valor)}</div>
+        <div class="action" style="color:${isV ? 'var(--green)' : 'var(--red)'};">${isV ? '+' : '−'}${fmtKz(m.valor)}</div>
       </div>`;
-  }).join('');
+  };
+  const movFirst = movs.slice(0, MOV_INITIAL);
+  cont.innerHTML = movFirst.map(movRow).join('');
+  if (movs.length > MOV_INITIAL) {
+    const more = document.createElement('div');
+    more.style.cssText = 'padding:12px;text-align:center;';
+    more.innerHTML = '<button type="button" class="btn btn-secondary btn-sm" id="movs-load-more">Mostrar mais (' + (movs.length - MOV_INITIAL) + ')</button><div id="movs-io-sentinel" style="height:1px;" aria-hidden="true"></div>';
+    cont.appendChild(more);
+    let off = MOV_INITIAL;
+    const movBtn = more.querySelector('#movs-load-more');
+    const movSent = more.querySelector('#movs-io-sentinel');
+    const loadMoreMovs = function() {
+      const next = movs.slice(off, off + MOV_INITIAL);
+      off += next.length;
+      if (typeof appendRowsHtml === 'function') appendRowsHtml(cont, next.map(movRow)); else next.forEach(m => cont.insertAdjacentHTML('beforeend', movRow(m)));
+      cont.appendChild(more);
+      if (off >= movs.length) more.remove();
+      else this.textContent = 'Mostrar mais (' + (movs.length - off) + ')';
+      cont.querySelectorAll('.list-item-venda').forEach(el => {
+        el.onclick = () => { if (typeof abrirDetalheVenda === 'function') abrirDetalheVenda(el.dataset.id); };
+      });
+    };
+    if (movBtn) movBtn.onclick = loadMoreMovs;
+    if (movSent && typeof observeLoadMore === 'function') observeLoadMore(movSent, function() { if (movBtn && document.body.contains(movBtn)) loadMoreMovs(); });
+  }
+  cont.querySelectorAll('.list-item-venda').forEach(el => {
+    el.onclick = () => { if (typeof abrirDetalheVenda === 'function') abrirDetalheVenda(el.dataset.id); };
+  });
+
 
   cont.querySelectorAll('.list-item').forEach(el => {
     el.addEventListener('click', e => {
@@ -109,24 +243,56 @@ function renderCaixa() {
 function getMovimentosPeriodo(periodo) {
   const hojeStr = hoje();
   const now = new Date();
+  const iso = (d) => d.toISOString().split('T')[0];
   return state.movimentos.filter(m => {
     if (periodo === 'hoje') return m.data === hojeStr;
+    if (periodo === 'ontem') {
+      const d = new Date(now); d.setDate(d.getDate() - 1);
+      return m.data === iso(d);
+    }
     if (periodo === '7dias') {
-      const d7 = new Date(now);
-      d7.setDate(d7.getDate() - 6);
-      return m.data >= d7.toISOString().split('T')[0];
+      const d7 = new Date(now); d7.setDate(d7.getDate() - 6);
+      return m.data >= iso(d7);
     }
     if (periodo === '30dias') {
-      const d30 = new Date(now);
-      d30.setDate(d30.getDate() - 29);
-      return m.data >= d30.toISOString().split('T')[0];
+      const d30 = new Date(now); d30.setDate(d30.getDate() - 29);
+      return m.data >= iso(d30);
+    }
+    if (periodo === 'semana') {
+      const d = new Date(hojeStr + 'T00:00:00');
+      const dia = d.getDay();
+      const inicio = new Date(d); inicio.setDate(d.getDate() - dia);
+      return m.data >= iso(inicio) && m.data <= hojeStr;
     }
     if (periodo === 'mes') {
       const mes = String(now.getMonth() + 1).padStart(2, '0');
       return m.data.startsWith(now.getFullYear() + '-' + mes);
     }
+    if (periodo === 'ano') {
+      return m.data.startsWith(String(now.getFullYear()));
+    }
+    if (periodo === 'dia') {
+      const dataExata = localStorage.getItem('bp_caixa_data_exata') || hojeStr;
+      return m.data === dataExata;
+    }
+    if (periodo === 'tudo') return true;
     return true;
   });
+}
+
+function tituloPeriodoCaixa(periodo) {
+  const map = {
+    hoje: 'Movimentos de Hoje',
+    ontem: 'Movimentos de Ontem',
+    semana: 'Movimentos desta Semana',
+    '7dias': 'Últimos 7 dias',
+    '30dias': 'Últimos 30 dias',
+    mes: 'Movimentos deste Mês',
+    ano: 'Movimentos deste Ano',
+    dia: 'Movimentos do dia seleccionado',
+    tudo: 'Histórico Completo'
+  };
+  return map[periodo] || 'Movimentos';
 }
 
 function renderProfissionais() {
@@ -142,11 +308,15 @@ function renderProfissionais() {
   }
   const profissionaisOrdenados = [...state.profissionais].sort((a, b) => a.nome.localeCompare(b.nome));
   cont.innerHTML = profissionaisOrdenados.map(p => `
-    <div class="list-item" style="cursor:default;">
+    <div class="list-item" data-prof-id="${p.id}" style="cursor:pointer;">
       <div class="avatar">${p.nome.charAt(0).toUpperCase()}</div>
       <div class="info">
         <div class="title">${escHtml(p.nome)}</div>
-        <div class="sub">${escHtml(p.especialidade || '')}</div>
+        <div class="sub">${escHtml(p.especialidade || 'Sem especialidade definida')}</div>
+        <div class="cliente-stats">
+          ${p.idade ? `<span class="cliente-stat">${p.idade} anos</span>` : ''}
+          ${p.contacto ? `<span class="cliente-stat">${escHtml(p.contacto)}</span>` : ''}
+        </div>
       </div>
       <div class="actions">
         <button class="row-menu-btn" data-action="row-menu" data-tipo="profissional" data-id="${p.id}" data-role="admin" aria-label="Mais ações" aria-haspopup="menu">
@@ -169,10 +339,10 @@ function renderServicos() {
     const profs = s.profissionais && s.profissionais.length > 0 ? s.profissionais.join(', ') : 'Todos os profissionais disponíveis';
     return `
       <div class="list-item" style="cursor:default;">
-        <div class="avatar" style="background:var(--gold-light);color:var(--gold-dark);">💈</div>
+        <div class="avatar" style="background:var(--gold-light);color:var(--gold-dark);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
         <div class="info">
           <div class="title">${escHtml(s.nome)}</div>
-          <div class="sub">${fmtKz(s.precoBase)} · 👤 ${escHtml(profs)}</div>
+          <div class="sub">${fmtKz(s.precoBase)} · ${escHtml(profs)}</div>
         </div>
         <div class="actions">
           <button class="row-menu-btn" data-action="row-menu" data-tipo="servico" data-id="${s.id}" data-role="admin" aria-label="Mais ações" aria-haspopup="menu">
@@ -184,12 +354,10 @@ function renderServicos() {
   }).join('');
 }
 
-function renderBadges() {
-  const count = state.agendamentos.filter(a => a.data === hoje() && a.status !== 'realizado').length;
-  const badge = document.getElementById('agenda-badge');
-  if (count > 0) { badge.textContent = count > 9 ? '9+' : count;
-    badge.classList.add('show'); } else badge.classList.remove('show');
-}
+// renderBadges: a única declaração válida está em ui-render-dashboard-agenda.js
+// (conta agendamentos futuros/pendentes em todos os dias, não só hoje). Esta
+// cópia antiga foi removida — carregava depois e estava a ganhar sempre,
+// travando o indicador num valor desatualizado.
 
 // ====================================================================
 //  SETUP DE PRECIFICAÇÃO E SELECTS
@@ -291,7 +459,7 @@ function populateVendaSelects() {
     state.servicos.map(s =>
       `<option value="${escHtml(s.nome)}" data-preco="${s.precoBase}">${escHtml(s.nome)}</option>`
     ).join('') +
-    '<option value="__custom" data-preco="">✏️ Outro (personalizado)</option>';
+    '<option value="__custom" data-preco="">Outro (personalizado)</option>';
 
   const filtrarProfsVenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia

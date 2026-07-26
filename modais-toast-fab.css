@@ -39,7 +39,7 @@
   margin: 0 auto 16px;
 }
 .modal-title {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.4rem;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -74,14 +74,16 @@
 .modal-overlay#modal-confirm.open { display: flex; }
 
 /* ===== MODAL DE LOGOUT (personalizado) ===== */
-#modal-confirm .modal-confirm-sheet {
-  text-align: left;
-  max-width: 340px;
-  padding: 28px 24px 24px;
-  background: var(--card-white);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-strong);
-}
+/* CORREÇÃO (modal de sair mal posicionado): existia aqui uma regra
+   "#modal-confirm .modal-confirm-sheet" com mais especificidade do que
+   a regra base ".modal-confirm-sheet" (Modal centrado — Fase 1, acima).
+   Isso fazia o diálogo de logout ficar alinhado à esquerda em vez de
+   centrado, com uma largura (340px) e um padding diferentes dos de
+   qualquer outro modal de confirmação da app, e sem a folga de
+   segurança no fundo (safe-area-inset) que a regra base garante.
+   Removida: o contentor volta a usar sempre a mesma regra base do
+   diálogo centrado; só os elementos filhos (ícone, título, mensagem,
+   ações) têm estilo próprio, abaixo. */
 #modal-confirm .confirm-icon {
   font-size: 2.8rem;
   line-height: 1;

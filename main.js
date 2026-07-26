@@ -24,13 +24,14 @@ document.addEventListener('DOMContentLoaded', async function init() {
   document.getElementById('login-view').style.display = 'flex';
   document.getElementById('app-view').style.display = 'none';
 
-  // ✅ Ponto 1 — indicador Online/Offline atualizado já aqui, ANTES de
+  // Ponto 1 — indicador Online/Offline atualizado já aqui, ANTES de
   // qualquer chamada de rede (openDB/checkSession). atualizarIndicadorSync()
   // só depende de navigator.onLine (instantâneo) e da fila local em
   // localStorage (instantâneo) — não precisa de sessão nem de perfil.
   // O HTML tem "Offline" fixo por defeito (index.html), por isso sem esta
   // chamada antecipada o texto ficava errado durante todo o checkSession().
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+  if (typeof initStoreBindings === 'function') initStoreBindings();
 
   // ============================================================
   // CORREÇÃO: Limpar fila de sincronização antiga para evitar
@@ -96,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
     if (splash && splash.style.display !== 'none') {
       splash.style.opacity = '0';
       setTimeout(() => { splash.style.display = 'none'; }, 300);
-      console.log('✅ Splash removida por timeout de emergência');
+      console.log('Splash removida por timeout de emergência');
     }
   }, 3000);
 
@@ -106,19 +107,28 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // Acessibilidade
   setTimeout(aplicarAcessibilidade, 600);
 
-  console.log('✅ BeautyPro inicializado com sucesso!');
+  console.log('BeautyPro inicializado com sucesso!');
 
-  // ✅ Ponto 2 — Sincronização periódica a cada 15 segundos (antes 30s)
-  // Reduzido para melhor reatividade entre dispositivos
+  // Sync periódico adaptativo (P2): 45s em idle; 15s se houver fila pendente
   setInterval(() => {
-    if (navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId) {
-      carregarDoSupabase().then(atualizado => {
-        if (atualizado) updateUI();
-      }).catch(() => {});
+    if (!(navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId)) return;
+    const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
+    const pendentes = fila.filter(op => op.failed !== true).length;
+    // Skip pull pesado se nada pendente e último pull < 40s (throttle)
+    const now = Date.now();
+    if (pendentes === 0 && window._lastSupabasePull && (now - window._lastSupabasePull) < 40000) {
+      return;
     }
-  }, 15000); // 15 segundos
+    carregarDoSupabase().then(atualizado => {
+      window._lastSupabasePull = Date.now();
+      if (atualizado) {
+        updateUI();
+        if (typeof renderBadges === 'function') renderBadges();
+      }
+    }).catch(() => {});
+  }, 15000);
 
-  // ✅ Ponto 3 — Forçar pull quando a app volta ao foco (visível)
+  // Ponto 3 — Forçar pull quando a app volta ao foco (visível)
   // Isto garante que ao trocar de app e voltar, os dados são atualizados
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible' && navigator.onLine && state?.config?.salaoId) {
@@ -127,6 +137,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
         const atualizado = await carregarDoSupabase();
         if (atualizado) {
           updateUI();
+          renderBadges(); // ← ADICIONADO: atualiza badge após sincronização ao voltar ao foco
           console.log('[Sync] Dados atualizados após retorno ao foco.');
         }
       } catch (e) {
@@ -135,7 +146,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
     }
   });
 
-  // ✅ Passo 4 (revisão) — FAB encolhe/esmaece durante scroll ativo, para
+  // Passo 4 (revisão) — FAB encolhe/esmaece durante scroll ativo, para
   // nunca bloquear de forma permanente um botão de ação (Ajustar/Excluir)
   // de uma linha que passe por baixo dele. Volta ao normal 250ms depois
   // do scroll parar. addEventListener com { passive: true } — só lê a

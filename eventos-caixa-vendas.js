@@ -3,6 +3,7 @@
 //  Conteúdo: Eventos: despesa, fundo, carrinho/venda, confirmação de venda, fecho de caixa, detalhes e KPIs
 //  Linhas originais: 1877-2109
 //  Carregar depois de core-*.js, db-indexeddb.js, sync-*.js, auth-supabase.js
+//  CORREÇÃO: adicionado profissional_id e renderBadges() no modal-finalizar-save
 // ====================================================================
 
 // Despesa
@@ -15,7 +16,7 @@ document.getElementById('modal-despesa-save').addEventListener('click', async ()
   closeModal('modal-despesa');
   document.getElementById('desp-desc').value = '';
   document.getElementById('desp-valor').value = '';
-  toast('Despesa registada', 'success');
+  toast('Despesa registada no caixa', 'success');
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
@@ -30,7 +31,7 @@ document.getElementById('modal-fundo-save').addEventListener('click', async () =
   state.config.fundo = v;
   await saveConfig();
   closeModal('modal-fundo');
-  toast('Fundo actualizado', 'success');
+  toast('Fundo de caixa actualizado', 'success');
   updateUI();
 });
 document.getElementById('modal-fundo-cancel').addEventListener('click', () => closeModal('modal-fundo'));
@@ -90,6 +91,12 @@ if (vendaSaveBtn) {
     const profObj = state.profissionais.find(p => p.id === profissionalId);
     const profissionalNome = profObj ? profObj.nome : '';
     
+    // Validação antecipada do profissional
+    if (!profissionalId || String(profissionalId).trim() === '') {
+      toast('Selecione um profissional antes de registar a venda.', 'error');
+      return;
+    }
+
     setButtonLoading(this, true);
     try {
       const idVenda = await registarVenda({
@@ -99,21 +106,21 @@ if (vendaSaveBtn) {
         itens: [...cartItems],
         metodoPagamento
       });
-      closeModal('modal-venda');
-      // Limpar carrinho
-      if (typeof window.clearCart === 'function') {
-        window.clearCart();
-      } else {
-        cartItems = [];
-        renderCart();
-      }
       if (idVenda) {
+        closeModal('modal-venda');
+        if (typeof window.clearCart === 'function') {
+          window.clearCart();
+        } else {
+          cartItems = [];
+          renderCart();
+        }
         mostrarConfirmacaoVenda(idVenda);
-      } else {
-        toast('Erro ao registar venda', 'error');
       }
+      // se idVenda for null, registarVenda já mostrou o toast de validação
     } catch (err) {
-      mostrarErro('Não foi possível registar a venda. Verifique a sua ligação e tente novamente.');
+      console.error('[modal-venda-save]', err);
+      // Não bloquear a UX com modal de erro genérico se a venda local já foi tentada
+      toast('Ocorreu um problema ao registar a venda. Verifique os dados e tente novamente.', 'error');
     } finally {
       setButtonLoading(this, false);
     }
@@ -146,68 +153,58 @@ document.getElementById('venda-add-cliente-rapido').addEventListener('click', ()
 let ultimaVendaId = null;
 
 const PAGAMENTO_ICONES = {
-  'Numerário': '💵 Numerário',
-  'Multicaixa Express': '📱 Multicaixa Express',
-  'Transferência Bancária': '🏦 Transferência Bancária',
-  'Cartão': '💳 Cartão',
-  'Outro': '💰 Outro',
+  'Numerário': 'Numerário',
+  'Multicaixa Express': 'Multicaixa Express',
+  'Transferência Bancária': 'Transferência Bancária',
+  'Cartão': 'Cartão',
+  'Outro': 'Outro',
 };
 
 function mostrarConfirmacaoVenda(vendaId) {
-  const venda = state.movimentos.find(m => m.id === vendaId);
-  if (!venda) return;
-  ultimaVendaId = vendaId;
-
-  document.getElementById('sucesso-valor').textContent = fmtKz(venda.valor);
-  document.getElementById('detalhe-venda-id').textContent = '#' + (venda.reciboNum || nextReciboNum());
-  document.getElementById('detalhe-venda-cliente').textContent = venda.cliente || 'Anónimo';
-  document.getElementById('detalhe-venda-profissional').textContent = getProfissionalNome(venda.profissional_id);
-  const [ano, mes, dia] = (venda.data || '').split('-');
-  document.getElementById('detalhe-venda-datahora').textContent = (dia ? `${dia}/${mes}/${ano}` : '--/--/----') + ' · ' + (venda.hora || '--:--');
-  document.getElementById('detalhe-venda-pagamento').textContent = PAGAMENTO_ICONES[venda.metodoPagamento] || ('💰 ' + (venda.metodoPagamento || 'Numerário'));
-  document.getElementById('detalhe-venda-itens').innerHTML = (venda.itens || []).map(i => `
-    <div class="r-item-row">
-      <span>${escHtml(i.nome)}</span>
-      <span>${i.quantidade}</span>
-      <span>${fmtKz(i.precoUnit)}</span>
-      <span>${fmtKz(i.subtotal)}</span>
-    </div>`).join('');
-  document.getElementById('detalhe-venda-total').textContent = fmtKz(venda.valor);
-
-  openModal('modal-venda-sucesso');
-  const circle = document.getElementById('success-circle');
-  const check = document.getElementById('success-check');
-  if (circle) { circle.style.strokeDashoffset = '88';
-    requestAnimationFrame(() => { circle.style.animation = 'none';
-      requestAnimationFrame(() => { circle.style.animation = 'drawCircle 0.5s ease-out forwards'; }); }); }
-  if (check) { check.style.strokeDashoffset = '17';
-    requestAnimationFrame(() => { check.style.animation = 'none';
-      requestAnimationFrame(() => { check.style.animation = 'drawCheck 0.3s 0.5s ease-out forwards'; }); }); }
+  // Constituição: sem modal de sucesso de venda — toast + actualização UI
+  const venda = (state.vendas || []).find(v => v.id === vendaId)
+    || (state.movimentos || []).find(m => m.id === vendaId);
+  const valor = venda ? (venda.total || venda.valor || 0) : 0;
+  toast('Venda registada · ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor + ' Kz'), 'success');
+  if (typeof updateUI === 'function') updateUI();
+  // Guardar id para impressão rápida se o utilizador abrir detalhe
+  try { sessionStorage.setItem('bp_last_venda_id', vendaId); } catch (_) {}
 }
 
-document.getElementById('btn-imprimir-sucesso')?.addEventListener('click', () => {
-  if (ultimaVendaId) {
-    const venda = state.movimentos.find(m => m.id === ultimaVendaId);
-    if (venda) imprimirRecibo(venda);
-  }
-});
-document.getElementById('btn-voltar-sucesso')?.addEventListener('click', () => {
-  closeModal('modal-venda-sucesso');
-  closeModal('modal-venda');
-});
 
-// Finalizar atendimento
+// ====================================================================
+// CORREÇÃO: Finalizar atendimento (adicionado profissional_id e renderBadges)
+// ====================================================================
 document.getElementById('modal-finalizar-save').addEventListener('click', async () => {
   const id = document.getElementById('finalizar-ag-id').value;
   const ag = state.agendamentos.find(a => a.id === id);
   if (!ag) return;
-  if (ag.status === 'realizado') { toast('Atendimento já realizado', 'warning'); return; }
+  if (ag.status !== 'agendado') {
+    toast('Este atendimento já não está disponível para finalizar (foi cancelado, expirou ou já foi realizado).', 'warning');
+    closeModal('modal-finalizar');
+    return;
+  }
   const metodo = document.getElementById('finalizar-pagamento').value;
+  
+  // Atualizar status do agendamento para realizado
   await updateAgendamento(id, { status: 'realizado' });
+  
+  // Registar a venda com profissional_id
   const itens = [{ nome: ag.servico, quantidade: 1, precoUnit: ag.preco, subtotal: ag.preco }];
-  await registarVenda({ cliente: ag.cliente, profissional: ag.profissional, itens, metodoPagamento: metodo });
+  await registarVenda({ 
+    cliente: ag.cliente, 
+    profissional: ag.profissional, 
+    profissional_id: ag.profissional_id, // <- CORREÇÃO
+    itens, 
+    metodoPagamento: metodo 
+  });
+  
   closeModal('modal-finalizar');
   toast('Atendimento finalizado e venda registada!', 'success');
+  
+  // Atualizar UI e badge
+  updateUI();
+  renderBadges(); // <- CORREÇÃO
 });
 
 document.getElementById('modal-finalizar-cancel').addEventListener('click', () => closeModal('modal-finalizar'));
@@ -307,15 +304,8 @@ document.getElementById('modal-agenda-close').addEventListener('click', () => cl
 document.getElementById('agenda-detail-pendentes').addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
 document.getElementById('agenda-detail-realizados').addEventListener('click', () => abrirDetalheAgendamentos('realizados'));
 
-// Histórico filtro
-document.getElementById('hist-filter').querySelectorAll('.hist-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    document.querySelectorAll('.hist-chip').forEach(c => c.classList.remove('active'));
-    chip.classList.add('active');
-    state.histPeriodo = chip.dataset.periodo;
-    renderCaixa();
-  });
-});
+// hist-chip substituído pelo popover caixa-filter (Fase E)
+
 
 // Filtro clientes
 document.querySelectorAll('.filtro-frequencia').forEach(btn => {
@@ -329,3 +319,138 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
 });
 
 // Agenda navegação
+// ====================================================================
+//  FASE E — Filtro Caixa (popover) + Localizar cliente
+// ====================================================================
+(function initCaixaFiltro() {
+  const icon = document.getElementById('caixa-filter-icon');
+  const pop = document.getElementById('caixa-filter-popover');
+  if (!icon || !pop) return;
+
+  icon.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const open = pop.style.display === 'block';
+    pop.style.display = open ? 'none' : 'block';
+    document.querySelectorAll('.caixa-periodo-filter').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.periodo === (state.histPeriodo || 'hoje'));
+    });
+  });
+
+  document.addEventListener('click', function(e) {
+    if (pop.style.display === 'block' && !pop.contains(e.target) && e.target !== icon && !icon.contains(e.target)) {
+      pop.style.display = 'none';
+    }
+  });
+
+  document.querySelectorAll('.caixa-periodo-filter').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const periodo = this.dataset.periodo;
+      if (periodo === 'dia') {
+        const input = document.getElementById('caixa-data-exata');
+        if (input) {
+          input.onchange = function() {
+            if (this.value) {
+              localStorage.setItem('bp_caixa_data_exata', this.value);
+              state.histPeriodo = 'dia';
+              pop.style.display = 'none';
+              renderCaixa();
+            }
+          };
+          input.click();
+        }
+        return;
+      }
+      state.histPeriodo = periodo;
+      localStorage.setItem('bp_hist_periodo', periodo);
+      pop.style.display = 'none';
+      renderCaixa();
+    });
+  });
+})();
+
+(function initCaixaLocalizar() {
+  const btn = document.getElementById('caixa-localizar-btn');
+  const pop = document.getElementById('caixa-localizar-popover');
+  const buscaBox = document.getElementById('caixa-localizar-busca');
+  const input = document.getElementById('caixa-localizar-input');
+  const go = document.getElementById('caixa-localizar-go');
+  if (!btn || !pop) return;
+
+  let periodoLoc = null;
+
+  btn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const open = pop.style.display === 'block';
+    pop.style.display = open ? 'none' : 'block';
+    if (buscaBox) buscaBox.style.display = 'none';
+    periodoLoc = null;
+    document.querySelectorAll('.caixa-loc-periodo').forEach(b => b.classList.remove('active'));
+  });
+
+  document.addEventListener('click', function(e) {
+    if (pop.style.display === 'block' && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+      pop.style.display = 'none';
+    }
+  });
+
+  document.querySelectorAll('.caixa-loc-periodo').forEach(b => {
+    b.addEventListener('click', function(e) {
+      e.stopPropagation();
+      periodoLoc = this.dataset.periodo;
+      document.querySelectorAll('.caixa-loc-periodo').forEach(x => x.classList.remove('active'));
+      this.classList.add('active');
+      if (buscaBox) buscaBox.style.display = 'block';
+      if (input) { input.value = ''; input.focus(); }
+    });
+  });
+
+  function procurar() {
+    if (!periodoLoc) {
+      toast('Seleccione primeiro o período.', 'warning');
+      return;
+    }
+    const nome = (input && input.value || '').trim().toLowerCase();
+    if (!nome) {
+      toast('Introduza o nome do cliente.', 'warning');
+      return;
+    }
+    const movs = getMovimentosPeriodo(periodoLoc).filter(m =>
+      m.tipo === 'venda' && m.cliente && m.cliente.toLowerCase().includes(nome)
+    );
+    if (movs.length === 0) {
+      pop.style.display = 'none';
+      openModal('modal-cliente-nao-encontrado');
+      return;
+    }
+    // Mostrar só estes movimentos e actualizar título
+    state.histPeriodo = periodoLoc;
+    const cont = document.getElementById('movimentos-list');
+    const tit = document.getElementById('hist-titulo');
+    if (tit) tit.textContent = 'Histórico: ' + movs[0].cliente;
+    if (cont) {
+      cont.innerHTML = movs.sort((a,b) => b.data.localeCompare(a.data) || b.hora.localeCompare(a.hora)).map(m => {
+        const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(m.profissional_id) : '';
+        return `<div class="list-item list-item-venda" data-id="${m.id}" data-tipo="venda" style="padding-right:32px;">
+          <div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
+          <div class="info">
+            <div class="title">${escHtml(m.descricao)}</div>
+            <div class="sub">${m.data} · ${m.hora} · ${escHtml(m.cliente || '')} · ${escHtml(m.metodoPagamento || '')}</div>
+          </div>
+          <div class="action" style="color:var(--green);">+${fmtKz(m.valor)}</div>
+        </div>`;
+      }).join('');
+      cont.querySelectorAll('.list-item-venda').forEach(el => {
+        el.addEventListener('click', e => { abrirDetalheVenda(el.dataset.id); });
+      });
+    }
+    pop.style.display = 'none';
+  }
+
+  if (go) go.addEventListener('click', procurar);
+  if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter') procurar(); });
+})();
+
+document.getElementById('modal-cliente-nao-encontrado-ok')?.addEventListener('click', () => {
+  closeModal('modal-cliente-nao-encontrado');
+});

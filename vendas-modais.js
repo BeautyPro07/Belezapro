@@ -155,14 +155,14 @@ function abrirDetalheVenda(id) {
       </div>`).join('')}` :
     `<div style="color:var(--text-muted);font-size:.85rem;padding:8px 0;">Sem itens detalhados</div>`;
   const mp = venda.metodoPagamento || 'Numerário';
-  const mpIcon = { 'Numerário': '💵', 'Multicaixa Express': '📱', 'Transferência Bancária': '🏦', 'Cartão': '💳' } [mp] || '💳';
+  const mpIcon = { 'Numerário': '', 'Multicaixa Express': '', 'Transferência Bancária': '', 'Cartão': '' } [mp] || '';
   const nomeProf = getProfissionalNome(venda.profissional_id);
   document.getElementById('detalhe-venda-conteudo').innerHTML = `
     <div class="detalhe-meta">
       <div class="detalhe-meta-row"><span class="label">Cliente</span><span class="val">${escHtml(venda.cliente || 'Anónimo')}</span></div>
       <div class="detalhe-meta-row"><span class="label">Profissional</span><span class="val">${escHtml(nomeProf)}</span></div>
       <div class="detalhe-meta-row"><span class="label">Data / Hora</span><span class="val">${venda.data} · ${venda.hora}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Pagamento</span><span class="val"><span class="pagamento-badge">${mpIcon} ${escHtml(mp)}</span></span></div>
+      <div class="detalhe-meta-row"><span class="label">Pagamento</span><span class="val"><span class="pagamento-badge">${escHtml(mp)}</span></span></div>
     </div>
     <div>${itensHtml}</div>
     <div class="detalhe-total"><span class="label">Total</span><span class="val">${fmtKz(venda.valor)}</span></div>`;
@@ -281,7 +281,7 @@ function removeItemFromCart(idx) {
   if (idx < 0 || idx >= cartItems.length) return;
   const item = cartItems[idx];
   if (item.quantidade > 1) {
-    const choice = confirm(`"${item.nome}" tem ${item.quantidade} unidades. Deseja remover todas?`);
+    const choice = confirm(`"${escHtml(item.nome||"")}" tem ${item.quantidade} unidades. Deseja remover todas?`);
     if (choice) {
       cartItems.splice(idx, 1);
     } else {
@@ -300,18 +300,18 @@ function addToCart(nome, valor) {
     const existing = cartItems[existingIndex];
     if (existing.precoUnit !== valor) {
       const choice = confirm(
-        `"${nome}" já está no carrinho com preço ${fmtKz(existing.precoUnit)}.\n` +
+        `"${escHtml(nome||"")}" já está no carrinho com preço ${fmtKz(existing.precoUnit)}.\n` +
         `Deseja atualizar para ${fmtKz(valor)}? (Cancelar = manter os dois separados)`
       );
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
         renderCart();
-        toast('Preço atualizado!', 'success');
+        toast('Preço do item actualizado', 'success');
         return;
       } else {
         cartItems.push({
-          nome: `${nome} (${fmtKz(valor)})`,
+          nome: `${escHtml(nome||"")} (${fmtKz(valor)})`,
           quantidade: 1,
           precoUnit: valor,
           subtotal: valor
@@ -324,7 +324,7 @@ function addToCart(nome, valor) {
     existing.quantidade += 1;
     existing.subtotal = existing.quantidade * existing.precoUnit;
     renderCart();
-    toast('Adicionado ao carrinho!', 'success');
+    toast('Serviço adicionado ao carrinho', 'success');
     return;
   }
 
@@ -335,7 +335,7 @@ function addToCart(nome, valor) {
     subtotal: valor
   });
   renderCart();
-  toast('Adicionado ao carrinho!', 'success');
+  toast('Serviço adicionado ao carrinho', 'success');
 }
 
 // --- Event listeners (delegação para botões do carrinho) ---
@@ -398,7 +398,7 @@ function renderServicoProfissionais(selected = []) {
   }
   container.innerHTML = state.profissionais.map(p => `
     <label style="display:flex;align-items:center;gap:4px;font-size:.75rem;background:var(--bg-soft);padding:4px 10px;border-radius:30px;border:1px solid var(--border-soft);cursor:pointer;">
-      <input type="checkbox" value="${escHtml(p.nome)}" ${selected.includes(p.nome) ? 'checked' : ''}>
+      <input type="checkbox" value="${escHtml(p.nome)}" ${escHtml(selected.includes(p.nome) ? 'checked' : ''||"")}>
       ${escHtml(p.nome)}
     </label>
   `).join('');

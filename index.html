@@ -38,6 +38,7 @@
   <link rel="stylesheet" href="plano-filtros-grafico.css">
   <link rel="stylesheet" href="impressao-acessibilidade.css">
   <link rel="stylesheet" href="design-tokens-extra.css">
+  <link rel="stylesheet" href="design-system-final.css">
   <link rel="stylesheet" href="dark-mode.css">
   <link rel="stylesheet" href="splash-sparkline.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -145,7 +146,9 @@
         </div>
       </header>
 
-      <div class="offline-banner" id="offline-banner"><span>📡</span> Modo offline — todas as funcionalidades disponíveis</div><!-- CTA VENDA -->
+      <div class="offline-banner" id="offline-banner"><span></span> Modo offline — todas as funcionalidades disponíveis</div>
+
+      <!-- CTA VENDA -->
       <button class="venda-cta-bar" id="nova-venda-hero-btn" aria-label="Registar nova venda">
         <div class="cta-icon">+</div>
         <div class="cta-text">
@@ -249,20 +252,58 @@
           </div>
         </div>
 
-        <!-- AGENDA -->
-        <div id="tab-agenda" class="tab-pane">
-          <div class="tab-inner">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Agenda</span>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <button id="agenda-prev" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">◀</button>
-                <span style="font-weight:600;font-size:.85rem;color:var(--text-primary);" id="agenda-date-label">Hoje</span>
-                <button id="agenda-next" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">▶</button>
-              </div>
-            </div>
-            <div id="agenda-full-list"></div>
-          </div>
+       <!-- AGENDA -->
+<div id="tab-agenda" class="tab-pane">
+  <div class="tab-inner">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;position:relative;padding-top:22px;">
+      <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Agenda</span>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;position:relative;">
+        <!-- Filtro: "Filtrar" + ícone, alinhado à direita, acima do hoje -->
+        <button id="agenda-filter-icon" style="background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center;gap:4px;transition:color 0.15s;position:absolute;top:-20px;right:0;font-size:.7rem;" aria-label="Filtrar agenda">
+          <span style="font-size:.55rem;font-weight:500;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-muted);">Filtrar</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="2" y1="3" x2="14" y2="3"/>
+            <line x1="3.5" y1="8" x2="12.5" y2="8"/>
+            <line x1="5" y1="13" x2="11" y2="13"/>
+          </svg>
+        </button>
+        <!-- Navegação e label -->
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="agenda-prev" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">◀</button>
+          <span style="font-weight:600;font-size:.85rem;color:var(--text-primary);" id="agenda-date-label">Hoje</span>
+          <button id="agenda-next" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">▶</button>
         </div>
+<!-- POPOVER do filtro (com Dia Exato integrado) -->
+<div id="agenda-filter-popover" class="agenda-filter-popover">
+  <div class="agenda-periodo-grid">
+    <button class="agenda-periodo-filter active" data-periodo="hoje">Hoje</button>
+    <button class="agenda-periodo-filter" data-periodo="semana">Semana</button>
+    <button class="agenda-periodo-filter" data-periodo="mes">Mês</button>
+    <button class="agenda-periodo-filter" data-periodo="todos">Todos</button>
+    <!-- Dia Exato – agora com data-periodo="dia" e sem ID específico -->
+    <button class="agenda-periodo-filter agenda-periodo-filter--dia" data-periodo="dia">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <rect x="2" y="3" width="12" height="11" rx="1"/>
+        <line x1="2" y1="6" x2="14" y2="6"/>
+        <line x1="5" y1="2" x2="5" y2="4"/>
+        <line x1="11" y1="2" x2="11" y2="4"/>
+      </svg>
+      <span>Dia exato</span>
+    </button>
+  </div>
+  <div class="agenda-periodo-separador"></div>
+  <div class="agenda-periodo-grid">
+    <button class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="realizados">Realizados</button>
+    <button class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="nao_realizado">Não realizados</button>
+  </div>
+  <!-- Input de data – oculto mas clicável (opacity:0 + pointer-events:none) -->
+  <input type="date" id="agenda-data-exata" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+</div>
+      </div>
+    </div>
+    <div id="agenda-full-list"></div>
+  </div>
+</div>
 
         <!-- CLIENTES -->
         <div id="tab-clientes" class="tab-pane">
@@ -272,7 +313,7 @@
               <button class="btn btn-sm btn-primary" id="add-cliente-btn">+ Novo</button>
             </div>
             <div class="input-group">
-              <input type="text" id="search-cliente" class="input-field" placeholder="🔍 Pesquisar cliente...">
+              <input type="text" id="search-cliente" class="input-field" placeholder="Pesquisar cliente...">
             </div>
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-secondary filtro-frequencia active" data-filtro="todos" style="padding:4px 12px;min-height:30px;font-size:.7rem;">Todos</button>
@@ -282,8 +323,7 @@
             <div id="clientes-list"></div>
           </div>
         </div>
-
-        <!-- CAIXA -->
+           <!-- CAIXA -->
         <div id="tab-caixa" class="tab-pane">
           <div class="tab-inner">
             <div class="card card-highlight mb-3">
@@ -316,33 +356,64 @@
                 </button>
               </div>
             </div>
-            <div class="hist-filter" id="hist-filter">
-              <button class="hist-chip active" data-periodo="hoje">Hoje</button>
-              <button class="hist-chip" data-periodo="7dias">7 dias</button>
-              <button class="hist-chip" data-periodo="30dias">30 dias</button>
-              <button class="hist-chip" data-periodo="mes">Este mês</button>
-              <button class="hist-chip" data-periodo="tudo">Tudo</button>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;position:relative;">
               <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;" id="hist-titulo">Movimentos de Hoje</span>
-              <span style="font-size:.7rem;color:var(--text-muted);">Toque para detalhes</span>
+              <button id="caixa-filter-icon" type="button" style="background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center;gap:4px;font-size:.7rem;" aria-label="Filtrar movimentos">
+                <span style="font-size:.55rem;font-weight:500;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-muted);">Filtrar</span>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="3.5" y1="8" x2="12.5" y2="8"/><line x1="5" y1="13" x2="11" y2="13"/></svg>
+              </button>
+              <div id="caixa-filter-popover" class="agenda-filter-popover" style="right:0;top:calc(100% + 6px);">
+                <div class="agenda-periodo-grid">
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter active" data-periodo="hoje">Hoje</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="ontem">Ontem</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="semana">Esta semana</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="7dias">Últimos 7 dias</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="mes">Este mês</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="30dias">Últimos 30 dias</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="ano">Este ano</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter agenda-periodo-filter--dia" data-periodo="dia">Dia exacto</button>
+                </div>
+                <input type="date" id="caixa-data-exata" style="display:none;" />
+              </div>
+            </div>
+            <div style="margin-bottom:12px;position:relative;">
+              <button type="button" id="caixa-localizar-btn" class="btn btn-secondary btn-block" style="justify-content:flex-start;gap:8px;font-size:.85rem;height:44px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Localizar cliente no histórico
+              </button>
+              <div id="caixa-localizar-popover" class="agenda-filter-popover" style="left:0;right:0;top:calc(100% + 6px);min-width:100%;">
+                <div style="font-size:.65rem;color:var(--text-muted);margin-bottom:8px;padding:0 4px;">Seleccione o período e depois o cliente</div>
+                <div class="agenda-periodo-grid" id="caixa-localizar-periodos">
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="hoje">Hoje</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="ontem">Ontem</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="7dias">Últimos 7 dias</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="30dias">Últimos 30 dias</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="mes">Este mês</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="ano">Este ano</button>
+                </div>
+                <div id="caixa-localizar-busca" style="display:none;margin-top:10px;">
+                  <input type="text" id="caixa-localizar-input" class="input-field" placeholder="Nome do cliente..." style="margin-bottom:8px;" />
+                  <button type="button" id="caixa-localizar-go" class="btn btn-primary btn-block btn-sm">Procurar</button>
+                </div>
+              </div>
             </div>
             <div id="movimentos-list"></div>
           </div>
         </div>
-<!-- EQUIPA -->
+
+        <!-- EQUIPA -->
         <div id="tab-equipa" class="tab-pane" data-role="admin,gerente">
           <div class="tab-inner">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">👤 Equipa</span>
+              <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Equipa</span>
               <button class="btn btn-sm btn-primary" id="add-prof-btn" data-role="admin">+ Novo</button>
             </div>
             <div id="plano-aviso" style="display:none;background:var(--gold-light);border:1px solid var(--gold);border-radius:var(--radius-sm);padding:8px 14px;margin-bottom:12px;font-size:.75rem;font-weight:600;color:var(--gold-dark);">
-              ⚠️ Anotações não disponível neste plano
+              Anotações não disponíveis neste plano
             </div>
             <div id="profissionais-list"></div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 12px;">
-              <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">📋 Serviços</span>
+              <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Serviços</span>
               <button class="btn btn-sm btn-primary" id="add-servico-btn" data-role="admin">+ Novo</button>
             </div>
             <div id="servicos-list"></div>
@@ -363,7 +434,7 @@
               <div class="ia-status-line">
                 <span class="ia-status-dot"></span> Online <span class="ia-status-sep">|</span> Sempre pronta para analisar o seu negócio.
               </div>
-              <button id="ia-renomear-btn" style="display:none;">✏️</button>
+              <button id="ia-renomear-btn" style="display:none;"></button>
             </div>
 
             <div class="ia-resumo-grid">
@@ -415,7 +486,7 @@
 
             <div class="card" style="padding:16px;position:relative;">
               <div id="ia-onboarding" style="display:none;text-align:center;padding:8px 4px 4px;">
-                <div style="font-size:1.8rem;margin-bottom:8px;">👋</div>
+                <div style="font-size:1.8rem;margin-bottom:8px;"></div>
                 <div style="font-family:var(--font-serif);font-size:1rem;font-weight:600;margin-bottom:4px;">Antes de começar</div>
                 <p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:14px;">Isto é só uma vez — deixa a conversa mais pessoal.</p>
                 <input type="text" id="ia-onb-nome-user" class="input-field" placeholder="Como te chamas?" style="margin-bottom:8px;text-align:center;">
@@ -557,7 +628,9 @@
         <button class="btn btn-primary" id="dash-custom-aplicar" type="button" style="width:100%;">Aplicar</button>
       </div>
     </div>
-  </div><!-- AGENDAMENTO -->
+  </div>
+
+  <!-- AGENDAMENTO -->
   <div id="modal-agenda" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="agenda-title">
     <div class="modal-sheet">
       <div class="handle"></div>
@@ -609,11 +682,13 @@
       </div>
     </div>
   </div>
+
   <!-- CLIENTE -->
   <div id="modal-cliente" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cliente-modal-title">
     <div class="modal-sheet">
       <div class="handle"></div>
       <div id="cliente-modal-title" class="modal-title">Cliente</div>
+      <div id="cliente-perfil-stats" class="cliente-perfil-stats" style="display:none;"></div>
       <div class="input-group">
         <label class="input-label">Cliente</label>
         <input type="text" id="cliente-nome" class="input-field" placeholder="Nome do cliente">
@@ -653,11 +728,12 @@
       </div>
     </div>
   </div>
+
   <!-- VENDA -->
   <div id="modal-venda" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="venda-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="venda-title" class="modal-title">💰 Nova Venda</div>
+      <div id="venda-title" class="modal-title">Nova Venda</div>
 
       <div class="input-group">
         <label class="input-label">Cliente</label>
@@ -665,29 +741,28 @@
         <button class="btn btn-sm btn-secondary mt-2" id="venda-add-cliente-rapido" style="width:100%;">+ Cliente rápido</button>
       </div>
 
-      <div style="background:var(--bg-soft);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
-        <div style="font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);margin-bottom:8px;">Adicionar Serviço / Produto</div>
-        <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;">
-          <div style="flex:1;min-width:0;">
-            <select id="ci-servico-sel" class="input-field" style="width:100%;padding:10px 12px;font-size:.85rem;">
-              <option value="">Selecionar serviço</option>
-            </select>
-          </div>
-          <div style="flex-shrink:0;text-align:center;width:100px;">
-            <div style="font-size:.55rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px;">Valor fixo</div>
-            <div style="display:flex;align-items:center;background:var(--card-white);border:1.5px solid var(--border-soft);border-radius:var(--radius-md);padding:0 4px;justify-content:center;">
-              <input type="number" id="ci-valor" class="input-field" placeholder="0" style="border:none;background:transparent;padding:8px 0;text-align:center;font-weight:700;color:var(--green);font-size:.85rem;width:55px;" min="0" step="500">
-              <span style="font-weight:700;color:var(--gold-dark);font-size:.85rem;margin-left:1px;">Kz</span>
-            </div>
+      <div class="venda-add-item-box">
+        <div class="venda-add-item-titulo">Adicionar Serviço / Produto</div>
+        <div class="input-group">
+          <label class="input-label">Serviço</label>
+          <select id="ci-servico-sel" class="input-field">
+            <option value="">Selecionar serviço</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label class="input-label">Valor</label>
+          <div class="venda-valor-wrap">
+            <input type="number" id="ci-valor" class="input-field" placeholder="0" min="0" step="500">
+            <span class="venda-valor-sufixo">Kz</span>
           </div>
         </div>
-        <div style="margin-bottom:8px;">
-          <label class="input-label" style="font-size:.6rem;">Profissional</label>
-          <select id="venda-profissional" class="input-field" style="width:100%;padding:10px 12px;font-size:.85rem;">
+        <div class="input-group">
+          <label class="input-label">Profissional</label>
+          <select id="venda-profissional" class="input-field">
             <option value="">Selecionar profissional</option>
           </select>
         </div>
-        <button class="btn btn-success btn-block btn-sm" id="btn-add-item">+ Adicionar ao carrinho</button>
+        <button class="btn btn-success btn-block" id="btn-add-item">+ Adicionar ao carrinho</button>
       </div>
 
       <div id="cart-items-list"></div>
@@ -696,17 +771,17 @@
       <div class="input-group mt-3">
         <label class="input-label">Forma de Pagamento</label>
         <select id="venda-pagamento" class="input-field">
-          <option value="Numerário">💵 Numerário</option>
-          <option value="Multicaixa Express">📱 Multicaixa Express</option>
-          <option value="Transferência Bancária">🏦 Transferência Bancária</option>
-          <option value="Cartão">💳 Cartão</option>
+          <option value="Numerário">Numerário</option>
+          <option value="Multicaixa Express">Multicaixa Express</option>
+          <option value="Transferência Bancária">Transferência Bancária</option>
+          <option value="Cartão">Cartão</option>
           <option value="Outro">Outro</option>
         </select>
       </div>
 
       <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary btn-sm" style="flex:1;font-size:0.9rem;padding:10px 0;" id="modal-venda-cancel">Cancelar</button>
-        <button class="btn btn-success btn-sm" style="flex:1;font-size:0.9rem;padding:10px 0;" id="modal-venda-save">Confirmar Venda</button>
+        <button class="btn btn-secondary" style="flex:1;" id="modal-venda-cancel">Cancelar</button>
+        <button class="btn btn-success" style="flex:1;" id="modal-venda-save">Confirmar Venda</button>
       </div>
     </div>
   </div>
@@ -735,7 +810,7 @@
       <div id="detalhe-venda-conteudo"></div>
       <div style="display:flex;gap:12px;margin-top:16px;">
         <button class="btn btn-secondary" style="flex:1;" id="modal-detalhe-fechar">Fechar</button>
-        <button class="btn btn-primary" style="flex:2;" id="btn-imprimir-recibo">
+        <button class="btn btn-primary" style="flex:1;" id="btn-imprimir-recibo">
           <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="6" y="9" width="12" height="8" rx="1"/><path d="M6 9V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v4"/><path d="M6 17H4a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/></svg>
           Imprimir Recibo
         </button>
@@ -747,12 +822,14 @@
   <div id="modal-fecho" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fecho-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="fecho-title" class="modal-title">📋 Fecho de Caixa</div>
+      <div id="fecho-title" class="modal-title">Fecho de Caixa</div>
       <div id="fecho-conteudo"></div>
-      <div style="display:flex; gap:6px; margin-top:14px; justify-content:center; flex-wrap:wrap;">
-        <button style="flex:1; min-width:70px; max-width:110px; border-radius:9999px !important; padding:4px 12px !important; font-size:0.65rem !important; font-weight:600; border:1px solid #ccc; background:#f0f0f0; color:#333; cursor:pointer;" id="modal-fecho-fechar">Regressar</button>
-        <button style="flex:1; min-width:70px; max-width:110px; border-radius:9999px !important; padding:4px 12px !important; font-size:0.65rem !important; font-weight:600; background:#2C7A4D; color:#fff; border:none; cursor:pointer;" id="confirmar-fecho-btn">Realizar fecho</button>
-        <button style="flex:1; min-width:70px; max-width:110px; border-radius:9999px !important; padding:4px 12px !important; font-size:0.65rem !important; font-weight:600; background:linear-gradient(135deg,#D4AF37,#A7872B); color:#fff; border:none; cursor:pointer;" id="btn-imprimir-fecho">Imprimir</button>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px;">
+        <button class="btn btn-success btn-block" id="confirmar-fecho-btn">Realizar fecho</button>
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-secondary" style="flex:1;" id="modal-fecho-fechar">Regressar</button>
+          <button class="btn btn-secondary" style="flex:1;" id="btn-imprimir-fecho">Imprimir</button>
+        </div>
       </div>
     </div>
   </div>
@@ -763,17 +840,54 @@
       <div class="handle"></div>
       <div id="prof-modal-title" class="modal-title">Profissional</div>
       <div class="input-group">
-        <label class="input-label">Nome</label>
+        <label class="input-label">Nome *</label>
         <input type="text" id="prof-nome" class="input-field" placeholder="Ex: Maria">
       </div>
+      <div class="prof-form-row">
+        <div class="input-group">
+          <label class="input-label">Idade *</label>
+          <input type="number" id="prof-idade" class="input-field" placeholder="Ex: 28" min="16" max="99" required>
+        </div>
+        <div class="input-group">
+          <label class="input-label">Data contratual *</label>
+          <input type="text" id="prof-data-contratual" class="input-field" placeholder="AAAA-MM-DD ou DD/MM/AAAA" inputmode="numeric" autocomplete="off">
+        </div>
+      </div>
       <div class="input-group">
-        <label class="input-label">Especialidade</label>
-        <input type="text" id="prof-esp" class="input-field" placeholder="Ex: Coloração, Manicure...">
+        <label class="input-label">Especialidade (serviço) *</label>
+        <select id="prof-esp" class="input-field">
+          <option value="">Seleccionar serviço / especialidade</option>
+          <option value="__criar">Criar seu serviço</option>
+        </select>
+        <div id="prof-criar-servico-box" style="display:none;margin-top:10px;padding:12px;background:var(--bg-soft);border-radius:var(--radius-md);border:1px solid var(--border-soft);">
+          <div class="input-group" style="margin-bottom:8px;">
+            <label class="input-label">Nome do novo serviço *</label>
+            <input type="text" id="prof-novo-servico-nome" class="input-field" placeholder="Ex: Hidratação Capilar">
+          </div>
+          <div class="input-group" style="margin-bottom:8px;">
+            <label class="input-label">Preço (Kz) *</label>
+            <input type="number" id="prof-novo-servico-preco" class="input-field" placeholder="Ex: 5000" min="1">
+          </div>
+          <button type="button" id="prof-criar-servico-btn" class="btn btn-secondary btn-sm btn-block">Criar serviço</button>
+        </div>
+      </div>
+      <div class="prof-form-separador">Dados adicionais <span>(opcional)</span></div>
+      <div class="input-group">
+        <label class="input-label">Número do BI</label>
+        <input type="text" id="prof-bi" class="input-field" placeholder="Ex: 006543210LA045" maxlength="20">
+      </div>
+      <div class="input-group">
+        <label class="input-label">Morada</label>
+        <input type="text" id="prof-morada" class="input-field" placeholder="Ex: Talatona, Luanda">
+      </div>
+      <div class="input-group">
+        <label class="input-label">Contacto (9 dígitos)</label>
+        <input type="tel" id="prof-contacto" class="input-field" placeholder="Ex: 923456789" maxlength="9" inputmode="numeric">
       </div>
       <input type="hidden" id="prof-id">
       <div style="display:flex;gap:12px;margin-top:12px;">
         <button class="btn btn-secondary" style="flex:1;" id="modal-prof-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:2;" id="modal-prof-save">Guardar</button>
+        <button class="btn btn-primary" style="flex:1;" id="modal-prof-save">Guardar</button>
       </div>
     </div>
   </div>
@@ -782,15 +896,15 @@
   <div id="modal-finalizar" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="finalizar-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="finalizar-title" class="modal-title">✅ Finalizar Atendimento</div>
+      <div id="finalizar-title" class="modal-title">Finalizar Atendimento</div>
       <div id="finalizar-info" style="background:var(--bg-soft);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;font-size:.88rem;"></div>
       <div class="input-group">
         <label class="input-label">Forma de Pagamento</label>
         <select id="finalizar-pagamento" class="input-field">
-          <option value="Numerário">💵 Numerário</option>
-          <option value="Multicaixa Express">📱 Multicaixa Express</option>
-          <option value="Transferência Bancária">🏦 Transferência Bancária</option>
-          <option value="Cartão">💳 Cartão</option>
+          <option value="Numerário">Numerário</option>
+          <option value="Multicaixa Express">Multicaixa Express</option>
+          <option value="Transferência Bancária">Transferência Bancária</option>
+          <option value="Cartão">Cartão</option>
           <option value="Outro">Outro</option>
         </select>
       </div>
@@ -806,7 +920,7 @@
   <div id="modal-upgrade" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="upgrade-title" class="modal-title">📈 Upgrade do Plano</div>
+      <div id="upgrade-title" class="modal-title"> Upgrade do Plano</div>
       <div id="upgrade-mensagem" style="margin-bottom:16px;color:var(--text-secondary);font-size:.9rem;">
         Atingiu o limite do seu plano actual. Escolha um plano para continuar.
       </div>
@@ -836,7 +950,7 @@
           <button class="btn btn-secondary btn-block mt-2 btn-sm" onclick="upgradePara('starter')" data-role="admin" data-role-mode="disable">Assinar Starter</button>
         </div>
       </div>
-      <button class="btn btn-secondary btn-block mt-3" id="modal-upgrade-contato" data-role="admin" data-role-mode="disable">📱 Contactar via WhatsApp</button>
+      <button class="btn btn-secondary btn-block mt-3" id="modal-upgrade-contato" data-role="admin" data-role-mode="disable">Contactar via WhatsApp</button>
     </div>
   </div>
 
@@ -860,7 +974,7 @@
       <input type="hidden" id="servico-id">
       <div style="display:flex;gap:12px;margin-top:12px;">
         <button class="btn btn-secondary" style="flex:1;" id="modal-servico-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:2;" id="modal-servico-save">Guardar Serviço</button>
+        <button class="btn btn-primary" style="flex:1;" id="modal-servico-save">Guardar Serviço</button>
       </div>
     </div>
   </div>
@@ -869,7 +983,7 @@
   <div id="modal-revenue-detail" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="revenue-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="revenue-title" class="modal-title">💰 Detalhe do Faturamento Hoje</div>
+      <div id="revenue-title" class="modal-title">Detalhe do Faturamento</div>
       <div id="revenue-detail-list" style="max-height:400px;overflow-y:auto;"></div>
       <div style="margin-top:12px;text-align:right;font-weight:700;font-size:1.1rem;border-top:2px solid var(--gold);padding-top:8px;">
         Total: <span id="revenue-detail-total" style="color:var(--gold-dark);font-family:var(--font-serif);">0 Kz</span>
@@ -882,7 +996,7 @@
   <div id="modal-agenda-detail" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="agenda-detail-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="agenda-detail-title" class="modal-title">📅 Agendamentos de Hoje</div>
+      <div id="agenda-detail-title" class="modal-title"> Agendamentos de Hoje</div>
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         <button class="btn btn-sm btn-secondary" id="agenda-detail-pendentes" style="flex:1;">Pendentes</button>
         <button class="btn btn-sm btn-secondary" id="agenda-detail-realizados" style="flex:1;">Realizados</button>
@@ -891,25 +1005,27 @@
       <button class="btn btn-secondary btn-block mt-3" id="modal-agenda-close">Fechar</button>
     </div>
   </div>
-<!-- MODAL CONFIRMAÇÃO (LOGOUT) -->
-<div id="modal-confirm" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-  <div class="modal-confirm-sheet">
-    <div class="confirm-icon">⚠️</div>
-    <h2 id="confirm-title" class="confirm-title">O senhor(a) sairá da aplicação?</h2>
-    <p id="confirm-message" class="confirm-message">As suas vendas e agendamentos estão guardados em segurança. Pode voltar a qualquer momento.</p>
-    <div class="confirm-actions">
-      <button class="btn btn-secondary" id="confirm-cancel-btn" style="flex:1;">Regressar</button>
-      <button class="btn btn-danger" id="confirm-ok-btn" style="flex:1;">Sair agora</button>
+
+  <!-- MODAL CONFIRMAÇÃO (LOGOUT) -->
+  <div id="modal-confirm" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-confirm-sheet">
+      <div class="confirm-icon" style="font-size:1.5rem;font-weight:700;color:var(--amber-500);">!</div>
+      <h2 id="confirm-title" class="confirm-title">O senhor(a) sairá da aplicação?</h2>
+      <p id="confirm-message" class="confirm-message">As suas vendas e agendamentos estão guardados em segurança. Pode voltar a qualquer momento.</p>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" id="confirm-cancel-btn" style="flex:1;">Regressar</button>
+        <button class="btn btn-danger" id="confirm-ok-btn" style="flex:1;">Sair agora</button>
+      </div>
+      <label>
+        <input type="checkbox" id="keep-logged"> Manter-me ligado neste dispositivo
+      </label>
     </div>
-    <label>
-      <input type="checkbox" id="keep-logged"> Manter-me ligado neste dispositivo
-    </label>
   </div>
-</div>
+
   <!-- MODAL ERRO -->
   <div id="modal-erro" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="erro-title">
     <div class="modal-confirm-sheet" style="text-align:center;">
-      <div class="confirm-icon" style="font-size:3rem;color:var(--red-500);">⚠️</div>
+      <div class="confirm-icon" style="font-size:1.4rem;font-weight:700;color:var(--red-500);">!</div>
       <h2 id="erro-title" class="confirm-title">Algo correu mal</h2>
       <p id="erro-message" class="confirm-message">Ocorreu um erro ao processar a operação. Tente novamente.</p>
       <div class="confirm-actions" style="justify-content:center;">
@@ -956,7 +1072,7 @@
             <span style="font-weight:600; color:var(--text-secondary);">Data / Hora</span>
             <span style="font-weight:500; color:var(--text-primary); font-variant-numeric:tabular-nums;" id="detalhe-venda-datahora">--/--/---- · --:--</span>
             <span style="font-weight:600; color:var(--text-secondary);">Pagamento</span>
-            <span style="font-weight:500; color:var(--text-primary);" id="detalhe-venda-pagamento">💵 Numerário</span>
+            <span style="font-weight:500; color:var(--text-primary);" id="detalhe-venda-pagamento">Numerário</span>
           </div>
           <div style="border-top:1px dashed var(--border-soft); margin:6px 0 8px;"></div>
           <div style="display:grid; grid-template-columns:1fr 36px 48px 56px; gap:4px; font-weight:600; font-size:0.6rem; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.06em; padding-bottom:4px; border-bottom:1px solid var(--border-soft);">
@@ -973,7 +1089,7 @@
         </div>
         <div style="display:flex; gap:10px; width:100%;">
           <button class="btn btn-secondary" id="btn-imprimir-sucesso" style="flex:1; padding:10px 0; font-size:0.75rem; border-color:var(--border-soft);">
-            <span style="margin-right:4px;">🖨️</span> Imprimir
+            Imprimir
           </button>
           <button class="btn btn-primary" id="btn-voltar-sucesso" style="flex:2; padding:10px 0; font-size:0.75rem; font-weight:600;">
             Continuar
@@ -1001,26 +1117,22 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="core-constants.js"></script>
-  <script src="core-utils.js"></script>
-  <script src="core-state.js"></script>
-  <script src="db-indexeddb.js"></script>
-  <script src="auth-supabase.js"></script>
-  <script src="sync-queue.js"></script>
-  <script src="sync-rest.js"></script>
-  <script src="plano-limites.js"></script>
-  <script src="crud-operations.js"></script>
-  <script src="ui-render-dashboard-agenda.js"></script>
-  <script src="ui-render-clientes-caixa-equipa.js"></script>
-  <script src="chart-module.js"></script>
-  <script src="vendas-modais.js"></script>
-  <script src="detalhes-acessibilidade.js"></script>
-  <script src="ui-events-navegacao.js"></script>
-  <script src="eventos-cadastros.js"></script>
-  <script src="eventos-caixa-vendas.js"></script>
-  <script src="eventos-globais.js"></script>
-  <script src="ia-module.js"></script>
-  <script src="main.js"></script>
+  <!-- Entry único (ordem de deps em build-bundle.js). Scripts individuais mantidos no repo para debug. -->
+  <script src="app.bundle.js"></script>
+
+
+  <!-- Modal limpo: cliente não encontrado -->
+  <div id="modal-cliente-nao-encontrado" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="modal-confirm-sheet" style="text-align:left;">
+      <div class="confirm-title" style="margin-bottom:12px;">Cliente não encontrado</div>
+      <div class="confirm-message" style="text-align:left;line-height:1.5;color:var(--text-primary);">
+        Não encontrei o cliente. Verifica se o nome está correcto ou se o cliente que procura está cadastrado.
+      </div>
+      <div class="confirm-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-primary btn-block" id="modal-cliente-nao-encontrado-ok">OK</button>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>

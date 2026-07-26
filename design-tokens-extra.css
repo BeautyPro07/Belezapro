@@ -112,3 +112,91 @@
 .text-danger      { color: var(--red-500) !important; }
 .text-warning     { color: var(--amber-500) !important; }
 
+
+
+/* ===== FASE E3 — Polimento profissional SaaS ===== */
+.empty-state {
+  padding: 48px 24px;
+  border-style: dashed;
+  border-width: 1px;
+}
+.empty-state p {
+  font-size: .82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Avatares de movimento mais sóbrios */
+.list-item .avatar {
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Toast sem ícones — tipografia limpa */
+.toast {
+  font-size: .78rem;
+  letter-spacing: -0.01em;
+  border-radius: 6px;
+  padding: 12px 20px;
+}
+
+/* Botões de filtro "Filtrar" consistentes */
+#caixa-filter-icon:hover,
+#agenda-filter-icon:hover,
+#dash-filter-icon:hover {
+  color: var(--text-primary);
+  opacity: 0.85;
+}
+#caixa-filter-icon:hover span,
+#agenda-filter-icon:hover span {
+  color: var(--text-primary);
+}
+
+/* Localizar cliente — menos genérico */
+#caixa-localizar-btn {
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  font-weight: 500;
+  border: 1px solid var(--border-soft);
+}
+#caixa-localizar-btn:active {
+  background: var(--card-white);
+  border-color: var(--border-soft);
+}
+
+/* Modal confirm limpo */
+.modal-confirm-sheet .confirm-title {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+}
+.modal-confirm-sheet .confirm-message {
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+/* Labels de input mais refinados */
+.input-label {
+  letter-spacing: 0.05em;
+}
+
+/* KPI sub text */
+.kpi-sub {
+  letter-spacing: 0.01em;
+}
+
+/* Evitar aspecto "Bootstrap" em botões sm */
+.btn-sm {
+  letter-spacing: -0.01em;
+}
+
+/* Pill profissional */
+.pill {
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}

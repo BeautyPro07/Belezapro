@@ -1,46 +1,22 @@
 // ====================================================================
-//  crud-operations.js — extraído do app.js (Fase C da modularização)
-//  Conteúdo: Carregamento de estado e todas as operações CRUD (loadState, saveConfig, clientes, agendamentos, profissionais, serviços, vendas, movimentos)
-//  Linhas originais: 81-382
-//  Carregar depois de core-*.js, db-indexeddb.js, sync-*.js, auth-supabase.js
+//  crud-operations.js — Fase C + Fase D (melhorias de robustez)
+//  Carregar depois de core-*.js, core-store.js, db-indexeddb.js,
+//  sync-*.js, auth-supabase.js, plano-limites.js
 // ====================================================================
 
-// closeModal/openModal movidos para core-utils.js
-
-// ====================================================================
-//  ARMAZENAMENTO (IndexedDB + fallback localStorage) — movido para
-//  db-indexeddb.js (Fase B da modularização)
-// ====================================================================
-
-// Override de dbPut/dbDelete (sync automático) movido para
-// sync-queue.js (Fase B da modularização)
-
-// ====================================================================
-//  ESTADO GLOBAL — movido para core-state.js (Fase B da modularização)
-// ====================================================================
-// dbClear movido para db-indexeddb.js (Fase B da modularização)
-
-// ====================================================================
-//  DETEÇÃO DE TROCA DE SALÃO
-//  CORREÇÃO (bug confirmado): esta verificação TEM de correr antes de
-//  sincronizarConfigDoServidor(), porque essa função chama saveConfig(),
-//  que sobrescreve a MESMA chave de cache 'salaoId' com o novo salão.
-//  Se a deteção só acontecer dentro de loadState() (como antes), a cache
-//  já foi reescrita e a comparação nunca acusa troca — os dados do salão
-//  anterior (e a fila de sync) nunca são limpos. Por isso este helper é
-//  chamado em checkSession()/login ANTES de sincronizarConfigDoServidor().
-// ====================================================================
 // ====================================================================
 //  VALIDAÇÃO DE DUPLICADOS (local)
 // ====================================================================
 function existeNomeDuplicado(tabela, nome, idIgnorar = null) {
   const lista = state[tabela] || [];
-  const nomeNormalizado = nome.trim().toLowerCase();
+  const nomeNormalizado = (nome || '').trim().toLowerCase();
+  if (!nomeNormalizado) return false;
   return lista.some(item =>
     item.nome && item.nome.trim().toLowerCase() === nomeNormalizado &&
     (idIgnorar ? item.id !== idIgnorar : true)
   );
 }
+
 async function detetarTrocaDeSalao(novoSalaoId) {
   const configs = await dbGetAll('config');
   const salaoIdCache = configs.find(c => c.key === 'salaoId');
@@ -55,21 +31,30 @@ async function loadState(trocouDeSalao = false) {
   const fund = configs.find(c => c.key === 'fundo');
   const plano = configs.find(c => c.key === 'plano');
   const trialInicio = configs.find(c => c.key === 'trialInicio');
+
+  // Mutação directa mantida por compatibilidade; Store notifica se existir
   state.config.storeName = cfg ? cfg.value : 'Glamour Beauty';
-  state.config.fundo = fund ? Number(fund.value) : 50000;
+  state.config.fundo = fund ? Number(fund.value) : 0;
   state.config.plano = plano ? plano.value : 'trial';
   state.config.trialInicio = trialInicio ? trialInicio.value : null;
-  // state.config.salaoId NUNCA é sobreposto aqui — já foi definido
-  // corretamente a partir do profile.salao_id antes de loadState() ser
-  // chamado (ver checkSession/login). trocouDeSalao agora é recebido
-  // como parâmetro, já calculado ANTES da cache ser sobrescrita.
 
   let clientes, agendamentos, movimentos, profs, servicos, fechos;
   if (trocouDeSalao) {
     await Promise.all(['clientes', 'agendamentos', 'movimentos', 'profissionais', 'servicos', 'fechos_caixa'].map(dbClear));
     localStorage.removeItem(SYNC_QUEUE_KEY);
+    try { localStorage.removeItem('bp_deleted_items'); } catch (_) {}
+    // Preferências e resíduos do salão anterior (P2)
+    ['bp_filtro_clientes','bp_chart_periodo','bp_chart_offset','bp_chart_mostrar_valores',
+     'bp_hist_periodo','bp_caixa_data_exata','bp_carrinho','bp_last_venda_id'].forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
+    try { sessionStorage.removeItem('bp_last_venda_id'); } catch (_) {}
+    state.histPeriodo = 'hoje';
+    state.filtroClientes = 'todos';
+    state.chartPeriodo = 'semana';
+    state.chartOffset = 0;
     clientes = []; agendamentos = []; movimentos = []; profs = []; servicos = []; fechos = [];
-    console.warn('[BeautyPro] Troca de salão detetada — dados locais e fila de sync limpos.');
+    console.warn('[BeautyPro] Troca de salão detetada — dados locais, fila e preferências limpos.');
   } else {
     const [clientesData, agendamentosData, movimentosData, profsData, servicosData, fechosData] = await Promise.all([
       dbGetAll('clientes'),
@@ -88,28 +73,12 @@ async function loadState(trocouDeSalao = false) {
   }
 
   const safe = (arr) => Array.isArray(arr) ? arr : [];
-  const safeClientes = safe(clientes);
-  const safeAgendamentos = safe(agendamentos);
-  const safeMovimentos = safe(movimentos);
-  const safeProfs = safe(profs);
-  const safeServicos = safe(servicos);
-  const safeFechos = safe(fechos);
-
-  // Os arrays de padrões já não são usados para criação automática
-  // Mantidos apenas para referência, mas não inseridos.
-  // const profsPadraoComIdProprio = PROF_DEFAULT.map(p => ({ ...p, id: uuid() }));
-  // const servicosPadraoComIdProprio = SERVICOS_DEFAULT.map(s => ({ ...s, id: uuid() }));
-
-  // ============================================================
-  // ALTERAÇÃO: NÃO INSERIR PROFISSIONAIS OU SERVIÇOS PADRÃO
-  // Se não houver dados, as listas ficam vazias.
-  // ============================================================
-  state.clientes = safeClientes;
-  state.agendamentos = safeAgendamentos;
-  state.movimentos = safeMovimentos;
-  state.profissionais = safeProfs; // já não substitui por padrões
-  state.servicos = safeServicos;   // já não substitui por padrões
-  state.fechos_caixa = safeFechos;
+  state.clientes = safe(clientes);
+  state.agendamentos = safe(agendamentos);
+  state.movimentos = safe(movimentos);
+  state.profissionais = safe(profs);
+  state.servicos = safe(servicos);
+  state.fechos_caixa = safe(fechos);
 
   const chartPeriodo = localStorage.getItem('bp_chart_periodo') || 'semana';
   const chartOffset = parseInt(localStorage.getItem('bp_chart_offset')) || 0;
@@ -127,13 +96,10 @@ async function loadState(trocouDeSalao = false) {
     await dbPut('config', { id: 'plano', key: 'plano', value: 'trial' });
   }
 
-  // ============================================================
-  // CRIAÇÃO AUTOMÁTICA DESATIVADA — não insere profissionais ou serviços padrão
-  // ============================================================
-  if (safeProfs.length === 0) {
+  if (state.profissionais.length === 0) {
     console.log('[loadState] Nenhum profissional encontrado. Criação automática desativada.');
   }
-  if (safeServicos.length === 0) {
+  if (state.servicos.length === 0) {
     console.log('[loadState] Nenhum serviço encontrado. Criação automática desativada.');
   }
 
@@ -143,7 +109,13 @@ async function loadState(trocouDeSalao = false) {
     if (carregouRemoto) await flushSyncQueue();
   }
 
+  // Notificar Store se disponível
+  if (window.BeautyStore && typeof window.BeautyStore.setState === 'function') {
+    window.BeautyStore.setState({ ...state });
+  }
+
   updateUI();
+  if (typeof renderBadges === 'function') renderBadges();
 }
 
 async function saveConfig() {
@@ -157,13 +129,55 @@ async function saveConfig() {
 }
 
 // ====================================================================
-//  CRUD FUNCTIONS
+//  HELPER — DELETE OPTIMISTA COM ROLLBACK
 // ====================================================================
+async function _deleteComRollback(tabela, id, nomeEntidade) {
+  // 1. Guardar snapshot para possível rollback
+  const lista = state[tabela] || [];
+  const itemOriginal = lista.find(item => item.id === id);
+  if (!itemOriginal) {
+    toast(`${nomeEntidade} não encontrado(a).`, 'warning');
+    return false;
+  }
 
-// -------------------- CLIENTE --------------------
+  // 2. Remoção optimista local
+  await dbDelete(tabela, id);
+  if (window.BeautyStore && window.BeautyStore.removeFromList) {
+    window.BeautyStore.removeFromList(tabela, id);
+  } else {
+    state[tabela] = state[tabela].filter(item => item.id !== id);
+  }
+  updateUI();
+  if (typeof renderBadges === 'function') renderBadges();
+
+  // 3. Tentar sincronizar
+  if (navigator.onLine && state.config.salaoId) {
+    try {
+      await flushSyncQueue();
+      await carregarDoSupabase();
+      updateUI();
+      if (typeof renderBadges === 'function') renderBadges();
+      toast(`${nomeEntidade} eliminado(a) e sincronizado(a)!`, 'success');
+      return true;
+    } catch (e) {
+      console.warn(`[delete ${tabela}] Falha ao sincronizar:`, e);
+      // Não fazemos rollback automático do item (já está na fila de sync).
+      // O utilizador vê a mensagem de aviso e o item continua eliminado localmente.
+      toast(`${nomeEntidade} eliminado(a) localmente. A sincronização falhou — será tentada novamente.`, 'warning');
+      return true;
+    }
+  } else {
+    toast(`${nomeEntidade} eliminado(a) (offline). Será sincronizado quando online.`, 'warning');
+    return true;
+  }
+}
+
+// ====================================================================
+//  CRUD — CLIENTE
+// ====================================================================
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
-  const nome = c.nome.trim();
+  const nome = (c.nome || '').trim();
   if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
 
   if (existeNomeDuplicado('clientes', nome)) {
@@ -174,9 +188,13 @@ async function addCliente(c) {
   const n = { ...c, id: uuid(), nome };
   try {
     await dbPut('clientes', n);
-    state.clientes.push(n);
-    updateUI();
-    toast('Cliente adicionado!', 'success');
+    if (window.BeautyStore && window.BeautyStore.pushToList) {
+      window.BeautyStore.pushToList('clientes', n);
+    } else {
+      state.clientes.push(n);
+      updateUI();
+    }
+    toast('Cliente adicionado à lista', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -186,6 +204,7 @@ async function addCliente(c) {
     throw err;
   }
 }
+
 async function updateCliente(id, data) {
   if (data.nome) {
     const nome = data.nome.trim();
@@ -194,37 +213,25 @@ async function updateCliente(id, data) {
       return;
     }
   }
-  const i = state.clientes.findIndex(c => c.id === id);
-  if (i === -1) return;
-  state.clientes[i] = { ...state.clientes[i], ...data };
-  await dbPut('clientes', state.clientes[i]);
-  updateUI();
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('clientes', id, data);
+  } else {
+    const i = state.clientes.findIndex(c => c.id === id);
+    if (i === -1) return;
+    state.clientes[i] = { ...state.clientes[i], ...data };
+  }
+  const item = state.clientes.find(c => c.id === id);
+  if (item) await dbPut('clientes', item);
+  if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
 }
 
 async function deleteCliente(id) {
-  // 1. Eliminar localmente
-  await dbDelete('clientes', id);
-  state.clientes = state.clientes.filter(c => c.id !== id);
-  updateUI();
-
-  // 2. Forçar envio da eliminação para o Supabase (processar fila)
-  if (navigator.onLine && state.config.salaoId) {
-    try {
-      await flushSyncQueue(); // Envia o delete pendente
-      // 3. Após enviar, puxar dados atualizados do servidor
-      await carregarDoSupabase();
-      updateUI();
-      toast('Cliente eliminado e sincronizado!', 'success');
-    } catch (e) {
-      console.warn('[deleteCliente] Falha ao sincronizar:', e);
-      toast('Cliente eliminado localmente. A sincronização falhou.', 'warning');
-    }
-  } else {
-    toast('Cliente eliminado (offline). Será sincronizado quando online.', 'warning');
-  }
+  return _deleteComRollback('clientes', id, 'Cliente');
 }
 
-// -------------------- AGENDAMENTO --------------------
+// ====================================================================
+//  CRUD — AGENDAMENTO
+// ====================================================================
 async function addAgendamento(ag) {
   const dtStr = ag.data + 'T' + (ag.hora || '00:00') + ':00';
   const agDatetime = new Date(dtStr);
@@ -234,7 +241,7 @@ async function addAgendamento(ag) {
     return null;
   }
   if (!verificarLimite('agendamentos')) return null;
-  if (!ag.profissional_id || ag.profissional_id.trim() === '') {
+  if (!ag.profissional_id || String(ag.profissional_id).trim() === '') {
     toast('Selecione um profissional antes de agendar.', 'error');
     return null;
   }
@@ -250,9 +257,14 @@ async function addAgendamento(ag) {
   };
   try {
     await dbPut('agendamentos', n);
-    state.agendamentos.push(n);
-    updateUI();
-    toast('Agendamento criado!', 'success');
+    if (window.BeautyStore && window.BeautyStore.pushToList) {
+      window.BeautyStore.pushToList('agendamentos', n);
+    } else {
+      state.agendamentos.push(n);
+      updateUI();
+    }
+    if (typeof renderBadges === 'function') renderBadges();
+    toast('Agendamento marcado', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -264,37 +276,29 @@ async function addAgendamento(ag) {
 }
 
 async function updateAgendamento(id, data) {
-  const i = state.agendamentos.findIndex(a => a.id === id);
-  if (i === -1) return;
-  state.agendamentos[i] = { ...state.agendamentos[i], ...data };
-  await dbPut('agendamentos', state.agendamentos[i]);
-  updateUI();
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('agendamentos', id, data);
+  } else {
+    const i = state.agendamentos.findIndex(a => a.id === id);
+    if (i === -1) return;
+    state.agendamentos[i] = { ...state.agendamentos[i], ...data };
+  }
+  const item = state.agendamentos.find(a => a.id === id);
+  if (item) await dbPut('agendamentos', item);
+  if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  if (typeof renderBadges === 'function') renderBadges();
 }
 
 async function deleteAgendamento(id) {
-  await dbDelete('agendamentos', id);
-  state.agendamentos = state.agendamentos.filter(a => a.id !== id);
-  updateUI();
-
-  if (navigator.onLine && state.config.salaoId) {
-    try {
-      await flushSyncQueue();
-      await carregarDoSupabase();
-      updateUI();
-      toast('Agendamento eliminado e sincronizado!', 'success');
-    } catch (e) {
-      console.warn('[deleteAgendamento] Falha ao sincronizar:', e);
-      toast('Agendamento eliminado localmente. A sincronização falhou.', 'warning');
-    }
-  } else {
-    toast('Agendamento eliminado (offline). Será sincronizado quando online.', 'warning');
-  }
+  return _deleteComRollback('agendamentos', id, 'Agendamento');
 }
 
-// -------------------- PROFISSIONAL --------------------
+// ====================================================================
+//  CRUD — PROFISSIONAL
+// ====================================================================
 async function addProfissional(p) {
   if (!verificarLimite('profissionais')) return null;
-  const nome = p.nome.trim();
+  const nome = (p.nome || '').trim();
   if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
 
   if (existeNomeDuplicado('profissionais', nome)) {
@@ -305,9 +309,13 @@ async function addProfissional(p) {
   const n = { ...p, id: uuid(), nome };
   try {
     await dbPut('profissionais', n);
-    state.profissionais.push(n);
-    updateUI();
-    toast('Profissional adicionado!', 'success');
+    if (window.BeautyStore && window.BeautyStore.pushToList) {
+      window.BeautyStore.pushToList('profissionais', n);
+    } else {
+      state.profissionais.push(n);
+      updateUI();
+    }
+    toast('Profissional adicionado à equipa', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -317,6 +325,7 @@ async function addProfissional(p) {
     throw err;
   }
 }
+
 async function updateProfissional(id, data) {
   if (data.nome) {
     const nome = data.nome.trim();
@@ -325,36 +334,27 @@ async function updateProfissional(id, data) {
       return;
     }
   }
-  const i = state.profissionais.findIndex(p => p.id === id);
-  if (i === -1) return;
-  state.profissionais[i] = { ...state.profissionais[i], ...data };
-  await dbPut('profissionais', state.profissionais[i]);
-  updateUI();
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('profissionais', id, data);
+  } else {
+    const i = state.profissionais.findIndex(p => p.id === id);
+    if (i === -1) return;
+    state.profissionais[i] = { ...state.profissionais[i], ...data };
+  }
+  const item = state.profissionais.find(p => p.id === id);
+  if (item) await dbPut('profissionais', item);
+  if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
 }
 
 async function deleteProfissional(id) {
-  await dbDelete('profissionais', id);
-  state.profissionais = state.profissionais.filter(p => p.id !== id);
-  updateUI();
-
-  if (navigator.onLine && state.config.salaoId) {
-    try {
-      await flushSyncQueue();
-      await carregarDoSupabase();
-      updateUI();
-      toast('Profissional eliminado e sincronizado!', 'success');
-    } catch (e) {
-      console.warn('[deleteProfissional] Falha ao sincronizar:', e);
-      toast('Profissional eliminado localmente. A sincronização falhou.', 'warning');
-    }
-  } else {
-    toast('Profissional eliminado (offline). Será sincronizado quando online.', 'warning');
-  }
+  return _deleteComRollback('profissionais', id, 'Profissional');
 }
 
-// -------------------- SERVIÇO --------------------
+// ====================================================================
+//  CRUD — SERVIÇO
+// ====================================================================
 async function addServico(s) {
-  const nome = s.nome.trim();
+  const nome = (s.nome || '').trim();
   if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
 
   if (existeNomeDuplicado('servicos', nome)) {
@@ -364,11 +364,16 @@ async function addServico(s) {
 
   const n = { ...s, id: uuid(), nome };
   await dbPut('servicos', n);
-  state.servicos.push(n);
-  updateUI();
-  toast('Serviço criado!', 'success');
+  if (window.BeautyStore && window.BeautyStore.pushToList) {
+    window.BeautyStore.pushToList('servicos', n);
+  } else {
+    state.servicos.push(n);
+    updateUI();
+  }
+  toast('Serviço criado e disponível', 'success');
   return n;
 }
+
 async function updateServico(id, data) {
   if (data.nome) {
     const nome = data.nome.trim();
@@ -377,31 +382,20 @@ async function updateServico(id, data) {
       return;
     }
   }
-  const i = state.servicos.findIndex(s => s.id === id);
-  if (i === -1) return;
-  state.servicos[i] = { ...state.servicos[i], ...data };
-  await dbPut('servicos', state.servicos[i]);
-  updateUI();
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('servicos', id, data);
+  } else {
+    const i = state.servicos.findIndex(s => s.id === id);
+    if (i === -1) return;
+    state.servicos[i] = { ...state.servicos[i], ...data };
+  }
+  const item = state.servicos.find(s => s.id === id);
+  if (item) await dbPut('servicos', item);
+  if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
 }
 
 async function deleteServico(id) {
-  await dbDelete('servicos', id);
-  state.servicos = state.servicos.filter(s => s.id !== id);
-  updateUI();
-
-  if (navigator.onLine && state.config.salaoId) {
-    try {
-      await flushSyncQueue();
-      await carregarDoSupabase();
-      updateUI();
-      toast('Serviço eliminado e sincronizado!', 'success');
-    } catch (e) {
-      console.warn('[deleteServico] Falha ao sincronizar:', e);
-      toast('Serviço eliminado localmente. A sincronização falhou.', 'warning');
-    }
-  } else {
-    toast('Serviço eliminado (offline). Será sincronizado quando online.', 'warning');
-  }
+  return _deleteComRollback('servicos', id, 'Serviço');
 }
 
 function getServicoById(id) {
@@ -420,46 +414,86 @@ function getProfissionaisPorServico(nomeServico) {
   return state.profissionais.map(p => p.nome);
 }
 
-// -------------------- VENDA --------------------
+// ====================================================================
+//  VENDA / MOVIMENTO
+// ====================================================================
 async function registarVenda(dados) {
-  if (!dados.cliente || dados.cliente.trim() === '') {
-    toast('Selecione ou crie um cliente antes de registar a venda.', 'error');
+  try {
+    if (!dados.cliente || String(dados.cliente).trim() === '') {
+      toast('Selecione ou crie um cliente antes de registar a venda.', 'error');
+      return null;
+    }
+
+    if (!dados.profissional_id || String(dados.profissional_id).trim() === '') {
+      toast('Selecione um profissional antes de registar a venda.', 'error');
+      return null;
+    }
+
+    if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
+      toast('Adicione pelo menos um serviço à venda.', 'error');
+      return null;
+    }
+
+    const total = dados.itens.reduce((acc, i) => acc + (Number(i.subtotal) || 0), 0);
+    if (total <= 0) {
+      toast('O valor total da venda tem de ser superior a zero.', 'error');
+      return null;
+    }
+
+    const descricao = dados.itens.map(i => i.nome).join(', ');
+    const id = uuid();
+    const mov = {
+      id,
+      tipo: 'venda',
+      descricao,
+      valor: total,
+      cliente: dados.cliente,
+      profissional_id: dados.profissional_id || null,
+      profissional: dados.profissional || 'Não atribuído',
+      itens: dados.itens.map(i => ({
+        nome: i.nome,
+        quantidade: Number(i.quantidade) || 1,
+        precoUnit: Number(i.precoUnit) || Number(i.subtotal) || 0,
+        subtotal: Number(i.subtotal) || 0
+      })),
+      metodoPagamento: dados.metodoPagamento || 'Numerário',
+      data: hoje(),
+      hora: horaAgora(),
+      reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
+      salao_id: state.config.salaoId || null,
+      updated_at: new Date().toISOString()
+    };
+
+    // Escrita local primeiro — nunca falha a venda por causa da rede
+    await dbPut('movimentos', mov);
+    if (window.BeautyStore && window.BeautyStore.pushToList) {
+      window.BeautyStore.pushToList('movimentos', mov);
+    } else {
+      state.movimentos.push(mov);
+      updateUI();
+    }
+    if (typeof renderBadges === 'function') renderBadges();
+    return id;
+  } catch (err) {
+    console.error('[registarVenda] Erro:', err);
+    // Se for limite de plano, mensagem específica
+    if (err && err.message === 'LIMITE_PLANO_ATINGIDO') {
+      mostrarModalUpgrade('Limite do plano atingido. Faça upgrade para continuar.');
+      return null;
+    }
+    toast('Não foi possível registar a venda localmente. Tente novamente.', 'error');
     return null;
   }
-
-  if (!dados.profissional_id || dados.profissional_id.trim() === '') {
-    toast('Selecione um profissional antes de registar a venda.', 'error');
-    return null;
-  }
-
-  const total = dados.itens.reduce((acc, i) => acc + i.subtotal, 0);
-  const descricao = dados.itens.map(i => i.nome).join(', ');
-  const id = uuid();
-  const mov = {
-    id,
-    tipo: 'venda',
-    descricao,
-    valor: total,
-    cliente: dados.cliente,
-    profissional_id: dados.profissional_id || null,
-    profissional: dados.profissional || 'Não atribuído',
-    itens: dados.itens,
-    metodoPagamento: dados.metodoPagamento || 'Numerário',
-    data: hoje(),
-    hora: horaAgora(),
-    reciboNum: nextReciboNum(),
-  };
-  await dbPut('movimentos', mov);
-  state.movimentos.push(mov);
-  updateUI();
-  return id;
 }
 
-// -------------------- MOVIMENTO GENÉRICO --------------------
 async function addMovimento(mov) {
   const n = { ...mov, id: uuid(), data: hoje(), hora: horaAgora() };
   await dbPut('movimentos', n);
-  state.movimentos.push(n);
-  updateUI();
+  if (window.BeautyStore && window.BeautyStore.pushToList) {
+    window.BeautyStore.pushToList('movimentos', n);
+  } else {
+    state.movimentos.push(n);
+    updateUI();
+  }
   return n;
 }

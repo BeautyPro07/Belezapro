@@ -1,0 +1,24 @@
+// BeautyPro ES module entry — ordem de dependências explícita
+import './core-constants.js';
+import './core-utils.js';
+import './tests-pure.js';
+import './core-state.js';
+import './core-store.js';
+import './db-indexeddb.js';
+import './auth-supabase.js';
+import './sync-queue.js';
+import './sync-rest.js';
+import './plano-limites.js';
+import './crud-operations.js';
+import './ui-render-dashboard-agenda.js';
+import './ui-render-clientes-caixa-equipa.js';
+import './chart-module.js';
+import './vendas-modais.js';
+import './detalhes-acessibilidade.js';
+import './ui-events-navegacao.js';
+import './eventos-cadastros.js';
+import './eventos-caixa-vendas.js';
+import './eventos-globais.js';
+import './ia-module.js';
+import './main.js';
+console.info('[BeautyPro] ES modules carregados');

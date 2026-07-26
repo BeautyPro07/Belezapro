@@ -17,11 +17,14 @@ const files = [
   './plano-filtros-grafico.css',
   './impressao-acessibilidade.css',
   './design-tokens-extra.css',
+  './design-system-final.css',
   './dark-mode.css',
   './splash-sparkline.css',
   './core-constants.js',
   './core-utils.js',
+  './tests-pure.js',
   './core-state.js',
+  './core-store.js',
   './db-indexeddb.js',
   './auth-supabase.js',
   './sync-queue.js',
@@ -39,6 +42,7 @@ const files = [
   './eventos-globais.js',
   './ia-module.js',
   './main.js',
+  './app.bundle.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -52,7 +56,7 @@ for (const file of files) {
     const content = fs.readFileSync(file);
     hash.update(content);
   } catch (err) {
-    console.warn(`⚠️ Ficheiro não encontrado: ${file} – a ignorar.`);
+    console.warn(`Ficheiro não encontrado: ${file} – a ignorar.`);
   }
 }
 const version = hash.digest('hex').slice(0, 8);
@@ -64,4 +68,4 @@ const swContent = template.replace(/CACHE_NAME_PLACEHOLDER/g, `'${cacheName}'`);
 
 // Escrever sw.js final
 fs.writeFileSync('./sw.js', swContent);
-console.log(`✅ sw.js gerado com CACHE_NAME = ${cacheName}`);
+console.log(`sw.js gerado com CACHE_NAME = ${cacheName}`);

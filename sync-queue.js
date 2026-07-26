@@ -31,13 +31,21 @@ function removeDeletedItem(id, tabela) {
 }
 
 function getSyncQueue() {
-  try { return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]'); }
-  catch (e) { logErroSilencioso('getSyncQueue', e); return []; }
+  try {
+    let raw = localStorage.getItem(SYNC_QUEUE_KEY) || '[]';
+    if (typeof storageGetSecure === 'function' && raw.startsWith('bp1:')) {
+      raw = storageGetSecure(SYNC_QUEUE_KEY, '[]');
+    }
+    return JSON.parse(raw || '[]');
+  } catch (e) { logErroSilencioso('getSyncQueue', e); return []; }
 }
 
 function saveSyncQueue(q) {
-  try { localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(q)); }
-  catch (e) { logErroSilencioso('saveSyncQueue', e); }
+  try {
+    const str = JSON.stringify(q);
+    if (typeof storageSetSecure === 'function') storageSetSecure(SYNC_QUEUE_KEY, str);
+    else localStorage.setItem(SYNC_QUEUE_KEY, str);
+  } catch (e) { logErroSilencioso('saveSyncQueue', e); }
 }
 
 function atualizarIndicadorSync() {

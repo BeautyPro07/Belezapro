@@ -12,7 +12,7 @@
 }
 .login-brand { text-align: center; margin-bottom: 32px; }
 .login-brand .logo {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 2.2rem;
   color: var(--gold-dark);
   letter-spacing: -.02em;
@@ -147,7 +147,7 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
   color: var(--text-secondary);
 }
 .cart-total-row .ct-val {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.4rem;
   font-weight: 600;
   color: var(--gold-dark);
@@ -237,7 +237,7 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
 }
 .detalhe-total .label { font-weight: 600; font-size: .9rem; color: var(--text-secondary); }
 .detalhe-total .val {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.5rem;
   font-weight: 600;
   color: var(--gold-dark);
@@ -253,4 +253,45 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
   font-weight: 600;
   background: var(--gold-light);
   color: var(--gold-dark);
+}
+/* ===== NOVA VENDA — bloco "Adicionar Serviço/Produto" reorganizado ===== */
+/* CORREÇÃO (layout "caótico"): Serviço e Valor Fixo estavam espremidos
+   lado a lado numa coluna de 100px, com um rótulo de 0.55rem. Cada
+   campo passa a ter a sua própria linha, com o padrão .input-group já
+   usado em todo o resto da aplicação — elimina a sobreposição visual. */
+.venda-add-item-box {
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  padding: 14px 12px;
+  margin-bottom: 12px;
+}
+.venda-add-item-titulo {
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.venda-valor-wrap {
+  display: flex;
+  align-items: center;
+  background: var(--card-white);
+  border: 1.5px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+}
+.venda-valor-wrap .input-field {
+  border: none;
+  background: transparent;
+  padding: 10px 4px 10px 0;
+  font-weight: 700;
+  color: var(--green);
+  text-align: left;
+}
+.venda-valor-sufixo {
+  font-weight: 700;
+  color: var(--gold-dark);
+  font-size: .85rem;
+  flex-shrink: 0;
 }

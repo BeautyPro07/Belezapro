@@ -416,9 +416,9 @@ document.addEventListener('click', (e) => {
   if (fb) {
     if (fb.classList.contains('ia-copiar-btn')) {
       const texto = fb.closest('.ia-msg-bot')?.querySelector('.ia-msg-bot-corpo')?.textContent || '';
-      navigator.clipboard?.writeText(texto).then(() => toast('Resposta copiada', 'success')).catch(() => {});
+      navigator.clipboard?.writeText(texto).then(() => toast('Texto copiado', 'success')).catch(() => {});
     } else {
-      toast('Obrigado pelo feedback!', 'success');
+      toast('Feedback registado', 'success');
       fb.parentElement.querySelectorAll('.ia-feedback-btn').forEach(b => b.disabled = true);
       fb.style.opacity = '1';
       fb.style.fontWeight = '700';
@@ -509,7 +509,7 @@ function runTests() {
 }
 
 if (localStorage.getItem('bp_run_tests') === 'true') {
-  setTimeout(runTests, 1500);
+  // runTests sob demanda: window.runBeautyProTests()
   localStorage.removeItem('bp_run_tests');
 }
 window.runBeautyProTests = runTests;
