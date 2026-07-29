@@ -6,7 +6,7 @@
 /* ===== MENU DE ACÇÕES DA LINHA (⋮) ===== */
 .row-menu-btn {
   width: 32px;
-  height: 32px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   background: transparent;
@@ -158,28 +158,28 @@
 .pill {
   display: inline-block;
   padding: 2px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: .6rem;
   font-weight: 600;
   background: var(--gold-light);
   color: var(--gold-dark);
 }
-.pill.green { background: #E6F4EC; color: var(--green); }
+.pill.green { background: var(--green-50); color: var(--green); }
 /* ===== PILLS DA AGENDA (sem emojis, mais profissionais) ===== */
 .pill-success {
   background: var(--green);
-  color: #fff;
+  color: var(--card-white);
 }
 .pill-danger {
   background: var(--red);
-  color: #fff;
+  color: var(--card-white);
 }
 .pill-warning {
   background: var(--gold);
-  color: #fff;
+  color: var(--card-white);
 }
 .pill-gray {
-  background: var(--neutral-200, #E5E1D8);
+  background: var(--neutral-200);
   color: var(--text-muted);
 }
 /* ===== POPOVER DE FILTRO DA AGENDA ===== */
@@ -195,7 +195,7 @@
   right: 0;
   background: var(--card-white);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-strong);
   padding: 10px;
   z-index: 200;
@@ -216,7 +216,7 @@
   font-family: inherit;
   font-size: .68rem;
   font-weight: 600;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--card-white);
   color: var(--text-secondary);
   border: 1px solid var(--border-soft);
@@ -225,7 +225,7 @@
 }
 .agenda-periodo-filter.active {
   background: var(--gold);
-  color: #fff;
+  color: var(--card-white);
   border-color: var(--gold);
 }
 .agenda-periodo-filter--dia {

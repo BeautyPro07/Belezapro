@@ -71,9 +71,9 @@
   color: var(--text-secondary);
   transition: color 0.2s ease;
 }
-#add-despesa-btn svg { color: #1F2937; }
+#add-despesa-btn svg { color: var(--text-primary); }
 #ajustar-fundo-btn svg { color: var(--gold-dark); }
-#fecho-caixa-btn svg { color: #1F2937; }
+#fecho-caixa-btn svg { color: var(--text-primary); }
 
 #caixa-variacao {
   font-family: var(--font-sans);
@@ -114,7 +114,7 @@
   line-height: 1.1;
 }
 /* Utilitário opcional (relatório §2.5): refinamento "Graphite" para o Ticket Médio */
-.kpi-value.graphite { color: #1F2937; }
+.kpi-value.graphite { color: var(--text-primary); }
 .kpi-card.gold-accent::before {
   content: '';
   position: absolute;
@@ -218,7 +218,7 @@
   border-radius: var(--radius-sm);
 }
 .cliente-stat--gasto { color: var(--gold-dark); background: var(--gold-light); }
-.cliente-stat--novo { color: var(--green); background: #E6F4EC; }
+.cliente-stat--novo { color: var(--green); background: var(--green-50); }
 .list-item .action {
   font-weight: 700;
   font-size: .8rem;

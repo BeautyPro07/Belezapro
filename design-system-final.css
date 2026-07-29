@@ -1,55 +1,10 @@
 /* ====================================================================
    design-system-final.css — Quality Gate Internacional BeautyPro
    Espaçamento 8px · Botões Primary/Secondary/Ghost/Danger · Inputs · Cards
-   Identidade BeautyPro SW v12: Gold #D4AF37 · Gold-dark #A7872B · Ivory #F9F7F5 · Ink #17140F
+   Identidade BeautyPro SW v12: Gold var(--gold) · Gold-dark var(--gold-dark) · Ivory var(--warm-ivory) · Ink var(--text-primary)
    ==================================================================== */
 
-:root {
-  /* Identidade BeautyPro original restaurada */
-  --navy: #17140F;
-  --navy-soft: #2A241E;
-  --amber: #D4AF37;
-  --amber-dark: #A7872B;
-  --amber-light: #FBF6E9;
-  --ivory: #F9F7F5;
-  --ivory-deep: #F3F2EF;
-
-  /* Mapear tokens à identidade original (dourado) */
-  --gold: #D4AF37;
-  --gold-dark: #A7872B;
-  --gold-light: #FBF6E9;
-  --bg-soft: #F3F2EF;
-  --warm-ivory: #F9F7F5;
-  --text-primary: #17140F;
-  --ink: #14110F;
-
-  /* Espaçamento 8px */
-  --s1: 8px;
-  --s2: 16px;
-  --s3: 24px;
-  --s4: 32px;
-  --s5: 40px;
-  --s6: 48px;
-
-  /* Radius unificado */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-full: 9999px;
-
-  /* Tipografia */
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-md: 14px;
-  --fs-base: 15px;
-  --fs-lg: 17px;
-  --fs-xl: 20px;
-  --fs-2xl: 24px;
-
-  --shadow-card: 0 1px 2px rgba(31, 41, 55, 0.04), 0 1px 3px rgba(31, 41, 55, 0.06);
-  --shadow-modal: 0 8px 24px rgba(31, 41, 55, 0.12);
-  --transition: 150ms cubic-bezier(0.16, 1, 0.3, 1);
-}
+/* Tokens: ver base-variaveis.css (fonte única) */
 
 body {
   background: var(--bg-soft) !important;
@@ -96,7 +51,7 @@ body {
   width: 18px;
   height: 18px;
   border: 2px solid rgba(255,255,255,0.35);
-  border-top-color: #fff;
+  border-top-color: var(--card-white);
   border-radius: 50%;
   animation: bp-spin 0.65s linear infinite;
   top: 50%;
@@ -110,21 +65,21 @@ body {
 @keyframes bp-spin { to { transform: rotate(360deg); } }
 
 .btn-primary {
-  background: linear-gradient(135deg, #D4AF37, #A7872B);
-  color: #fff;
-  box-shadow: 0 2px 6px rgba(212, 175, 55, 0.22);
+  background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+  color: var(--card-white);
+  box-shadow: var(--shadow-gold);
 }
-.btn-primary:hover { background: linear-gradient(135deg, #C4A030, #967820); }
-.btn-primary:active { background: #8A6E1C; }
+.btn-primary:hover { background: linear-gradient(135deg, var(--gold-600), var(--gold-900)); }
+.btn-primary:active { background: var(--gold-900); }
 
 .btn-secondary {
-  background: #fff;
-  border-color: #E5E2DC;
+  background: var(--card-white);
+  border-color: var(--border-soft);
   color: var(--text-primary);
   box-shadow: none;
 }
 .btn-secondary:hover { background: var(--ivory-deep); }
-.btn-secondary:active { background: #EDEAE4; }
+.btn-secondary:active { background: var(--border-soft); }
 
 .btn-ghost {
   background: transparent;
@@ -135,14 +90,14 @@ body {
 
 .btn-danger,
 .btn-danger.btn-primary {
-  background: #B33A4A;
-  color: #fff;
+  background: var(--red);
+  color: var(--card-white);
 }
-.btn-danger:hover { background: #922F3B; }
+.btn-danger:hover { background: var(--red); }
 
 .btn-sm {
-  height: 36px;
-  min-height: 36px;
+  height: 40px;
+  min-height: 40px;
   padding: 0 14px;
   font-size: var(--fs-sm);
 }
@@ -156,8 +111,8 @@ body {
   padding: 0 var(--s2);
 }
 .btn-success {
-  background: #2C7A4D;
-  color: #fff;
+  background: var(--green);
+  color: var(--card-white);
   box-shadow: none;
 }
 
@@ -178,8 +133,8 @@ body {
   padding: 0 14px;
   font-family: var(--font-sans);
   font-size: var(--fs-base);
-  background: #fff;
-  border: 1.5px solid #E5E2DC;
+  background: var(--card-white);
+  border: 1.5px solid var(--border-soft);
   border-radius: var(--radius-md);
   color: var(--text-primary);
   transition: border-color var(--transition), background var(--transition);
@@ -187,9 +142,9 @@ body {
 }
 .input-field:focus {
   border-color: var(--gold);
-  background: #fff;
+  background: var(--card-white);
 }
-.input-field::placeholder { color: #9CA3AF; }
+.input-field::placeholder { color: var(--text-muted); }
 .input-field:disabled {
   background: var(--ivory-deep);
   color: var(--text-muted);
@@ -197,7 +152,7 @@ body {
 }
 .input-field.error,
 .input-field.has-error {
-  border-color: #B33A4A;
+  border-color: var(--red);
 }
 textarea.input-field {
   height: auto;
@@ -207,7 +162,7 @@ textarea.input-field {
 }
 select.input-field {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B6560' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 36px;
@@ -215,15 +170,15 @@ select.input-field {
 
 /* ===== CARDS ===== */
 .card {
-  background: #fff;
-  border: 1px solid #E5E2DC;
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   padding: var(--s2);
   box-shadow: var(--shadow-card);
 }
 .card-highlight {
   border-color: var(--gold);
-  background: linear-gradient(180deg, var(--gold-light) 0%, #fff 48%);
+  background: linear-gradient(180deg, var(--gold-light) 0%, var(--card-white) 48%);
 }
 
 /* ===== MODAIS ===== */
@@ -261,13 +216,13 @@ select.input-field {
 /* ===== NAV ===== */
 .bottom-nav {
   background: rgba(255,255,255,0.96);
-  border-top: 1px solid #E5E2DC;
+  border-top: 1px solid var(--border-soft);
   height: 64px;
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 .nav-item {
-  color: #9CA3AF;
-  font-size: 10px;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
   font-weight: 600;
   gap: 2px;
   min-height: 48px;
@@ -288,7 +243,7 @@ select.input-field {
 /* ===== HEADER ===== */
 .app-header {
   background: rgba(248, 247, 244, 0.92);
-  border-bottom: 1px solid #E5E2DC;
+  border-bottom: 1px solid var(--border-soft);
   padding: 12px var(--s2);
 }
 .app-header .logo {
@@ -316,7 +271,7 @@ select.input-field {
 .list-item {
   padding: 12px var(--s2);
   gap: 12px;
-  border-bottom: 1px solid #F0EDE8;
+  border-bottom: 1px solid var(--border-soft);
   align-items: center;
 }
 .list-item .avatar {
@@ -345,8 +300,8 @@ select.input-field {
 .empty-state {
   padding: var(--s4) var(--s2);
   text-align: center;
-  background: #fff;
-  border: 1px dashed #E5E2DC;
+  background: var(--card-white);
+  border: 1px dashed var(--border-soft);
   border-radius: var(--radius-md);
 }
 .empty-state p {
@@ -357,15 +312,15 @@ select.input-field {
 .empty-state svg {
   width: 40px;
   height: 40px;
-  stroke: #D1D5DB;
+  stroke: var(--gold);
   margin: 0 auto 12px;
   display: block;
 }
 
 /* ===== KPI ===== */
 .kpi-card {
-  background: #fff;
-  border: 1px solid #E5E2DC;
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   padding: 14px;
   box-shadow: var(--shadow-card);
@@ -385,8 +340,8 @@ select.input-field {
 
 /* ===== TOAST ===== */
 .toast {
-  background: #17140F;
-  color: #fff;
+  background: var(--text-primary);
+  color: var(--card-white);
   border-radius: var(--radius-md);
   padding: 12px 18px;
   font-size: var(--fs-sm);
@@ -394,36 +349,36 @@ select.input-field {
   box-shadow: var(--shadow-modal);
   bottom: 88px;
 }
-.toast.success { background: #166534; }
-.toast.error { background: #B33A4A; }
-.toast.warning { background: #A7872B; }
+.toast.success { background: var(--green); }
+.toast.error { background: var(--red); }
+.toast.warning { background: var(--gold-dark); }
 
 /* ===== FILTER / POPOVER ===== */
 .agenda-filter-popover {
   border-radius: var(--radius-md);
-  border: 1px solid #E5E2DC;
+  border: 1px solid var(--border-soft);
   box-shadow: var(--shadow-modal);
   padding: 10px;
-  background: #fff;
+  background: var(--card-white);
 }
 .agenda-periodo-filter {
   height: 32px;
   font-size: var(--fs-xs);
   font-weight: 600;
   border-radius: var(--radius-sm);
-  border: 1px solid #E5E2DC;
-  background: #fff;
+  border: 1px solid var(--border-soft);
+  background: var(--card-white);
   color: var(--text-secondary);
 }
 .agenda-periodo-filter.active {
   background: var(--gold);
   border-color: var(--gold);
-  color: #fff;
+  color: var(--card-white);
 }
 
 /* ===== PILLS ===== */
 .pill {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -435,16 +390,16 @@ select.input-field {
   color: var(--gold-dark);
 }
 .pill-success {
-  background: #DCFCE7;
-  color: #166534;
+  background: var(--green-50);
+  color: var(--green);
 }
 .pill-danger {
-  background: #FEE2E2;
-  color: #B33A4A;
+  background: var(--red-50);
+  color: var(--red);
 }
 .pill-gray {
-  background: #F3F4F6;
-  color: #6B7280;
+  background: var(--bg-soft);
+  color: var(--text-muted);
 }
 
 /* ===== FAB ===== */
@@ -452,8 +407,8 @@ select.input-field {
   width: 52px;
   height: 52px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #D4AF37, #A7872B);
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.28);
+  background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+  box-shadow: var(--shadow-gold);
   bottom: 88px;
   right: 16px;
 }
@@ -477,7 +432,7 @@ select.input-field {
 
 /* Skeleton loading */
 .skeleton {
-  background: linear-gradient(90deg, #F3F2EF 25%, #EDEAE4 50%, #F3F2EF 75%);
+  background: linear-gradient(90deg, var(--bg-soft) 25%, var(--border-soft) 50%, var(--bg-soft) 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.2s ease-in-out infinite;
   border-radius: var(--radius-sm);

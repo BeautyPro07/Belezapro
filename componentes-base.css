@@ -26,10 +26,10 @@
 .btn:disabled { opacity: .5; pointer-events: none; }
 .btn-primary {
   background: linear-gradient(135deg, var(--gold), var(--gold-dark));
-  color: #fff;
-  box-shadow: 0 2px 6px rgba(212, 175, 55, .22);
+  color: var(--card-white);
+  box-shadow: var(--shadow-gold);
 }
-.btn-primary:active { box-shadow: 0 2px 8px rgba(212, 175, 55, .12); }
+.btn-primary:active { box-shadow: var(--shadow-gold); }
 .btn-secondary {
   background: var(--card-white);
   border: 1px solid var(--border-soft);
@@ -39,22 +39,22 @@
 .btn-secondary:active { background: var(--bg-soft); }
 .btn-success {
   background: var(--green);
-  color: #fff;
+  color: var(--card-white);
   box-shadow: 0 4px 12px rgba(44, 122, 77, .2);
 }
 .btn-danger {
   background: var(--red);
-  color: #fff;
+  color: var(--card-white);
 }
 .btn-sm {
   padding: 6px 16px;
   font-size: .75rem;
-  min-height: 36px;
+  min-height: 40px;
   height: 40px;
 }
 .btn-block { width: 100%; justify-content: center; }
 
-.btn-xs { height: 32px; padding: 0 12px; font-size: 12px; min-height: 32px; }
+.btn-xs { height: 40px; padding: 0 12px; font-size: 12px; min-height: 40px; }
 .btn-lg { height: 60px; padding: 0 32px; font-size: 16px; min-height: 60px; }
 .btn-xl { height: 68px; padding: 0 40px; font-size: 18px; min-height: 68px; }
 
@@ -70,13 +70,13 @@
   width: 22px;
   height: 22px;
   border: 2.5px solid rgba(255,255,255,0.3);
-  border-top-color: #fff;
+  border-top-color: var(--card-white);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
   top: calc(50% - 11px);
   left: calc(50% - 11px);
 }
-.btn-success.is-loading::after { border-top-color: #fff; }
+.btn-success.is-loading::after { border-top-color: var(--card-white); }
 .btn-secondary.is-loading::after { border-top-color: var(--text-primary); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -100,7 +100,7 @@
 
 /* Ao tocar, o fundo escurece ligeiramente e a borda dourada fica mais forte */
 .venda-cta-bar:active {
-  background: #F3F0EC;
+  background: var(--bg-soft);
   border-bottom-color: var(--gold-dark);
   transform: translateY(1px);
 }
@@ -115,10 +115,10 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #FFFFFF;
+  color: var(--card-white);
   font-size: 1.4rem;
   font-weight: 300;
-  box-shadow: 0 2px 6px rgba(212, 175, 55, 0.2);
+  box-shadow: var(--shadow-gold);
   transition: transform 0.15s ease;
 }
 

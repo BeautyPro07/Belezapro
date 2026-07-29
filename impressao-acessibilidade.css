@@ -9,7 +9,7 @@
   * { visibility: hidden !important; }
   #recibo-print, #recibo-print * { visibility: visible !important; }
   @page { size: 58mm auto; margin: 0; }
-  body { margin: 0; padding: 0; background: #fff; }
+  body { margin: 0; padding: 0; background: var(--card-white); }
   #recibo-print {
     visibility: visible !important;
     display: block !important;
@@ -22,7 +22,7 @@
     font-size: 8pt;
     line-height: 1.35;
     color: #000;
-    background: #fff;
+    background: var(--card-white);
     word-break: break-word;
     overflow: hidden;
   }
@@ -58,9 +58,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 /* ===== CORREÇÃO DE CONTRASTE ===== */
 #kpi-revenue { color: var(--gold-dark); }
 .revenue-detail-total { color: var(--gold-dark); }
-.plano-pro { background: var(--gold-light); color: #836719; }
+.plano-pro { background: var(--gold-light); color: var(--gold-900); }
 ::placeholder {
-  color: var(--neutral-500, #8C7E72) !important;
+  color: var(--neutral-500) !important;
   opacity: 1;
 }
 

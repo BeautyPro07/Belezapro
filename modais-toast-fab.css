@@ -35,7 +35,7 @@
   width: 36px;
   height: 4px;
   background: var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   margin: 0 auto 16px;
 }
 .modal-title {
@@ -109,11 +109,11 @@
 }
 #modal-confirm .confirm-actions .btn {
   flex: 1;
-  min-height: 36px;
+  min-height: 40px;
   padding: 6px 12px;
   font-size: 0.78rem;
   font-weight: 600;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   text-align: center;
   justify-content: center;
 }
@@ -127,7 +127,7 @@
 }
 #modal-confirm .confirm-actions .btn-danger {
   background: var(--red);
-  color: #fff;
+  color: var(--card-white);
   border: none;
 }
 #modal-confirm .confirm-actions .btn-danger:active {
@@ -157,9 +157,9 @@
   left: 50%;
   transform: translateX(-50%) translateY(20px);
   background: var(--text-primary);
-  color: #fff;
+  color: var(--card-white);
   padding: 12px 24px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: .8rem;
   font-weight: 600;
   z-index: 3000;
@@ -176,7 +176,7 @@
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.success { background: var(--green); }
 .toast.error { background: var(--red); }
-.toast.warning { background: #A7872B; }
+.toast.warning { background: var(--gold-dark); }
 
 /* ===== FAB ===== */
 .fab {
@@ -189,9 +189,9 @@
   height: 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--gold), var(--gold-dark));
-  color: #fff;
+  color: var(--card-white);
   border: none;
-  box-shadow: 0 2px 8px rgba(212, 175, 55, .22);
+  box-shadow: var(--shadow-gold);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -214,10 +214,10 @@
   inset: -8px;
   z-index: -1;
 }
-.fab:active { opacity: .85; box-shadow: 0 4px 12px rgba(212, 175, 55, .18); }
+.fab:active { opacity: .85; box-shadow: var(--shadow-gold); }
 /* Forçar botões do fecho a serem redondos e magros */
 #modal-fecho button {
-  border-radius: 9999px !important;
+  border-radius: var(--radius-full) !important;
   padding: 4px 14px !important;
   font-size: 0.7rem !important;
   height: 30px !important;

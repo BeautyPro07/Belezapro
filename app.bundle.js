@@ -2077,6 +2077,12 @@ async function registarVenda(dados) {
 
     const descricao = dados.itens.map(i => i.nome).join(', ');
     const id = uuid();
+    let comissaoGerada = 0;
+    try {
+      if (typeof getTaxaComissao === 'function' && typeof calcularComissao === 'function') {
+        comissaoGerada = calcularComissao(total, getTaxaComissao(dados.profissional_id));
+      }
+    } catch (e) {}
     const mov = {
       id,
       tipo: 'venda',
@@ -2092,6 +2098,7 @@ async function registarVenda(dados) {
         subtotal: Number(i.subtotal) || 0
       })),
       metodoPagamento: dados.metodoPagamento || 'Numerário',
+      comissao_gerada: comissaoGerada,
       data: hoje(),
       hora: horaAgora(),
       reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
@@ -3277,7 +3284,14 @@ function renderProfissionais() {
     return;
   }
   const profissionaisOrdenados = [...state.profissionais].sort((a, b) => a.nome.localeCompare(b.nome));
-  cont.innerHTML = profissionaisOrdenados.map(p => `
+  cont.innerHTML = profissionaisOrdenados.map(p => {
+    let taxa = 0, saldo = 0, barra = '';
+    try {
+      taxa = Number(p.taxa_comissao) || 0;
+      if (typeof getSaldoComissao === 'function') saldo = getSaldoComissao(p.id) || 0;
+      if (typeof renderBarraMeta === 'function') barra = renderBarraMeta(p.id) || '';
+    } catch (e) {}
+    return `
     <div class="list-item" data-prof-id="${p.id}" style="cursor:pointer;">
       <div class="avatar">${p.nome.charAt(0).toUpperCase()}</div>
       <div class="info">
@@ -3286,7 +3300,10 @@ function renderProfissionais() {
         <div class="cliente-stats">
           ${p.idade ? `<span class="cliente-stat">${p.idade} anos</span>` : ''}
           ${p.contacto ? `<span class="cliente-stat">${escHtml(p.contacto)}</span>` : ''}
+          ${taxa > 0 ? `<span class="cliente-stat">Comissão ${taxa}%</span>` : ''}
         </div>
+        ${taxa > 0 || saldo > 0 ? `<div style="font-size:.68rem;color:var(--text-secondary);margin-top:4px;">Comissão acumulada: <strong style="color:var(--gold-dark,var(--gold));">${fmtKz(saldo)}</strong></div>` : ''}
+        ${barra}
       </div>
       <div class="actions">
         <button class="row-menu-btn" data-action="row-menu" data-tipo="profissional" data-id="${p.id}" data-role="admin" aria-label="Mais ações" aria-haspopup="menu">
@@ -3294,7 +3311,8 @@ function renderProfissionais() {
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function renderServicos() {
@@ -3886,6 +3904,7 @@ function abrirDetalheVenda(id) {
       <div class="detalhe-meta-row"><span class="label">Profissional</span><span class="val">${escHtml(nomeProf)}</span></div>
       <div class="detalhe-meta-row"><span class="label">Data / Hora</span><span class="val">${venda.data} · ${venda.hora}</span></div>
       <div class="detalhe-meta-row"><span class="label">Pagamento</span><span class="val"><span class="pagamento-badge">${escHtml(mp)}</span></span></div>
+      ${Number(venda.comissao_gerada) > 0 ? ('<div class="detalhe-meta-row"><span class="label">Comissão</span><span class="val" style="color:var(--gold-dark,var(--gold));font-weight:600;">' + fmtKz(venda.comissao_gerada) + '</span></div>') : ''}
     </div>
     <div>${itensHtml}</div>
     <div class="detalhe-total"><span class="label">Total</span><span class="val">${fmtKz(venda.valor)}</span></div>`;
@@ -4654,10 +4673,14 @@ function openEditProf(id) {
   document.getElementById('prof-bi').value = p.numeroBI || '';
   document.getElementById('prof-morada').value = p.morada || '';
   document.getElementById('prof-contacto').value = p.contacto || '';
+  const taxaEl = document.getElementById('prof-taxa');
+  const metaEl = document.getElementById('prof-meta');
+  if (taxaEl) taxaEl.value = p.taxa_comissao != null ? p.taxa_comissao : 0;
+  if (metaEl) metaEl.value = p.meta_mensal != null ? p.meta_mensal : '';
   popularEspecialidadesProf(p.especialidade || '');
   document.getElementById('prof-id').value = id;
   // modo edição
-  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp'].forEach(fid => {
+  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
     if (el) { el.disabled = false; el.readOnly = false; el.style.opacity = '1'; }
   });
@@ -4678,9 +4701,13 @@ function abrirDetalheProfView(id) {
   document.getElementById('prof-bi').value = p.numeroBI || '';
   document.getElementById('prof-morada').value = p.morada || '';
   document.getElementById('prof-contacto').value = p.contacto || '';
+  const taxaElV = document.getElementById('prof-taxa');
+  const metaElV = document.getElementById('prof-meta');
+  if (taxaElV) taxaElV.value = p.taxa_comissao != null ? p.taxa_comissao : 0;
+  if (metaElV) metaElV.value = p.meta_mensal != null ? p.meta_mensal : '';
   popularEspecialidadesProf(p.especialidade || '');
   document.getElementById('prof-id').value = id;
-  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp'].forEach(fid => {
+  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
     if (el) { el.disabled = true; el.style.opacity = '0.85'; }
   });
@@ -4733,9 +4760,12 @@ document.getElementById('prof-criar-servico-btn')?.addEventListener('click', asy
 document.getElementById('add-prof-btn')?.addEventListener('click', () => {
   editProfId = null;
   document.getElementById('prof-modal-title').textContent = 'Novo Profissional';
-  ['prof-nome', 'prof-idade', 'prof-data-contratual', 'prof-bi', 'prof-morada', 'prof-contacto', 'prof-id'].forEach(fid => {
+  ['prof-nome', 'prof-idade', 'prof-data-contratual', 'prof-bi', 'prof-morada', 'prof-contacto', 'prof-id', 'prof-taxa', 'prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
-    if (el) { el.value = ''; el.disabled = false; el.readOnly = false; el.style.opacity = '1'; }
+    if (el) {
+      el.value = (fid === 'prof-taxa') ? '0' : '';
+      el.disabled = false; el.readOnly = false; el.style.opacity = '1';
+    }
   });
   popularEspecialidadesProf('');
   const saveBtn = document.getElementById('modal-prof-save');
@@ -4767,6 +4797,14 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     return;
   }
 
+  const taxaRaw = document.getElementById('prof-taxa') ? document.getElementById('prof-taxa').value : '0';
+  const metaRaw = document.getElementById('prof-meta') ? document.getElementById('prof-meta').value : '';
+  const taxaComissao = Math.min(100, Math.max(0, parseFloat(taxaRaw) || 0));
+  let metaMensal = null;
+  if (metaRaw !== '' && metaRaw != null) {
+    const nMeta = parseInt(metaRaw, 10);
+    if (!isNaN(nMeta) && nMeta >= 0) metaMensal = nMeta;
+  }
   const dados = {
     nome,
     idade: parseInt(idade, 10),
@@ -4774,7 +4812,9 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     especialidade,
     numeroBI: numeroBI || '',
     morada,
-    contacto: contacto || ''
+    contacto: contacto || '',
+    taxa_comissao: taxaComissao,
+    meta_mensal: metaMensal
   };
 
   if (id) {
@@ -4788,7 +4828,7 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
 });
 
 document.getElementById('modal-prof-cancel')?.addEventListener('click', () => {
-  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp'].forEach(fid => {
+  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
     if (el) { el.disabled = false; el.style.opacity = '1'; }
   });
@@ -4987,7 +5027,26 @@ if (vendaSaveBtn) {
     if (cartItems.length === 0) { toast('Adicione pelo menos um serviço', 'error'); return; }
     const cliente = document.getElementById('venda-cliente').value || 'Anónimo';
     const profissionalId = document.getElementById('venda-profissional').value;
-    const metodoPagamento = document.getElementById('venda-pagamento').value;
+    let metodoPagamento = document.getElementById('venda-pagamento').value;
+    let pagamentos = null;
+
+    // F13 — pagamento dividido
+    if (metodoPagamento === '__split__') {
+      const split = (window.BPFinance && window.BPFinance.lerPagamentosSplit)
+        ? window.BPFinance.lerPagamentosSplit()
+        : null;
+      const totalCart = cartItems.reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
+      if (!split || !split.list.length) {
+        toast('Indique os valores do pagamento dividido.', 'error');
+        return;
+      }
+      if (Math.abs(split.sum - totalCart) > 1) {
+        toast('A soma dos pagamentos (' + Math.round(split.sum) + ' Kz) deve igualar o total (' + Math.round(totalCart) + ' Kz).', 'error');
+        return;
+      }
+      pagamentos = split.list;
+      metodoPagamento = split.list.map(p => p.metodo).join(' + ');
+    }
     
     // Buscar o nome do profissional
     const profObj = state.profissionais.find(p => p.id === profissionalId);
@@ -5006,7 +5065,8 @@ if (vendaSaveBtn) {
         profissional: profissionalNome,
         profissional_id: profissionalId,
         itens: [...cartItems],
-        metodoPagamento
+        metodoPagamento,
+        pagamentos
       });
       if (idVenda) {
         closeModal('modal-venda');

@@ -64,16 +64,16 @@
   text-transform: uppercase;
   letter-spacing: .04em;
 }
-.app-header .plano-trial { background: #FEF6E0; color: #A7872B; }
-.app-header .plano-starter { background: #E6F4EC; color: #2C7A4D; }
-.app-header .plano-pro { background: var(--gold-light); color: #836719; }
-.app-header .plano-premium { background: linear-gradient(135deg, var(--gold), var(--gold-dark)); color: #fff; }
+.app-header .plano-trial { background: var(--gold-light); color: var(--gold-dark); }
+.app-header .plano-starter { background: var(--green-50); color: var(--green); }
+.app-header .plano-pro { background: var(--gold-light); color: var(--gold-900); }
+.app-header .plano-premium { background: linear-gradient(135deg, var(--gold), var(--gold-dark)); color: var(--card-white); }
 .app-header .trial-countdown {
   font-size: .55rem;
   color: var(--text-muted);
   background: var(--card-white);
   padding: 1px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-soft);
   white-space: nowrap;
 }
@@ -89,7 +89,7 @@
   gap: 6px;
   background: var(--card-white);
   padding: 4px 12px 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-soft);
   font-size: .65rem;
   font-weight: 600;
@@ -107,8 +107,8 @@
 #menu-btn:active { background: rgba(0,0,0,.08); }
 .offline-banner {
   display: none;
-  background: #FEF6E0;
-  color: #A7872B;
+  background: var(--gold-light);
+  color: var(--gold-dark);
   text-align: center;
   padding: 8px 16px;
   font-size: .7rem;
@@ -193,12 +193,12 @@
   right: 50%;
   transform: translateX(calc(50% + 16px));
   background: var(--gold);
-  color: #fff;
+  color: var(--card-white);
   font-size: .55rem;
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 4px;
-  border: 2px solid #fff;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--card-white);
   min-width: 18px;
   text-align: center;
   display: none;
