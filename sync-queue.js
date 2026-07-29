@@ -8,8 +8,10 @@
 const DELETED_KEY = 'bp_deleted_items';
 
 function getDeletedItems() {
-  try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '[]'); }
-  catch (e) { logErroSilencioso('getDeletedItems', e); return []; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(DELETED_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) { logErroSilencioso('getDeletedItems', e); return []; }
 }
 
 function saveDeletedItems(items) {
@@ -18,14 +20,37 @@ function saveDeletedItems(items) {
 }
 
 function addDeletedItem(id, tabela) {
-  const items = getDeletedItems();
-  if (!items.find(i => i.id === id && i.tabela === tabela)) {
+  if (!id || !tabela) return;
+  const items = pruneDeletedItems(getDeletedItems());
+  const existing = items.find(i => i.id === id && i.tabela === tabela);
+  if (existing) {
+    existing.ts = Date.now();
+  } else {
     items.push({ id, tabela, ts: Date.now() });
-    saveDeletedItems(items);
   }
+  // Cap de segurança (DoS local / storage overflow)
+  const MAX_TOMBSTONES = 2000;
+  saveDeletedItems(items.slice(-MAX_TOMBSTONES));
+}
+
+function touchDeletedItem(id, tabela) {
+  addDeletedItem(id, tabela);
+}
+
+function isDeletedItem(id, tabela) {
+  if (!id) return false;
+  return pruneDeletedItems(getDeletedItems()).some(i => i.id === id && (!tabela || i.tabela === tabela));
+}
+
+/** Tombstones expiram após 30 dias (ISO / práticas de sync offline). */
+function pruneDeletedItems(items) {
+  const TTL = 30 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return (items || []).filter(i => i && i.id && (now - (i.ts || 0)) < TTL);
 }
 
 function removeDeletedItem(id, tabela) {
+  // Remoção explícita apenas em cenários de undelete administrativo.
   const items = getDeletedItems().filter(i => !(i.id === id && i.tabela === tabela));
   saveDeletedItems(items);
 }
@@ -98,9 +123,16 @@ async function flushSyncQueue() {
 
     try {
       if (op.operacao === 'delete') {
+        // Tombstone permanece na lista negra (TTL) para impedir reimportação
+        // em pulls concurrentes multi-dispositivo (padrão tombstone/eventual consistency).
         await supabaseDelete(op.tabela, op.payload.id);
-        removeDeletedItem(op.payload.id, op.tabela);
+        // NÃO chamar removeDeletedItem aqui — só após TTL ou purge remoto confirmado.
+        if (typeof touchDeletedItem === 'function') touchDeletedItem(op.payload.id, op.tabela);
       } else {
+        // Nunca fazer upsert de item na lista negra
+        if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload?.id, op.tabela)) {
+          continue;
+        }
         await supabaseUpsert(op.tabela, op.payload);
       }
     } catch (err) {

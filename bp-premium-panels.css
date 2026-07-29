@@ -643,3 +643,152 @@
   flex-shrink: 0;
 }
 .bp-gal-actions { margin: 8px 0 4px; }
+
+
+/* --- Agenda cards (paridade list-item) --- */
+#agenda-full-list {
+  padding: 4px 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+#agenda-full-list > div[style*="font-weight:600"] {
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6B6560) !important;
+  padding: 16px 4px 8px !important;
+}
+.bp-ag-card.list-item {
+  align-items: flex-start;
+  padding: 14px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--border-soft, #DCD5C9);
+  border-radius: 12px;
+  background: var(--card-white, #fff);
+  gap: 12px;
+  border-bottom: 1px solid var(--border-soft, #DCD5C9);
+  box-shadow: 0 1px 2px rgba(23, 20, 15, 0.04);
+}
+.bp-ag-card.list-item:active {
+  background: var(--bg-soft, #F3F2EF);
+}
+.bp-ag-avatar.avatar {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.bp-ag-info {
+  flex: 1;
+  min-width: 0;
+}
+.bp-ag-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.bp-ag-time {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary, #5C564E);
+  letter-spacing: -0.02em;
+}
+.bp-ag-status {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.bp-ag-st-ok {
+  background: var(--green-50, #E6F4EC);
+  color: var(--green, #2C7A4D);
+}
+.bp-ag-st-no {
+  background: var(--red-50, #FDE8E8);
+  color: var(--red, #B33A4A);
+}
+.bp-ag-st-off {
+  background: var(--bg-soft, #F3F2EF);
+  color: var(--text-muted, #6B6560);
+}
+.bp-ag-st-agendado {
+  background: var(--gold-50, #FBF6E9);
+  color: var(--gold-dark, #A7872B);
+}
+.bp-ag-card .title {
+  font-size: 0.9375rem !important;
+  font-weight: 600 !important;
+  color: var(--text-primary, #17140F) !important;
+  line-height: 1.3;
+}
+.bp-ag-card .sub {
+  font-size: 0.8125rem !important;
+  color: var(--text-secondary, #5C564E) !important;
+  margin-top: 2px;
+}
+.bp-ag-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.bp-ag-prof {
+  font-size: 0.75rem;
+  color: var(--text-muted, #6B6560);
+}
+.bp-ag-price {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary, #17140F);
+}
+.bp-ag-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft, #DCD5C9);
+}
+.bp-ag-btn-primary {
+  flex: 1;
+  background: var(--gold, #D4AF37) !important;
+  border-color: var(--gold, #D4AF37) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  min-height: 40px;
+}
+.bp-ag-btn-primary:hover {
+  background: var(--gold-dark, #A7872B) !important;
+}
+.bp-ag-btn-cancel {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border-radius: 8px !important;
+  padding: 0 14px !important;
+  font-weight: 500 !important;
+}
+
+/* legacy timeline hide when using cards inside same list — keep date headers */
+#agenda-full-list .timeline-item {
+  display: flex;
+  gap: 12px;
+  padding: 14px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-soft, #DCD5C9);
+  border-radius: 12px;
+  background: var(--card-white, #fff);
+  border-bottom: 1px solid var(--border-soft, #DCD5C9);
+}

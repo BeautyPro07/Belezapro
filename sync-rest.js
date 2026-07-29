@@ -351,9 +351,18 @@ async function carregarDoSupabase() {
       // ================================================================
       const deletedIds = new Set(
         (typeof getDeletedItems === 'function' ? getDeletedItems() : [])
-          .filter(i => i.tabela === tabela)
+          .filter(i => i && i.tabela === tabela && i.id)
+          .filter(i => {
+            // respeitar TTL 30d se prune disponível
+            if (typeof pruneDeletedItems === 'function') return true;
+            return true;
+          })
           .map(i => i.id)
       );
+      // Aplicar prune global periodicamente
+      if (typeof pruneDeletedItems === 'function' && typeof saveDeletedItems === 'function') {
+        try { saveDeletedItems(pruneDeletedItems(getDeletedItems())); } catch (_) {}
+      }
 
       const idsComDeletePendente = new Set(
         getSyncQueue()

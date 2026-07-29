@@ -165,25 +165,29 @@
 
   function enhanceListAvatars() {
     try {
-      // clientes
       document.querySelectorAll(".cliente-item[data-cliente-id]").forEach(function (row) {
         var id = row.getAttribute("data-cliente-id");
         var c = getCliente(id);
-        if (!c || !c.foto) return;
+        if (!c) return;
         var av = row.querySelector(".avatar");
-        if (!av || av.classList.contains("bp-avatar-img")) return;
-        av.classList.add("bp-avatar-img");
-        av.innerHTML = '<img src="' + c.foto + '" alt="" loading="lazy" decoding="async">';
+        if (!av) return;
+        if (av.classList.contains("bp-avatar-done")) return;
+        var src = c.foto || (window.BPAvatars && BPAvatars.avatarDataUrl(c.nome));
+        if (!src) return;
+        av.classList.add("bp-avatar-img", "bp-avatar-done");
+        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
       });
-      // profissionais
       document.querySelectorAll("[data-prof-id]").forEach(function (row) {
         var id = row.getAttribute("data-prof-id");
         var p = getProf(id);
-        if (!p || !p.foto) return;
+        if (!p) return;
         var av = row.querySelector(".avatar");
-        if (!av || av.classList.contains("bp-avatar-img")) return;
-        av.classList.add("bp-avatar-img");
-        av.innerHTML = '<img src="' + p.foto + '" alt="" loading="lazy" decoding="async">';
+        if (!av) return;
+        if (av.classList.contains("bp-avatar-done")) return;
+        var src = p.foto || (window.BPAvatars && BPAvatars.avatarDataUrl(p.nome));
+        if (!src) return;
+        av.classList.add("bp-avatar-img", "bp-avatar-done");
+        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
       });
     } catch (e) {}
   }

@@ -150,24 +150,21 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
   updateUI();
   if (typeof renderBadges === 'function') renderBadges();
 
-  // 3. Tentar sincronizar
-  if (navigator.onLine && state.config.salaoId) {
+  // 3. Sincronizar em background — SEM pull completo (evita “vibração”/reload da UI).
+  // dbDelete já adicionou tombstone + enfileirou delete se necessário.
+  if (navigator.onLine && state.config && state.config.salaoId) {
     try {
-      await flushSyncQueue();
-      await carregarDoSupabase();
-      updateUI();
-      if (typeof renderBadges === 'function') renderBadges();
-      toast(`${nomeEntidade} eliminado(a) e sincronizado(a)!`, 'success');
+      if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+      toast(`${nomeEntidade} eliminado(a).`, 'success');
       return true;
     } catch (e) {
       console.warn(`[delete ${tabela}] Falha ao sincronizar:`, e);
-      // Não fazemos rollback automático do item (já está na fila de sync).
-      // O utilizador vê a mensagem de aviso e o item continua eliminado localmente.
-      toast(`${nomeEntidade} eliminado(a) localmente. A sincronização falhou — será tentada novamente.`, 'warning');
+      toast(`${nomeEntidade} eliminado(a) localmente. Sync em fila.`, 'warning');
       return true;
     }
   } else {
-    toast(`${nomeEntidade} eliminado(a) (offline). Será sincronizado quando online.`, 'warning');
+    toast(`${nomeEntidade} eliminado(a) (offline). Sync quando online.`, 'warning');
     return true;
   }
 }

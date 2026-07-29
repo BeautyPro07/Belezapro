@@ -114,9 +114,9 @@ document.addEventListener('DOMContentLoaded', async function init() {
     if (!(navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId)) return;
     const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
     const pendentes = fila.filter(op => op.failed !== true).length;
-    // Skip pull pesado se nada pendente e último pull < 40s (throttle)
+    // Skip pull pesado se nada pendente e último pull < 90s (throttle)
     const now = Date.now();
-    if (pendentes === 0 && window._lastSupabasePull && (now - window._lastSupabasePull) < 40000) {
+    if (pendentes === 0 && window._lastSupabasePull && (now - window._lastSupabasePull) < 90000) {
       return;
     }
     carregarDoSupabase().then(atualizado => {
