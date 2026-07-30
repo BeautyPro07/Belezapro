@@ -26,60 +26,187 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
   logoutVoluntarioEmCurso = false;
 });
 
+/** Timeout de rede no boot — nunca bloquear a UI offline-first. */
+function bpWithTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_' + (label || 'op'))), ms))
+  ]);
+}
+
+function bpHideSplashNow() {
+  try {
+    const splash = document.getElementById('splash-screen');
+    if (splash && splash.style.display !== 'none') {
+      splash.style.opacity = '0';
+      setTimeout(function () { splash.style.display = 'none'; }, 280);
+    }
+  } catch (_) {}
+}
+
+async function bpLoadSalaoIdLocal() {
+  try {
+    if (typeof dbGetAll !== 'function') return null;
+    const configs = await dbGetAll('config');
+    const row = (configs || []).find(c => c.key === 'salaoId' || c.id === 'salaoId');
+    return row && row.value ? row.value : null;
+  } catch (_) { return null; }
+}
+
+/**
+ * Boot offline-first:
+ * 1) Sessão local com timeout curto
+ * 2) Abrir app com dados IndexedDB
+ * 3) Rede (perfil/config/pull) em background — sem bloquear
+ */
 async function checkSession() {
   try {
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session) {
-      document.getElementById('login-view').style.display = 'none';
-      document.getElementById('app-view').style.display = 'flex';
-      const { data: profile, error: profileError } = await supabaseClient
-        .from('profiles')
-        .select('salao_id, role, nome')
-        .eq('user_id', session.user.id)
-        .single();
-      if (profileError) {
-        toast('Perfil não encontrado. Contacte o administrador.', 'error');
-        document.getElementById('login-view').style.display = 'flex';
-        document.getElementById('app-view').style.display = 'none';
+    let session = null;
+    try {
+      const res = await bpWithTimeout(
+        supabaseClient.auth.getSession(),
+        2500,
+        'getSession'
+      );
+      session = res && res.data ? res.data.session : null;
+    } catch (e) {
+      console.warn('[boot] getSession timeout/offline — a usar cache local', e && e.message);
+      session = null;
+      try {
+        const { data } = await supabaseClient.auth.getSession();
+        session = data && data.session;
+      } catch (_) {}
+    }
+
+    // Sem sessão de rede: tentar salão local (último login)
+    if (!session) {
+      const localSalao = await bpLoadSalaoIdLocal();
+      if (localSalao) {
+        state.config.salaoId = localSalao;
+        document.getElementById('login-view').style.display = 'none';
+        document.getElementById('app-view').style.display = 'flex';
+        try { await loadState(false); } catch (e) { console.warn('[boot] loadState local', e); }
+        if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
+        if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+        bpHideSplashNow();
+        if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+        // Tentar revalidar sessão em background se online
+        if (navigator.onLine) {
+          setTimeout(function () {
+            if (typeof bpSilentPull === 'function') bpSilentPull(true);
+          }, 2000);
+        }
         return;
       }
-      state.config.salaoId  = profile.salao_id;
-      state.config.storeName = profile.nome || 'Salão';
-      state.config.userRole  = profile.role;
-      const trocouDeSalao = await detetarTrocaDeSalao(profile.salao_id);
-      aplicarPermissoes();
-      await sincronizarConfigDoServidor();
-      await loadState(trocouDeSalao);
-      if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
-      if (navigator.onLine) {
-        atualizarIndicadorSync();
+      bpHideSplashNow();
+      return; // fica no login
+    }
+
+    // Com sessão: mostrar app IMEDIATAMENTE com dados locais
+    document.getElementById('login-view').style.display = 'none';
+    document.getElementById('app-view').style.display = 'flex';
+
+    let profile = null;
+    let profileError = null;
+    if (navigator.onLine) {
+      try {
+        const pr = await bpWithTimeout(
+          supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
+          3000,
+          'profile'
+        );
+        profile = pr.data;
+        profileError = pr.error;
+      } catch (e) {
+        console.warn('[boot] profile timeout — cache local', e && e.message);
       }
-      toast('Sessão restaurada. Bem-vindo(a)!', 'success');
-      if (typeof carregarHistoricoIA === 'function') carregarHistoricoIA();
-      aplicarPermissoes();
-      if (!localStorage.getItem('bp_onboarding_seen')) {
-        // ============================================================
-        // CORREÇÃO: remover splash manualmente (sem depender de hideSplash)
-        // ============================================================
-        const splash = document.getElementById('splash-screen');
-        if (splash) {
-          splash.style.opacity = '0';
-          setTimeout(() => { splash.style.display = 'none'; }, 600);
-        }
-        const onbEl = document.getElementById('onboarding-screen');
+    }
+
+    if (profile && !profileError) {
+      state.config.salaoId = profile.salao_id;
+      state.config.storeName = profile.nome || state.config.storeName || 'Salão';
+      state.config.userRole = profile.role;
+      if (typeof saveConfig === 'function') {
+        try { await saveConfig(); } catch (_) {}
+      }
+    } else {
+      // Offline ou timeout: usar salão já gravado
+      const localSalao = await bpLoadSalaoIdLocal();
+      if (localSalao) state.config.salaoId = localSalao;
+      if (!state.config.salaoId) {
+        toast('Sem dados locais do salão. Conecte-se uma vez para sincronizar.', 'warning');
+      }
+    }
+
+    let trocouDeSalao = false;
+    try {
+      if (typeof detetarTrocaDeSalao === 'function' && state.config.salaoId) {
+        trocouDeSalao = await detetarTrocaDeSalao(state.config.salaoId);
+      }
+    } catch (_) {}
+
+    if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+
+    // Dados locais primeiro (rápido)
+    try { await loadState(trocouDeSalao); } catch (e) { console.warn('[boot] loadState', e); }
+    if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
+    bpHideSplashNow();
+    if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+
+    // Rede em BACKGROUND — não bloqueia abertura
+    if (navigator.onLine) {
+      setTimeout(function () {
+        Promise.resolve()
+          .then(function () { return typeof sincronizarConfigDoServidor === 'function' ? sincronizarConfigDoServidor() : null; })
+          .then(function () { return typeof bpSilentPull === 'function' ? bpSilentPull(true) : (typeof carregarDoSupabase === 'function' ? carregarDoSupabase() : null); })
+          .then(function () {
+            if (typeof updateUI === 'function') updateUI();
+            if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+          })
+          .catch(function (err) { console.warn('[boot] background sync', err); });
+      }, 400);
+    }
+
+    if (typeof carregarHistoricoIA === 'function') {
+      setTimeout(function () { try { carregarHistoricoIA(); } catch (_) {} }, 1500);
+    }
+    if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+
+    if (!localStorage.getItem('bp_onboarding_seen')) {
+      const splash = document.getElementById('splash-screen');
+      if (splash) {
+        splash.style.opacity = '0';
+        setTimeout(function () { splash.style.display = 'none'; }, 400);
+      }
+      const onbEl = document.getElementById('onboarding-screen');
+      if (onbEl) {
         onbEl.style.display = 'flex';
         onbEl.style.pointerEvents = 'none';
-        setTimeout(() => { onbEl.style.pointerEvents = 'auto'; }, 500);
-        if (typeof showOnboardingSlide === 'function') showOnboardingSlide(0);
+        setTimeout(function () { onbEl.style.pointerEvents = 'auto'; }, 400);
       }
+      if (typeof showOnboardingSlide === 'function') showOnboardingSlide(0);
     }
   } catch (err) {
     console.error('Erro na verificação de sessão:', err);
     if (typeof Sentry !== 'undefined' && Sentry.captureException) {
       Sentry.captureException(err, { tags: { action: 'checkSession' } });
     }
+    // Último recurso offline: dados locais
+    try {
+      const localSalao = await bpLoadSalaoIdLocal();
+      if (localSalao) {
+        state.config.salaoId = localSalao;
+        document.getElementById('login-view').style.display = 'none';
+        document.getElementById('app-view').style.display = 'flex';
+        await loadState(false);
+        if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
+        bpHideSplashNow();
+        return;
+      }
+    } catch (_) {}
     document.getElementById('login-view').style.display = 'flex';
-    document.getElementById('app-view').style.display  = 'none';
+    document.getElementById('app-view').style.display = 'none';
+    bpHideSplashNow();
   }
 }
 

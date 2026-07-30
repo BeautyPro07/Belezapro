@@ -89,17 +89,21 @@ document.addEventListener('DOMContentLoaded', async function init() {
   }
 
   // Splash (removida após verificação de sessão)
-  setTimeout(hideSplash, 1500);
+  // Splash: hideSplash já pode ter corrido no checkSession; fallback curto
+  setTimeout(function () {
+    if (typeof hideSplash === 'function') hideSplash();
+    if (typeof bpHideSplashNow === 'function') bpHideSplashNow();
+  }, 400);
 
   // Timeout de emergência: se splash persistir além de 3s, força remoção
   setTimeout(function() {
     var splash = document.getElementById('splash-screen');
     if (splash && splash.style.display !== 'none') {
       splash.style.opacity = '0';
-      setTimeout(() => { splash.style.display = 'none'; }, 300);
+      setTimeout(function () { splash.style.display = 'none'; }, 200);
       console.log('Splash removida por timeout de emergência');
     }
-  }, 3000);
+  }, 5000);
 
   // IA offline
   setTimeout(atualizarIAOffline, 500);
