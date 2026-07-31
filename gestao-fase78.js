@@ -228,20 +228,23 @@
 
   /* ========== F10 DASHBOARD EXECUTIVO ========== */
   function dashboardExecutivo() {
-    var ym = hojeStr().slice(0, 7);
+    var hs = hojeStr();
+    var ym = hs.slice(0, 7);
     var movs = state.movimentos || [];
     var vendasMes = movs.filter(function (m) { return m.tipo === "venda" && String(m.data || "").startsWith(ym); });
     var despMes = movs.filter(function (m) { return m.tipo === "despesa" && String(m.data || "").startsWith(ym); });
     var receita = vendasMes.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
     var despesas = despMes.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
     var comissoes = vendasMes.reduce(function (s, m) { return s + (Number(m.comissao_gerada) || 0); }, 0);
-    var hojeVendas = movs.filter(function (m) { return m.tipo === "venda" && m.data === hojeStr(); });
+    var hojeVendas = movs.filter(function (m) { return m.tipo === "venda" && m.data === hs; });
     var receitaHoje = hojeVendas.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
     var agHoje = (state.agendamentos || []).filter(function (a) {
-      return a.data === hojeStr() && String(a.status || a.estado || "").toLowerCase() !== "cancelado";
+      return a.data === hs && String(a.status || a.estado || "").toLowerCase() !== "cancelado";
     }).length;
     var clientes = (state.clientes || []).length;
-    var profs = (state.profissionais || []).length;
+    var profs = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === "function" ? isProfissionalAtivo(p) : (p.ativo !== false);
+    }).length;
     var ticket = vendasMes.length ? Math.round(receita / vendasMes.length) : 0;
     var nps = null;
     try {
@@ -251,15 +254,58 @@
     try {
       if (window.BPOps && BPOps.produtosBaixoStock) stockAlert = BPOps.produtosBaixoStock().length;
     } catch (e) {}
-    // top profissionais mês
+
     var byProf = {};
     vendasMes.forEach(function (m) {
       var k = m.profissional || m.profissional_id || "—";
-      byProf[k] = (byProf[k] || 0) + (Number(m.valor) || 0);
+      if (!byProf[k]) byProf[k] = { nome: k, receita: 0, n: 0 };
+      byProf[k].receita += Number(m.valor) || 0;
+      byProf[k].n += 1;
     });
-    var topProf = Object.keys(byProf).map(function (k) {
-      return { nome: k, receita: byProf[k] };
-    }).sort(function (a, b) { return b.receita - a.receita; }).slice(0, 5);
+    var topProf = Object.keys(byProf).map(function (k) { return byProf[k]; })
+      .sort(function (a, b) { return b.receita - a.receita; }).slice(0, 8);
+
+    var byServ = {};
+    vendasMes.forEach(function (m) {
+      (m.itens || []).forEach(function (it) {
+        var nome = it.nome || "Sem nome";
+        if (!byServ[nome]) byServ[nome] = { nome: nome, receita: 0, qtd: 0 };
+        byServ[nome].receita += Number(it.subtotal) || 0;
+        byServ[nome].qtd += Number(it.quantidade) || 1;
+      });
+    });
+    var topServ = Object.keys(byServ).map(function (k) { return byServ[k]; })
+      .sort(function (a, b) { return b.receita - a.receita; }).slice(0, 8);
+
+    var byMetodo = {};
+    vendasMes.forEach(function (m) {
+      var k = m.metodoPagamento || m.metodo_pagamento || "Numerário";
+      byMetodo[k] = (byMetodo[k] || 0) + (Number(m.valor) || 0);
+    });
+    var metodos = Object.keys(byMetodo).map(function (k) {
+      return { nome: k, valor: byMetodo[k] };
+    }).sort(function (a, b) { return b.valor - a.valor; });
+
+    // Série diária do mês até hoje
+    var y = parseInt(ym.slice(0, 4), 10);
+    var mo = parseInt(ym.slice(5, 7), 10);
+    var lastDay = new Date(y, mo, 0).getDate();
+    var diaHoje = parseInt(hs.slice(8, 10), 10) || lastDay;
+    var porDia = {};
+    vendasMes.forEach(function (m) {
+      var d = String(m.data || "");
+      porDia[d] = (porDia[d] || 0) + (Number(m.valor) || 0);
+    });
+    var serieDiaria = [];
+    for (var day = 1; day <= diaHoje; day++) {
+      var ds = ym + "-" + String(day).padStart(2, "0");
+      serieDiaria.push({ data: ds, dia: day, valor: porDia[ds] || 0 });
+    }
+
+    var meta = null;
+    try {
+      if (typeof getProgressoMetaSalao === "function") meta = getProgressoMetaSalao();
+    } catch (e) {}
 
     return {
       receitaMes: receita,
@@ -276,8 +322,76 @@
       nps: nps,
       stockAlert: stockAlert,
       topProfissionais: topProf,
+      topServicos: topServ,
+      metodos: metodos,
+      serieDiaria: serieDiaria,
+      meta: meta,
       periodo: ym
     };
+  }
+
+  function drawExecChart(canvas, serie) {
+    if (!canvas || !serie || !serie.length) return;
+    var parent = canvas.parentElement;
+    var width = Math.max((parent && parent.getBoundingClientRect().width) || 320, 240);
+    var height = 160;
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+
+    var maxVal = 1;
+    serie.forEach(function (p) { if (p.valor > maxVal) maxVal = p.valor; });
+
+    var padL = 8, padR = 8, padT = 12, padB = 22;
+    var n = serie.length;
+    var gap = n > 20 ? 1 : 2;
+    var barW = Math.max(2, (width - padL - padR) / n - gap);
+    var baseY = height - padB;
+    var chartH = height - padT - padB;
+
+    var gold = "#C9A227";
+    try {
+      var g = getComputedStyle(document.documentElement).getPropertyValue("--gold").trim();
+      if (g) gold = g;
+    } catch (e) {}
+
+    // grid line
+    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, baseY);
+    ctx.lineTo(width - padR, baseY);
+    ctx.stroke();
+
+    for (var i = 0; i < n; i++) {
+      var v = serie[i].valor || 0;
+      var h = Math.max(v > 0 ? 3 : 0, (v / maxVal) * chartH);
+      var x = padL + i * (barW + gap);
+      var y = baseY - h;
+      ctx.fillStyle = v > 0 ? gold : "rgba(0,0,0,0.06)";
+      ctx.beginPath();
+      var r = Math.min(3, barW / 2);
+      ctx.moveTo(x, baseY);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.lineTo(x + barW - r, y);
+      ctx.quadraticCurveTo(x + barW, y, x + barW, y + r);
+      ctx.lineTo(x + barW, baseY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // labels: first, mid, last day
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    var idxs = [0, Math.floor((n - 1) / 2), n - 1];
+    idxs.forEach(function (ix) {
+      if (ix < 0 || ix >= n) return;
+      var x = padL + ix * (barW + gap) + barW / 2;
+      ctx.fillText(String(serie[ix].dia), x, height - 6);
+    });
   }
 
   /* ========== F12 EXPORT ========== */
@@ -431,34 +545,41 @@
 
   /* ========== UI ========== */
   function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
     var el = document.getElementById(id);
     if (el) {
-      var t = el.querySelector(".bp-sheet-title");
-      if (t && title) t.textContent = title;
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
       return el;
     }
-    el = document.createElement("div");
+    el = document.createElement('div');
     el.id = id;
-    el.className = "modal-overlay";
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-modal", "true");
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
     el.innerHTML =
-      '<div class="bp-sheet">' +
-        '<div class="bp-sheet-handle" aria-hidden="true"></div>' +
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
         '<div class="bp-sheet-header">' +
-          '<div class="bp-sheet-eyebrow">' + esc(eyebrow || "Gestão") + "</div>" +
-          '<h2 class="bp-sheet-title">' + esc(title) + "</h2>" +
-          (subtitle ? '<p class="bp-sheet-subtitle">' + esc(subtitle) + "</p>" : "") +
-        "</div>" +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
         '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
-        '<div class="bp-sheet-footer">' +
+        '<div class="bp-sheet-footer modal-actions">' +
           '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
-        "</div></div>";
+        '</div>' +
+      '</div>';
     document.body.appendChild(el);
-    el.addEventListener("click", function (e) {
-      if (e.target === el || e.target.getAttribute("data-close") === id) {
-        if (typeof closeModal === "function") closeModal(id);
-        else el.classList.remove("open");
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
       }
     });
     return el;
@@ -472,33 +593,78 @@
   }
 
   function openDashboard() {
-    ensureShell("modal-bp-dash", "Dashboard executivo", "Gestão", "Visão do mês em tempo real (dados locais).");
+    ensureShell("modal-bp-dash", "Dashboard executivo", "Gestão", "KPIs, gráfico diário e tabelas do mês corrente.");
     var d = dashboardExecutivo();
     var body = document.getElementById("modal-bp-dash-body");
+    if (!body) return;
+
     var npsTxt = d.nps && d.nps.nps != null ? String(d.nps.nps) : "—";
-    var top = (d.topProfissionais || []).map(function (p, i) {
-      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + (i + 1) + ". " + esc(p.nome) + "</div></div>" +
-        '<div class="bp-row-value">' + fmt(p.receita) + "</div></div>";
-    }).join("") || '<div class="bp-empty">Sem vendas no mês.</div>';
+    var lucroClass = d.lucroMes > 0 ? " is-positive" : (d.lucroMes < 0 ? " is-negative" : "");
+
+    var insight = "";
+    if (d.meta && d.meta.meta > 0) {
+      if (d.meta.atingida) {
+        insight = '<div class="bp-alert-banner is-ok"><strong>Meta do mês atingida</strong>' + fmt(d.meta.volume) + " de " + fmt(d.meta.meta) + " (" + d.meta.pct + "%).</div>";
+      } else {
+        insight = '<div class="bp-alert-banner"><strong>Meta do mês · ' + d.meta.pct + "%</strong>" +
+          fmt(d.meta.volume) + " de " + fmt(d.meta.meta) + " · faltam " + fmt(Math.max(0, d.meta.meta - d.meta.volume)) + ".</div>";
+      }
+    } else if (!d.vendasMes) {
+      insight = '<div class="bp-alert-banner"><strong>Sem vendas neste mês</strong>Os indicadores e o gráfico actualizam quando registar vendas.</div>';
+    }
+
+    function tableRows(headers, rowsHtml) {
+      return '<div class="bp-table-wrap"><table class="bp-table"><thead><tr>' +
+        headers.map(function (h) { return "<th>" + h + "</th>"; }).join("") +
+        "</tr></thead><tbody>" + rowsHtml + "</tbody></table></div>";
+    }
+
+    var profRows = (d.topProfissionais || []).map(function (p, i) {
+      return "<tr><td>" + (i + 1) + "</td><td>" + esc(p.nome) + "</td><td>" + (p.n || "—") + "</td><td class=\"num\">" + fmt(p.receita) + "</td></tr>";
+    }).join("") || '<tr><td colspan="4" class="empty">Sem vendas no mês</td></tr>';
+
+    var servRows = (d.topServicos || []).map(function (s, i) {
+      return "<tr><td>" + (i + 1) + "</td><td>" + esc(s.nome) + "</td><td>" + s.qtd + "</td><td class=\"num\">" + fmt(s.receita) + "</td></tr>";
+    }).join("") || '<tr><td colspan="4" class="empty">Sem itens de serviço</td></tr>';
+
+    var metRows = (d.metodos || []).map(function (m) {
+      var pct = d.receitaMes > 0 ? Math.round((m.valor / d.receitaMes) * 100) : 0;
+      return "<tr><td>" + esc(m.nome) + "</td><td>" + pct + "%</td><td class=\"num\">" + fmt(m.valor) + "</td></tr>";
+    }).join("") || '<tr><td colspan="3" class="empty">—</td></tr>';
 
     body.innerHTML =
-      '<p style="font-size:.8rem;color:var(--text-muted);margin:0 0 12px">Período <strong style="color:var(--text-primary)">' + esc(d.periodo) + "</strong></p>" +
+      insight +
+      '<p class="bp-ref-line">Período <strong>' + esc(d.periodo) + "</strong> · actualizado agora · dados locais</p>" +
       '<div class="bp-kpi-grid">' +
         '<div class="bp-kpi"><div class="bp-kpi-label">Receita mês</div><div class="bp-kpi-value is-gold" style="font-size:.78rem">' + fmt(d.receitaMes) + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Despesas</div><div class="bp-kpi-value is-negative" style="font-size:.78rem">' + fmt(d.despesasMes) + "</div></div>" +
-        '<div class="bp-kpi"><div class="bp-kpi-label">Lucro</div><div class="bp-kpi-value" style="font-size:.78rem">' + fmt(d.lucroMes) + "</div></div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Lucro</div><div class="bp-kpi-value' + lucroClass + '" style="font-size:.78rem">' + fmt(d.lucroMes) + "</div></div></div>" +
       '<div class="bp-kpi-grid">' +
         '<div class="bp-kpi"><div class="bp-kpi-label">Hoje</div><div class="bp-kpi-value" style="font-size:.78rem">' + fmt(d.receitaHoje) + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Vendas mês</div><div class="bp-kpi-value">' + d.vendasMes + "</div></div>" +
-        '<div class="bp-kpi"><div class="bp-kpi-label">Ticket</div><div class="bp-kpi-value" style="font-size:.78rem">' + fmt(d.ticketMedio) + "</div></div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Ticket médio</div><div class="bp-kpi-value" style="font-size:.78rem">' + fmt(d.ticketMedio) + "</div></div></div>" +
       '<div class="bp-kpi-grid">' +
         '<div class="bp-kpi"><div class="bp-kpi-label">Agenda hoje</div><div class="bp-kpi-value">' + d.agendamentosHoje + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">NPS 90d</div><div class="bp-kpi-value is-gold">' + npsTxt + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Stock baixo</div><div class="bp-kpi-value' + (d.stockAlert ? " is-negative" : "") + '">' + d.stockAlert + "</div></div></div>" +
-      '<div class="bp-section"><div class="bp-section-title">Top profissionais (mês)</div>' + top + "</div>" +
-      '<p style="font-size:.75rem;color:var(--text-muted)">Comissões geradas no mês: <strong>' + fmt(d.comissoesMes) + "</strong> · Clientes " + d.clientes + " · Equipa " + d.profissionais + "</p>";
+      '<div class="bp-section"><div class="bp-section-title">Receita diária (mês)</div>' +
+        '<div class="bp-chart-box"><canvas id="bp-exec-chart" aria-label="Gráfico de receita diária"></canvas></div>' +
+        '<p class="bp-ref-line">Barras = receita por dia até hoje</p></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Top profissionais</div>' +
+        tableRows(["#", "Nome", "Vendas", "Receita"], profRows) + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Top serviços</div>' +
+        tableRows(["#", "Serviço", "Qtd", "Receita"], servRows) + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Formas de pagamento</div>' +
+        tableRows(["Método", "%", "Valor"], metRows) + "</div>" +
+      '<p class="bp-ref-line">Comissões do mês: <strong>' + fmt(d.comissoesMes) + "</strong> · Clientes " + d.clientes + " · Equipa activa " + d.profissionais + "</p>";
+
     openShell("modal-bp-dash");
     logAudit("dashboard", "Consulta dashboard executivo");
+
+    requestAnimationFrame(function () {
+      var canvas = document.getElementById("bp-exec-chart");
+      drawExecChart(canvas, d.serieDiaria || []);
+    });
   }
 
   function openReagendar() {
@@ -579,10 +745,13 @@
       { k: "agenda", l: "Agenda completa" }
     ];
     body.innerHTML =
-      '<p style="font-size:.85rem;color:var(--text-secondary);line-height:1.5;margin:0 0 16px">Ficheiros CSV com BOM UTF-8 — abrem correctamente no Excel e LibreOffice.</p>' +
+      '<div class="bp-alert-banner"><strong>Exportação local</strong>CSV com BOM UTF-8 — abre no Excel e LibreOffice sem problemas de acentos.</div>' +
+      '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Escolher relatório</div>' +
       tipos.map(function (t) {
-        return '<button type="button" class="btn btn-secondary btn-block" style="margin-bottom:8px" data-exp="' + t.k + '">' + t.l + "</button>";
-      }).join("");
+        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + t.l + '</div>' +
+          '<div class="bp-row-meta">Separador ; · mês corrente quando aplicável</div></div>' +
+          '<button type="button" class="bp-action-btn is-primary" data-exp="' + t.k + '">Exportar</button></div>';
+      }).join("") + '</div>';
     body.querySelectorAll("[data-exp]").forEach(function (btn) {
       btn.onclick = function () { exportRelatorio(btn.getAttribute("data-exp")); };
     });
@@ -594,15 +763,18 @@
     var meta = safeJson(BACKUP_META_KEY, null);
     var body = document.getElementById("modal-bp-backup-body");
     body.innerHTML =
+      '<div class="bp-alert-banner"><strong>Backup neste dispositivo</strong>Inclui clientes, equipa, serviços, movimentos, agenda e preferências BeautyPro.</div>' +
       '<div class="bp-kpi-grid">' +
         '<div class="bp-kpi"><div class="bp-kpi-label">Último backup</div><div class="bp-kpi-value" style="font-size:.7rem">' +
         (meta && meta.at ? esc(String(meta.at).slice(0, 16).replace("T", " ")) : "—") + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Clientes</div><div class="bp-kpi-value">' + ((state.clientes || []).length) + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Movimentos</div><div class="bp-kpi-value">' + ((state.movimentos || []).length) + "</div></div></div>" +
-      '<p style="font-size:.85rem;color:var(--text-secondary);line-height:1.5;margin:0 0 16px">O backup inclui clientes, equipa, serviços, movimentos, agenda e dados BeautyPro no localStorage.</p>' +
-      '<button type="button" class="btn btn-primary btn-block" id="bp-bk-dl" style="margin-bottom:10px">Descarregar backup JSON</button>' +
-      '<div class="input-group"><label class="input-label">Restaurar a partir de ficheiro</label>' +
-      '<input type="file" id="bp-bk-file" class="input-field" accept="application/json,.json"></div>';
+      '<div class="bp-section"><div class="bp-section-title">Exportar</div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-bk-dl">Descarregar backup JSON</button></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Restaurar</div>' +
+      '<div class="input-group"><label class="input-label" for="bp-bk-file">Ficheiro JSON</label>' +
+      '<input type="file" id="bp-bk-file" class="input-field" accept="application/json,.json"></div>' +
+      '<p class="bp-ref-line">A restauração substitui os dados locais deste dispositivo.</p></div>';
     document.getElementById("bp-bk-dl").onclick = downloadBackup;
     document.getElementById("bp-bk-file").onchange = function (ev) {
       var file = ev.target.files && ev.target.files[0];
@@ -626,13 +798,16 @@
     var body = document.getElementById("modal-bp-audit-body");
     var list = loadAudit(80);
     if (!list.length) {
-      body.innerHTML = '<div class="bp-empty"><strong>Sem registos ainda</strong>As acções das novas funcionalidades aparecem aqui.</div>';
+      body.innerHTML = '<div class="bp-alert-banner"><strong>Auditoria local</strong>Regista acções deste dispositivo (dashboard, backup, reagendar…).</div>' +
+        '<div class="bp-empty"><strong>Sem registos ainda</strong>As acções das funcionalidades de gestão aparecem aqui.</div>';
     } else {
-      body.innerHTML = list.map(function (a) {
-        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(a.acao) + "</div>" +
-          '<div class="bp-row-meta">' + esc((a.ts || "").slice(0, 16).replace("T", " ")) +
-          (a.detalhe ? " · " + esc(a.detalhe) : "") + "</div></div></div>";
-      }).join("");
+      body.innerHTML = '<div class="bp-alert-banner"><strong>Auditoria local</strong>Últimas ' + list.length + ' acções neste dispositivo.</div>' +
+        '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Histórico</div>' +
+        list.map(function (a) {
+          return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(a.acao) + "</div>" +
+            '<div class="bp-row-meta">' + esc((a.ts || "").slice(0, 16).replace("T", " ")) +
+            (a.detalhe ? " · " + esc(a.detalhe) : "") + "</div></div></div>";
+        }).join("") + '</div>';
     }
     openShell("modal-bp-audit");
   }

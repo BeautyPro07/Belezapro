@@ -74,15 +74,107 @@ function verificarLimite(tipo) {
 
 function mostrarModalUpgrade(mensagem) {
   if (!mensagem) mensagem = 'Atingiu o limite do seu plano actual. Escolha um plano para continuar.';
-  document.getElementById('upgrade-mensagem').textContent = mensagem;
+  const el = document.getElementById('upgrade-mensagem');
+  if (el) el.textContent = mensagem;
   openModal('modal-upgrade');
 }
 
-function upgradePara(plano) {
+/** Copia texto para a área de transferência com fallback para ambientes sem Clipboard API. */
+async function copiarTextoSeguro(texto) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch (_) { /* continua para fallback */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return !!ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Abre WhatsApp com mensagem pré-preenchida.
+ * Se popup for bloqueado ou falhar, copia a mensagem e informa via toast.
+ * @returns {Promise<{ok: boolean, metodo: 'window'|'clipboard'|'manual'}>}
+ */
+async function abrirWhatsAppVenda(mensagem) {
+  const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(mensagem)}`;
+  let win = null;
+  try {
+    win = window.open(url, '_blank', 'noopener,noreferrer');
+  } catch (_) { /* ignore */ }
+
+  if (!win || win.closed) {
+    const copiado = await copiarTextoSeguro(mensagem);
+    if (copiado) {
+      if (typeof toast === 'function') {
+        toast('Não foi possível abrir o WhatsApp. Mensagem copiada — cole na conversa.', 'warning');
+      }
+      return { ok: true, metodo: 'clipboard' };
+    }
+    if (typeof toast === 'function') {
+      toast('Abra o WhatsApp e envie a mensagem de adesão manualmente.', 'error');
+    }
+    return { ok: false, metodo: 'manual' };
+  }
+  return { ok: true, metodo: 'window' };
+}
+
+async function upgradePara(plano) {
+  if (!plano) {
+    if (typeof toast === 'function') toast('Plano inválido', 'error');
+    return;
+  }
+  const salao = (typeof state !== 'undefined' && state.config && state.config.storeName) ? state.config.storeName : '—';
+  const actual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : '—';
   const msg =
-    `Olá, quero assinar o plano ${plano} do BeautyPro. Salão: ${state.config.storeName} | Plano actual: ${getPlanoAtual()}`;
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
+    `Olá, quero assinar o plano ${plano} do BeautyPro. Salão: ${salao} | Plano actual: ${actual}`;
+  await abrirWhatsAppVenda(msg);
   closeModal('modal-upgrade');
 }
-// Expor globalmente para os botões onclick no HTML
+
+/** Liga os botões data-upgrade-plano (CSP-safe; sem onclick inline). */
+function bindUpgradeButtons() {
+  document.querySelectorAll('[data-upgrade-plano]').forEach((btn) => {
+    if (btn.dataset.bpUpgradeBound) return;
+    btn.dataset.bpUpgradeBound = '1';
+    btn.addEventListener('click', () => {
+      const plano = btn.getAttribute('data-upgrade-plano');
+      if (plano) upgradePara(plano);
+    });
+  });
+
+  const contato = document.getElementById('modal-upgrade-contato');
+  if (contato && !contato.dataset.bpUpgradeBound) {
+    contato.dataset.bpUpgradeBound = '1';
+    contato.addEventListener('click', async () => {
+      const salao = (typeof state !== 'undefined' && state.config && state.config.storeName) ? state.config.storeName : '—';
+      const actual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : '—';
+      const msg =
+        `Olá, quero assinar um plano do BeautyPro. Salão: ${salao} | Plano actual: ${actual}`;
+      await abrirWhatsAppVenda(msg);
+      closeModal('modal-upgrade');
+    });
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindUpgradeButtons);
+} else {
+  bindUpgradeButtons();
+}
+
+// API pública (chamadas programáticas / compatibilidade)
 window.upgradePara = upgradePara;
+window.abrirWhatsAppVenda = abrirWhatsAppVenda;

@@ -232,38 +232,12 @@
   }
 
   function ensureModal(id, title, eyebrow, subtitle) {
-    var el = document.getElementById(id);
-    if (el) {
-      var t = el.querySelector('.bp-sheet-title');
-      if (t && title) t.textContent = title;
-      return el;
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
     }
-    el = document.createElement('div');
-    el.id = id;
-    el.className = 'modal-overlay';
-    el.setAttribute('role', 'dialog');
-    el.setAttribute('aria-modal', 'true');
-    el.innerHTML =
-      '<div class="bp-sheet">' +
-        '<div class="bp-sheet-handle" aria-hidden="true"></div>' +
-        '<div class="bp-sheet-header">' +
-          '<div class="bp-sheet-eyebrow">' + (eyebrow || 'Marketing') + '</div>' +
-          '<h2 class="bp-sheet-title">' + title + '</h2>' +
-          (subtitle ? '<p class="bp-sheet-subtitle">' + subtitle + '</p>' : '') +
-        '</div>' +
-        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
-        '<div class="bp-sheet-footer">' +
-          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(el);
-    el.addEventListener('click', function (e) {
-      if (e.target === el || e.target.getAttribute('data-close') === id) {
-        if (typeof closeModal === 'function') closeModal(id);
-        else el.classList.remove('open');
-      }
-    });
-    return el;
+    var el = document.getElementById(id);
+    if (el) return el;
+    return null;
   }
 
   function openModalFidelidade() {
@@ -300,7 +274,7 @@
         '<div class="bp-row-meta">' + (cod ? '<span class="bp-code">' + cod + '</span>' : 'Sem código') + '</div></div>' +
         '<button type="button" class="bp-action-btn' + (cod ? '' : ' is-primary') + '" data-gen-cod="' + c.id + '">' + (cod ? 'Gerado' : 'Gerar') + '</button></div>';
     }).join('') || '<div class="bp-empty"><strong>Sem clientes</strong>Adicione clientes para gerar códigos.</div>';
-    body.innerHTML = '<p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">Cada código dá ' + BONUS_INDICACAO + ' pts ao indicador quando o indicado compra.</p>' + rows;
+    body.innerHTML = '<div class="bp-alert-banner"><strong>Programa de indicações</strong>Cada código dá ' + BONUS_INDICACAO + ' pts ao indicador quando o indicado compra.</div>' + rows;
     body.querySelectorAll('[data-gen-cod]').forEach(function (btn) {
       btn.onclick = async function () {
         var id = btn.getAttribute('data-gen-cod');
@@ -327,7 +301,7 @@
     var lista = (state.agendamentos || []).filter(function (a) {
       return a.data >= hojeStr && a.estado !== 'cancelado';
     }).slice(0, 20);
-    var html = '<p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">Abre o WhatsApp com texto pronto. O cliente precisa de telefone na ficha.</p>';
+    var html = '<div class="bp-alert-banner"><strong>Lembretes WhatsApp</strong>Abre conversa com texto pronto. O cliente precisa de telefone na ficha.</div>';
     if (!lista.length) {
       html += '<div class="bp-empty"><strong>Sem marcações futuras</strong>Os lembretes aparecem quando houver agenda.</div>';
     } else {

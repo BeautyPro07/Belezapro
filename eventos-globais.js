@@ -46,9 +46,9 @@ function abrirMenuLinha(anchorEl, tipo, id) {
   const papel = normalizarRole(state.config.userRole);
 
   const config = {
-    cliente:      { editLabel: 'Ajustar perfil', delAction: 'del-cliente', podeEliminar: papel === 'admin' || papel === 'gerente' },
-    profissional: { editLabel: 'Ajustar',         delAction: 'del-p',       podeEliminar: papel === 'admin' },
-    servico:      { editLabel: 'Ajustar',         delAction: 'del-servico', podeEliminar: papel === 'admin' },
+    cliente:      { editLabel: 'Ajustar perfil', delAction: 'del-cliente', delLabel: 'Excluir',   podeEliminar: papel === 'admin' || papel === 'gerente' },
+    profissional: { editLabel: 'Ajustar',         delAction: 'del-p',       delLabel: 'Destituir', podeEliminar: papel === 'admin' },
+    servico:      { editLabel: 'Ajustar',         delAction: 'del-servico', delLabel: 'Excluir',   podeEliminar: papel === 'admin' },
   }[tipo];
   if (!config) return;
 
@@ -63,6 +63,8 @@ function abrirMenuLinha(anchorEl, tipo, id) {
   delBtn.dataset.action = config.delAction;
   delBtn.dataset.id = id;
   delBtn.style.display = config.podeEliminar ? 'flex' : 'none';
+  const delLabelEl = document.getElementById('row-menu-delete-label');
+  if (delLabelEl) delLabelEl.textContent = config.delLabel || 'Excluir';
 
   document.querySelectorAll('.row-menu-btn.is-open').forEach(b => b.classList.remove('is-open'));
   anchorEl.classList.add('is-open');
@@ -78,7 +80,8 @@ function abrirMenuLinha(anchorEl, tipo, id) {
   menu.style.left = left + 'px';
   menu.style.top = top + 'px';
   requestAnimationFrame(() => menu.classList.add('is-open'));
-  window._lastMenuTrigger = anchorEl;
+  window.BPRuntime = window.BPRuntime || {};
+  window.BPRuntime.lastMenuTrigger = anchorEl;
   const firstItem = menu.querySelector('.row-menu-item:not([style*="display: none"])');
   if (firstItem) setTimeout(() => firstItem.focus(), 50);
 }
@@ -90,9 +93,9 @@ function fecharMenuLinha() {
   document.querySelectorAll('.row-menu-btn.is-open').forEach(b => b.classList.remove('is-open'));
   setTimeout(() => {
     if (!menu.classList.contains('is-open')) menu.style.display = 'none';
-    if (window._lastMenuTrigger) {
-      window._lastMenuTrigger.focus();
-      window._lastMenuTrigger = null;
+    if (window.BPRuntime && window.BPRuntime.lastMenuTrigger) {
+      window.BPRuntime.lastMenuTrigger.focus();
+      window.BPRuntime.lastMenuTrigger = null;
     }
   }, 150);
 }
@@ -122,6 +125,38 @@ document.addEventListener('click', async function(e) {
 
   if (e.target.closest('.row-menu-item')) {
     fecharMenuLinha();
+  }
+
+  const reagendarBtn = e.target.closest('[data-action="reagendar-agenda"]');
+  if (reagendarBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = reagendarBtn.dataset.id;
+    if (typeof abrirReagendarAgendamento === 'function') abrirReagendarAgendamento(id);
+    else if (window.abrirReagendarAgendamento) window.abrirReagendarAgendamento(id);
+    return;
+  }
+
+  const waBtn = e.target.closest('[data-action="whatsapp-agenda"]');
+  if (waBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = waBtn.dataset.id;
+    const ag = (state.agendamentos || []).find(a => a.id === id);
+    if (!ag) return;
+    let href = '';
+    try {
+      if (window.BPAgendaUI && typeof BPAgendaUI.waHref === 'function') href = BPAgendaUI.waHref(ag);
+    } catch (_) {}
+    if (!href) {
+      if (typeof toast === 'function') toast('Cliente sem telefone no registo', 'warning');
+      return;
+    }
+    const win = window.open(href, '_blank', 'noopener,noreferrer');
+    if (!win) {
+      if (typeof toast === 'function') toast('Permita pop-ups para abrir o WhatsApp', 'warning');
+    }
+    return;
   }
 
   const target = e.target.closest('[data-action="cancelar-agenda"]');
@@ -154,10 +189,47 @@ document.addEventListener('click', async function(e) {
       return;
     }
     const id = delProf.dataset.id;
-    const prof = state.profissionais.find(p => p.id === id);
+    const prof = (state.profissionais || []).find(p => p.id === id);
     if (!prof) return;
-    const confirmed = await showConfirmModal('Remover Profissional?', `Tem a certeza que quer remover ${prof.nome}? Esta acção não pode ser desfeita.`, true);
-    if (confirmed) await deleteProfissional(id);
+    if (typeof isProfissionalAtivo === 'function' && !isProfissionalAtivo(prof)) {
+      toast('Este profissional já está destituído', 'warning');
+      return;
+    }
+    const msg =
+      'Tem a certeza que deseja destituir ' + (prof.nome || 'este profissional') + ' das suas funções?\n\n' +
+      '• Deixa de aparecer em novos agendamentos e vendas\n' +
+      '• Será removido dos serviços associados\n' +
+      '• Serviços onde for o único profissional serão desactivados\n' +
+      '• Agendamentos e vendas anteriores mantêm-se no histórico';
+    const confirmed = await showConfirmModal('Destituir profissional', msg, true);
+    if (!confirmed) return;
+
+    const result = typeof desassociarProfissional === 'function'
+      ? await desassociarProfissional(id)
+      : null;
+
+    if (result) {
+      let extra = '';
+      if (result.servicosDesativados && result.servicosDesativados.length) {
+        extra = ' Serviços desactivados: ' + result.servicosDesativados.join(', ') + '.';
+      }
+      toast((prof.nome || 'Profissional') + ' destituído.' + extra, 'success');
+
+      // Aviso ao profissional via WhatsApp (contexto AO — sem SMS infra)
+      const digits = String(prof.contacto || '').replace(/\D/g, '');
+      if (digits.length === 9) {
+        const salao = (state.config && state.config.storeName) || 'o salão';
+        const texto = encodeURIComponent(
+          'Olá ' + (prof.nome || '') + ', foi destituído das suas funções em ' + salao +
+          '. Os registos históricos permanecem no sistema. Contacte a administração para mais informações.'
+        );
+        try {
+          window.open('https://wa.me/244' + digits + '?text=' + texto, '_blank', 'noopener,noreferrer');
+        } catch (e) {}
+      }
+    } else {
+      toast('Não foi possível destituir o profissional', 'error');
+    }
     return;
   }
 
@@ -195,23 +267,34 @@ document.addEventListener('click', async function(e) {
   }
 }, true);
 
-// ONLINE/OFFLINE
+// ONLINE/OFFLINE — multi-dispositivo: indicador sempre legível
 window.addEventListener('online', () => {
-  const container = document.getElementById('sync-status-container');
-  if (container) container.style.display = 'none';
-  document.getElementById('sync-dot')?.classList.add('online');
-  document.getElementById('offline-banner')?.classList.remove('show');
-  atualizarIAOffline();
-  flushSyncQueue().then(atualizarIndicadorSync);
+  if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
+  if (typeof flushSyncQueue === 'function') {
+    flushSyncQueue().then(function () {
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    }).catch(function () {
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    });
+  } else if (typeof atualizarIndicadorSync === 'function') {
+    atualizarIndicadorSync();
+  }
 });
 
 window.addEventListener('offline', () => {
-  const container = document.getElementById('sync-status-container');
-  if (container) container.style.display = 'flex';
-  document.getElementById('sync-dot')?.classList.remove('online');
-  document.getElementById('offline-banner')?.classList.add('show');
-  atualizarIAOffline();
+  if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 });
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    });
+  } else if (typeof atualizarIndicadorSync === 'function') {
+    atualizarIndicadorSync();
+  }
+}
 
 // Fechar modais ao clicar no overlay
 document.querySelectorAll('.modal-overlay').forEach(el => {

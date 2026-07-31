@@ -276,3 +276,81 @@
   text-transform: none;
   letter-spacing: 0;
 }
+
+/* ===== Dashboard A2 — meta, caixa, próximos ===== */
+.dash-meta-wrap {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-rest);
+}
+.dash-meta-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dash-meta-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.dash-meta-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.dash-meta-track {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.dash-meta-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--gold), var(--gold-600));
+  transition: width var(--transition-base);
+}
+.dash-caixa-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+.dash-caixa-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.dash-caixa-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.dash-next-title {
+  color: var(--gold-dark);
+  font-weight: 700;
+}
+.dash-next-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.dash-next-price {
+  font-weight: 700;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}

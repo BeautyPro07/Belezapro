@@ -310,7 +310,8 @@ function fromSupabaseFormat(tabela, row) {
         id:            row.id,
         nome:          row.nome,
         especialidade: row.especialidade,
-        ativo:         row.ativo,
+        ativo:         row.ativo !== false && row.ativo !== 0,
+        data_desativacao: row.data_desativacao || null,
         updated_at:    row.updated_at,
       };
     case 'servicos':
@@ -319,7 +320,7 @@ function fromSupabaseFormat(tabela, row) {
         nome:          row.nome,
         precoBase:     row.preco_base,
         profissionais: row.profissionais || [],
-        ativo:         row.ativo,
+        ativo:         row.ativo !== false && row.ativo !== 0,
         updated_at:    row.updated_at,
       };
     default:

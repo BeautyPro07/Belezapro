@@ -172,6 +172,46 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
 // ====================================================================
 //  CRUD — CLIENTE
 // ====================================================================
+
+// ====================================================================
+//  FIDELIDADE — pontos e níveis (1 ponto / 1000 Kz)
+// ====================================================================
+var BP_PONTOS_POR_KZ = 1000;
+
+function calcularPontosVenda(valor) {
+  var v = Number(valor) || 0;
+  if (v <= 0) return 0;
+  return Math.floor(v / BP_PONTOS_POR_KZ);
+}
+
+function getClienteTier(pontos) {
+  var p = Number(pontos) || 0;
+  if (p >= 300) return { id: 'ouro', label: 'Ouro', min: 300 };
+  if (p >= 100) return { id: 'prata', label: 'Prata', min: 100 };
+  return { id: 'bronze', label: 'Bronze', min: 0 };
+}
+
+async function creditarPontosCliente(clienteId, pontos) {
+  if (!clienteId || !pontos || pontos <= 0) return null;
+  var c = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+  if (!c) return null;
+  var next = (Number(c.pontos) || 0) + pontos;
+  // update directo para não disparar rename / side-effects pesados
+  var data = { pontos: next, updated_at: new Date().toISOString() };
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('clientes', clienteId, data);
+  } else {
+    var i = state.clientes.findIndex(function (x) { return x.id === clienteId; });
+    if (i === -1) return null;
+    state.clientes[i] = Object.assign({}, state.clientes[i], data);
+  }
+  var item = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+  if (item) {
+    try { await dbPut('clientes', item); } catch (e) {}
+  }
+  return next;
+}
+
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
   const nome = (c.nome || '').trim();
@@ -182,7 +222,7 @@ async function addCliente(c) {
     return null;
   }
 
-  const n = { ...c, id: uuid(), nome };
+  const n = { ...c, id: uuid(), nome, pontos: Number(c.pontos) || 0 };
   try {
     await dbPut('clientes', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -203,23 +243,58 @@ async function addCliente(c) {
 }
 
 async function updateCliente(id, data) {
+  const actual = (state.clientes || []).find(c => c.id === id);
+  if (!actual) return null;
+
   if (data.nome) {
     const nome = data.nome.trim();
+    data = { ...data, nome };
     if (existeNomeDuplicado('clientes', nome, id)) {
       toast('Já existe um cliente com este nome.', 'error');
-      return;
+      return null;
     }
   }
+
+  const oldNome = actual.nome;
+  const newNome = data.nome != null ? data.nome : oldNome;
+  const renamed = data.nome != null && String(data.nome) !== String(oldNome);
+
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('clientes', id, data);
   } else {
     const i = state.clientes.findIndex(c => c.id === id);
-    if (i === -1) return;
+    if (i === -1) return null;
     state.clientes[i] = { ...state.clientes[i], ...data };
   }
   const item = state.clientes.find(c => c.id === id);
   if (item) await dbPut('clientes', item);
+
+  // Propagar rename para histórico ligado (id ou nome legado) — mantém stats coerentes
+  if (renamed && newNome) {
+    const patchList = async (storeKey) => {
+      const list = state[storeKey] || [];
+      for (let i = 0; i < list.length; i++) {
+        const row = list[i];
+        const byId = row.cliente_id && String(row.cliente_id) === String(id);
+        const byName = row.cliente && String(row.cliente) === String(oldNome);
+        if (!byId && !byName) continue;
+        const next = { ...row, cliente: newNome, cliente_id: id };
+        if (window.BeautyStore && window.BeautyStore.updateInList) {
+          window.BeautyStore.updateInList(storeKey, row.id, next);
+        } else {
+          list[i] = next;
+        }
+        try { await dbPut(storeKey, next); } catch (e) {}
+      }
+    };
+    await patchList('movimentos');
+    await patchList('agendamentos');
+    // invalidar cache de stats se existir
+    try { if (typeof _statsCache !== 'undefined') _statsCache = { key: '', map: null }; } catch (e) {}
+  }
+
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  return item;
 }
 
 async function deleteCliente(id) {
@@ -229,11 +304,56 @@ async function deleteCliente(id) {
 // ====================================================================
 //  CRUD — AGENDAMENTO
 // ====================================================================
+
+/** Duração do serviço em minutos (default 60 se não configurado). */
+function getServicoDuracaoMin(servicoNome) {
+  const s = (state.servicos || []).find(x => x.nome === servicoNome);
+  if (!s) return 60;
+  const d = Number(s.duracao || s.duracaoMin || s.minutos || 0);
+  return d > 0 ? d : 60;
+}
+
+function _parseAgDateTime(data, hora) {
+  const h = String(hora || '00:00').slice(0, 5);
+  const dt = new Date(String(data) + 'T' + h + ':00');
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+/**
+ * Conflito = mesmo profissional, mesmo dia, intervalo sobreposto, status agendado.
+ * @returns {object|null} o agendamento conflituoso ou null
+ */
+function temConflitoAgendamento({ profissional_id, data, hora, servico, excludeId, duracaoMin }) {
+  if (!profissional_id || !data || !hora) return null;
+  const dur = duracaoMin || getServicoDuracaoMin(servico);
+  const start = _parseAgDateTime(data, hora);
+  if (!start) return null;
+  const end = new Date(start.getTime() + dur * 60000);
+
+  for (const a of state.agendamentos || []) {
+    if (excludeId && a.id === excludeId) continue;
+    if (String(a.profissional_id) !== String(profissional_id)) continue;
+    if (a.data !== data) continue;
+    const st = String(a.status || a.estado || 'agendado').toLowerCase();
+    if (st !== 'agendado') continue;
+    const aStart = _parseAgDateTime(a.data, a.hora);
+    if (!aStart) continue;
+    const aDur = getServicoDuracaoMin(a.servico);
+    const aEnd = new Date(aStart.getTime() + aDur * 60000);
+    if (start < aEnd && end > aStart) return a;
+  }
+  return null;
+}
+
 async function addAgendamento(ag) {
-  const dtStr = ag.data + 'T' + (ag.hora || '00:00') + ':00';
-  const agDatetime = new Date(dtStr);
-  const agora = new Date();
-  if (agDatetime < agora) {
+  const data = ag.data || (typeof hoje === 'function' ? hoje() : '');
+  const hora = String(ag.hora || (typeof horaAgora === 'function' ? horaAgora() : '00:00')).slice(0, 5);
+  const agDatetime = _parseAgDateTime(data, hora);
+  if (!agDatetime) {
+    toast('Data ou hora inválida.', 'error');
+    return null;
+  }
+  if (agDatetime < new Date()) {
     toast('Não é possível agendar para datas ou horários passados.', 'error');
     return null;
   }
@@ -243,14 +363,32 @@ async function addAgendamento(ag) {
     return null;
   }
 
+  const conflito = temConflitoAgendamento({
+    profissional_id: ag.profissional_id,
+    data,
+    hora,
+    servico: ag.servico,
+    excludeId: null
+  });
+  if (conflito) {
+    const h = String(conflito.hora || '').slice(0, 5);
+    toast(
+      'Conflito: ' + (conflito.cliente || 'cliente') + ' já tem ' + (conflito.servico || 'serviço') +
+      ' com este profissional às ' + h + '.',
+      'error'
+    );
+    return null;
+  }
+
   const n = {
     ...ag,
     id: uuid(),
-    data: ag.data || hoje(),
-    hora: ag.hora || horaAgora(),
+    data,
+    hora,
     status: 'agendado',
     profissional_id: ag.profissional_id || null,
-    profissional: ag.profissional || ''
+    profissional: ag.profissional || '',
+    updated_at: new Date().toISOString()
   };
   try {
     await dbPut('agendamentos', n);
@@ -273,17 +411,50 @@ async function addAgendamento(ag) {
 }
 
 async function updateAgendamento(id, data) {
+  const actual = (state.agendamentos || []).find(a => a.id === id);
+  if (!actual) return null;
+
+  const merged = { ...actual, ...data };
+  const st = String(merged.status || 'agendado').toLowerCase();
+  if (st === 'agendado' && (data.data || data.hora || data.profissional_id || data.servico)) {
+    const conflito = temConflitoAgendamento({
+      profissional_id: merged.profissional_id,
+      data: merged.data,
+      hora: merged.hora,
+      servico: merged.servico,
+      excludeId: id
+    });
+    if (conflito) {
+      const h = String(conflito.hora || '').slice(0, 5);
+      toast(
+        'Conflito: ' + (conflito.cliente || 'cliente') + ' já tem ' + (conflito.servico || 'serviço') +
+        ' com este profissional às ' + h + '.',
+        'error'
+      );
+      return null;
+    }
+    if (data.data || data.hora) {
+      const dt = _parseAgDateTime(merged.data, merged.hora);
+      if (dt && dt < new Date()) {
+        toast('Não é possível reagendar para o passado.', 'error');
+        return null;
+      }
+    }
+  }
+
+  merged.updated_at = new Date().toISOString();
   if (window.BeautyStore && window.BeautyStore.updateInList) {
-    window.BeautyStore.updateInList('agendamentos', id, data);
+    window.BeautyStore.updateInList('agendamentos', id, merged);
   } else {
     const i = state.agendamentos.findIndex(a => a.id === id);
-    if (i === -1) return;
-    state.agendamentos[i] = { ...state.agendamentos[i], ...data };
+    if (i === -1) return null;
+    state.agendamentos[i] = merged;
   }
   const item = state.agendamentos.find(a => a.id === id);
   if (item) await dbPut('agendamentos', item);
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
   if (typeof renderBadges === 'function') renderBadges();
+  return item;
 }
 
 async function deleteAgendamento(id) {
@@ -303,7 +474,7 @@ async function addProfissional(p) {
     return null;
   }
 
-  const n = { ...p, id: uuid(), nome };
+  const n = { ...p, id: uuid(), nome, ativo: p.ativo !== false };
   try {
     await dbPut('profissionais', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -323,24 +494,163 @@ async function addProfissional(p) {
   }
 }
 
-async function updateProfissional(id, data) {
-  if (data.nome) {
-    const nome = data.nome.trim();
-    if (existeNomeDuplicado('profissionais', nome, id)) {
-      toast('Já existe um profissional com este nome.', 'error');
-      return;
+
+function isProfissionalAtivo(p) {
+  if (!p) return false;
+  return p.ativo !== false && p.ativo !== 0 && p.ativo !== 'false';
+}
+
+function isServicoAtivo(s) {
+  if (!s) return false;
+  return s.ativo !== false && s.ativo !== 0 && s.ativo !== 'false';
+}
+
+function getProfissionaisAtivos() {
+  return (state.profissionais || []).filter(isProfissionalAtivo);
+}
+
+/**
+ * Soft-delete: destituir profissional sem DELETE remoto (evita 409 FK).
+ * Remove associações em serviços; desactiva serviços que ficam sem equipa.
+ */
+async function desassociarProfissional(id) {
+  const p = (state.profissionais || []).find(function (x) { return x.id === id; });
+  if (!p) {
+    if (typeof toast === 'function') toast('Profissional não encontrado', 'error');
+    return null;
+  }
+  if (!isProfissionalAtivo(p)) {
+    if (typeof toast === 'function') toast('Este profissional já está destituído', 'warning');
+    return null;
+  }
+
+  const patch = {
+    ativo: false,
+    data_desativacao: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  // UPDATE local + fila (não DELETE — crítico para multi-dispositivo)
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('profissionais', id, patch);
+  } else {
+    const i = state.profissionais.findIndex(function (x) { return x.id === id; });
+    if (i === -1) return null;
+    state.profissionais[i] = Object.assign({}, state.profissionais[i], patch);
+  }
+  const item = (state.profissionais || []).find(function (x) { return x.id === id; });
+  if (item) {
+    try { await dbPut('profissionais', item); } catch (e) {
+      console.error('[desassociarProfissional]', e);
     }
   }
+
+  const nome = p.nome || '';
+  const servicosAfetados = [];
+  const servicosDesativados = [];
+
+  for (const s of (state.servicos || []).slice()) {
+    const arr = Array.isArray(s.profissionais) ? s.profissionais.slice() : [];
+    if (!arr.length) continue;
+    const next = arr.filter(function (x) {
+      return x !== nome && String(x) !== String(id);
+    });
+    if (next.length === arr.length) continue;
+
+    const sPatch = { profissionais: next };
+    if (next.length === 0) {
+      sPatch.ativo = false;
+      servicosDesativados.push(s.nome || 'Serviço');
+    } else {
+      servicosAfetados.push(s.nome || 'Serviço');
+    }
+
+    if (window.BeautyStore && window.BeautyStore.updateInList) {
+      window.BeautyStore.updateInList('servicos', s.id, sPatch);
+    } else {
+      const si = state.servicos.findIndex(function (x) { return x.id === s.id; });
+      if (si !== -1) state.servicos[si] = Object.assign({}, state.servicos[si], sPatch);
+    }
+    const updated = (state.servicos || []).find(function (x) { return x.id === s.id; });
+    if (updated) {
+      try { await dbPut('servicos', updated); } catch (e) {}
+    }
+  }
+
+  if (!(window.BeautyStore && window.BeautyStore.subscribe) && typeof updateUI === 'function') {
+    updateUI();
+  }
+
+  return {
+    profissional: item || Object.assign({}, p, patch),
+    servicosAfetados: servicosAfetados,
+    servicosDesativados: servicosDesativados
+  };
+}
+
+async function updateProfissional(id, data) {
+  const actual = (state.profissionais || []).find(p => p.id === id);
+  if (!actual) return null;
+
+  if (data.nome) {
+    const nome = data.nome.trim();
+    data = { ...data, nome };
+    if (existeNomeDuplicado('profissionais', nome, id)) {
+      toast('Já existe um profissional com este nome.', 'error');
+      return null;
+    }
+  }
+  const oldNome = actual.nome;
+  const newNome = data.nome != null ? data.nome : oldNome;
+  const renamed = data.nome != null && String(data.nome) !== String(oldNome);
+
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('profissionais', id, data);
   } else {
     const i = state.profissionais.findIndex(p => p.id === id);
-    if (i === -1) return;
+    if (i === -1) return null;
     state.profissionais[i] = { ...state.profissionais[i], ...data };
   }
   const item = state.profissionais.find(p => p.id === id);
   if (item) await dbPut('profissionais', item);
+
+  // Rename: actualizar nomes em serviços ligados (array legado de nomes)
+  if (renamed && oldNome && newNome) {
+    for (const s of (state.servicos || [])) {
+      const arr = s.profissionais || [];
+      if (!arr.length) continue;
+      let changed = false;
+      const next = arr.map(function (x) {
+        if (x === oldNome || x === id) { changed = true; return newNome; }
+        return x;
+      });
+      if (!changed) continue;
+      const updated = { ...s, profissionais: next };
+      if (window.BeautyStore && window.BeautyStore.updateInList) {
+        window.BeautyStore.updateInList('servicos', s.id, updated);
+      } else {
+        const si = state.servicos.findIndex(x => x.id === s.id);
+        if (si !== -1) state.servicos[si] = updated;
+      }
+      try { await dbPut('servicos', updated); } catch (e) {}
+    }
+    // Nome em movimentos legados sem quebrar id
+    for (const m of (state.movimentos || [])) {
+      if (String(m.profissional_id) !== String(id)) continue;
+      if (m.profissional === newNome) continue;
+      const updated = { ...m, profissional: newNome };
+      if (window.BeautyStore && window.BeautyStore.updateInList) {
+        window.BeautyStore.updateInList('movimentos', m.id, updated);
+      } else {
+        const mi = state.movimentos.findIndex(x => x.id === m.id);
+        if (mi !== -1) state.movimentos[mi] = updated;
+      }
+      try { await dbPut('movimentos', updated); } catch (e) {}
+    }
+  }
+
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  return item;
 }
 
 async function deleteProfissional(id) {
@@ -416,14 +726,15 @@ function getProfissionaisPorServico(nomeServico) {
 // ====================================================================
 async function registarVenda(dados) {
   try {
-    if (!dados.cliente || String(dados.cliente).trim() === '') {
-      toast('Selecione ou crie um cliente antes de registar a venda.', 'error');
-      return null;
-    }
-
-    if (!dados.profissional_id || String(dados.profissional_id).trim() === '') {
-      toast('Selecione um profissional antes de registar a venda.', 'error');
-      return null;
+    const clienteNome = String(dados.cliente || '').trim() || 'Avulso';
+    let clienteId = dados.cliente_id || null;
+    if (!clienteId && typeof resolverClienteIdPorNome === 'function') {
+      clienteId = resolverClienteIdPorNome(clienteNome);
+    } else if (!clienteId && clienteNome && clienteNome !== 'Avulso' && clienteNome !== 'Anónimo') {
+      const hit = (state.clientes || []).find(c =>
+        String(c.nome || '').trim().toLowerCase() === clienteNome.toLowerCase()
+      );
+      if (hit) clienteId = hit.id;
     }
 
     if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
@@ -439,14 +750,26 @@ async function registarVenda(dados) {
 
     const descricao = dados.itens.map(i => i.nome).join(', ');
     const id = uuid();
+    let comissao = 0;
+    if (dados.profissional_id && typeof calcularComissao === 'function') {
+      try { comissao = Number(calcularComissao(dados.profissional_id, total)) || 0; } catch (e) { comissao = 0; }
+    } else if (dados.profissional_id && typeof getTaxaComissao === 'function') {
+      try {
+        const taxa = Number(getTaxaComissao(dados.profissional_id)) || 0;
+        comissao = Math.round((total * taxa) / 100);
+      } catch (e) { comissao = 0; }
+    }
+
     const mov = {
       id,
       tipo: 'venda',
       descricao,
       valor: total,
-      cliente: dados.cliente,
+      cliente: clienteNome,
+      cliente_id: clienteId || null,
       profissional_id: dados.profissional_id || null,
       profissional: dados.profissional || 'Não atribuído',
+      comissao_gerada: comissao,
       itens: dados.itens.map(i => ({
         nome: i.nome,
         quantidade: Number(i.quantidade) || 1,
@@ -470,6 +793,15 @@ async function registarVenda(dados) {
       updateUI();
     }
     if (typeof renderBadges === 'function') renderBadges();
+
+    // Fidelidade: creditar pontos se há ficha de cliente
+    if (clienteId) {
+      var pts = calcularPontosVenda(total);
+      if (pts > 0) {
+        try { await creditarPontosCliente(clienteId, pts); } catch (ePts) {}
+      }
+    }
+
     return id;
   } catch (err) {
     console.error('[registarVenda] Erro:', err);

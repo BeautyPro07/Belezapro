@@ -237,10 +237,13 @@
   }
 
   function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
     var el = document.getElementById(id);
     if (el) {
-      var t = el.querySelector('.bp-sheet-title');
-      if (t && title) t.textContent = title;
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
       return el;
     }
     el = document.createElement('div');
@@ -248,18 +251,22 @@
     el.className = 'modal-overlay';
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
     el.innerHTML =
-      '<div class="bp-sheet">' +
-        '<div class="bp-sheet-handle" aria-hidden="true"></div>' +
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
         '<div class="bp-sheet-header">' +
-          '<div class="bp-sheet-eyebrow">' + esc(eyebrow || 'Equipa') + '</div>' +
-          '<h2 class="bp-sheet-title">' + esc(title) + '</h2>' +
-          (subtitle ? '<p class="bp-sheet-subtitle">' + esc(subtitle) + '</p>' : '') +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
         '</div>' +
         '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
-        '<div class="bp-sheet-footer">' +
+        '<div class="bp-sheet-footer modal-actions">' +
           '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
-        '</div></div>';
+        '</div>' +
+      '</div>';
     document.body.appendChild(el);
     el.addEventListener('click', function (e) {
       if (e.target === el || e.target.getAttribute('data-close') === id) {
@@ -285,34 +292,40 @@
     var periodo = localStorage.getItem(RANK_PERIODO_KEY) || 'mes';
     var data = calcRanking(periodo);
     var rank = data.list;
+    var activos = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
     var toggle =
-      '<div style="display:flex;gap:8px;margin-bottom:16px">' +
-        '<button type="button" class="bp-action-btn' + (periodo === 'semana' ? ' is-primary' : '') + '" data-rank-p="semana">Esta semana</button>' +
-        '<button type="button" class="bp-action-btn' + (periodo === 'mes' ? ' is-primary' : '') + '" data-rank-p="mes">Este mês</button></div>';
-    if (!(state.profissionais || []).length) {
-      body.innerHTML = toggle + '<div class="bp-empty"><strong>Sem profissionais</strong>Cadastre a equipa na aba Equipa.</div>';
+      '<div class="bp-seg" role="tablist" aria-label="Período do ranking">' +
+        '<button type="button" class="bp-seg-btn' + (periodo === 'semana' ? ' is-active' : '') + '" data-rank-p="semana" role="tab">Esta semana</button>' +
+        '<button type="button" class="bp-seg-btn' + (periodo === 'mes' ? ' is-active' : '') + '" data-rank-p="mes" role="tab">Este mês</button></div>';
+    if (!activos.length) {
+      body.innerHTML = toggle + '<div class="bp-empty"><strong>Sem profissionais activos</strong>Adicione a equipa na aba Equipa.</div>';
       bindRankToggle(body); return;
     }
     if (!rank.some(function (r) { return r.vendas > 0; })) {
-      body.innerHTML = toggle + '<div class="bp-empty"><strong>Ainda sem vendas no período</strong>O ranking actualiza após vendas atribuídas a profissionais.</div>';
+      body.innerHTML = toggle + '<div class="bp-empty"><strong>Sem vendas no período</strong>O ranking actualiza com vendas atribuídas a profissionais.</div>';
       bindRankToggle(body); return;
     }
     var top = rank[0];
     var kpis =
       '<div class="bp-kpi-grid">' +
-        '<div class="bp-kpi"><div class="bp-kpi-label">Líder</div><div class="bp-kpi-value is-gold" style="font-size:.78rem;line-height:1.3">' + esc(top.nome) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Líder</div><div class="bp-kpi-value is-gold" style="font-size:.8rem;line-height:1.25">' + esc(top.nome) + '</div></div>' +
         '<div class="bp-kpi"><div class="bp-kpi-label">Pontos</div><div class="bp-kpi-value">' + top.pontos + '</div></div>' +
-        '<div class="bp-kpi"><div class="bp-kpi-label">Receita equipa</div><div class="bp-kpi-value" style="font-size:.72rem">' + fmt(data.totalReceita) + '</div></div></div>';
+        '<div class="bp-kpi"><div class="bp-kpi-label">Receita equipa</div><div class="bp-kpi-value" style="font-size:.75rem">' + fmt(data.totalReceita) + '</div></div></div>';
     var rows = rank.map(function (r, i) {
-      var pos = (i + 1) + '.º';
-      var badge = i < 3 ? '<span class="bp-badge">' + pos + '</span> ' : '<span style="display:inline-block;min-width:2rem;color:var(--text-muted);font-size:.75rem">' + pos + '</span> ';
-      var meta = r.metaOk ? ' · <span class="bp-badge is-green">Meta</span>' : '';
-      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + badge + esc(r.nome) + meta + '</div>' +
-        '<div class="bp-row-meta">' + r.vendas + ' vendas · ticket ' + fmt(r.ticket) + ' · ' + r.share + '% receita · comissão ' + fmt(r.comissao) + '</div></div>' +
-        '<div class="bp-row-value is-gold">' + r.pontos + '</div></div>';
+      var rankClass = i === 0 ? ' is-rank-1' : (i === 1 ? ' is-rank-2' : (i === 2 ? ' is-rank-3' : ''));
+      var badge = '<span class="bp-badge' + rankClass + '">' + (i + 1) + '.º</span> ';
+      var metaBadge = r.metaOk ? ' <span class="bp-badge is-green">Meta</span>' : '';
+      var pctMeta = (r.meta > 0) ? Math.min(100, Math.round((r.receita / r.meta) * 100)) : 0;
+      var bar = r.meta > 0 ? '<div class="bp-meta-bar" title="Progresso da meta"><i style="width:' + pctMeta + '%"></i></div>' : '';
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + badge + esc(r.nome) + metaBadge + '</div>' +
+        '<div class="bp-row-meta">' + r.vendas + ' vendas · ticket ' + fmt(r.ticket) + ' · ' + (r.share || 0) + '% receita</div>' +
+        bar +
+        '</div><div class="bp-row-value is-gold">' + r.pontos + '<span style="display:block;font-size:.6rem;font-weight:500;color:var(--text-muted)">pts</span></div></div>';
     }).join('');
     body.innerHTML = toggle + kpis +
-      '<p style="font-size:.75rem;color:var(--text-muted);margin:0 0 12px;line-height:1.45">10 pts/venda · 1 pt/1.000 Kz · +50 pts se atingir meta mensal</p>' +
+      '<p class="bp-ref-line">10 pts/venda · 1 pt/1.000 Kz · +50 pts ao atingir a meta mensal</p>' +
       '<div class="bp-section"><div class="bp-section-title">Classificação</div>' + rows + '</div>';
     bindRankToggle(body);
   }
@@ -326,25 +339,41 @@
   }
 
   function openHorarios() {
-    ensureShell('modal-bp-horarios', 'Horários e folgas', 'Operação', 'Turnos, intervalos, folgas e conflitos com a agenda.');
+    ensureShell('modal-bp-horarios', 'Horários e folgas', 'Equipa', 'Turnos, intervalos, folgas e conflitos com a agenda de hoje.');
     renderHorariosList();
     openShell('modal-bp-horarios');
   }
   function renderHorariosList() {
     var body = document.getElementById('modal-bp-horarios-body');
     if (!body) return;
-    var profs = state.profissionais || [];
+    var profs = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
     if (!profs.length) {
-      body.innerHTML = '<div class="bp-empty"><strong>Sem profissionais</strong>Cadastre a equipa na aba Equipa.</div>';
+      body.innerHTML = '<div class="bp-empty"><strong>Sem profissionais activos</strong>Cadastre a equipa na aba Equipa.</div>';
       return;
     }
-    var list = profs.map(function (p) {
+
+    var emTurno = 0, emFolga = 0, conflitosTotal = 0;
+    var rows = profs.map(function (p) {
       var h = getHorarioProf(p.id);
       var st = estadoHojeProf(p.id);
       var conf = conflitosAgenda(p.id, hojeStr());
-      var dias = (h.dias || []).map(function (d) { return DIAS_LABEL[d] || d; }).join(' · ') || '—';
-      var badgeClass = st.code === 'em_turno' ? ' is-green' : '';
-      var alert = conf.length ? '<div class="bp-row-meta" style="color:var(--red);margin-top:4px">' + conf.length + ' marcação(ões) em conflito hoje</div>' : '';
+      conflitosTotal += conf.length;
+      if (st.code === 'em_turno') emTurno++;
+      if (st.code === 'folga' || st.code === 'dia_folga_semana') emFolga++;
+
+      var badgeClass = '';
+      if (st.code === 'em_turno') badgeClass = ' is-green';
+      else if (st.code === 'folga' || st.code === 'dia_folga_semana') badgeClass = ' is-gold';
+      else if (st.code === 'intervalo') badgeClass = '';
+      else if (st.code === 'fora_horario' || st.code === 'inactivo') badgeClass = ' is-red';
+
+      var dias = (h.dias || []).map(function (d) { return DIAS_LABEL[d] || d; }).join(', ') || 'Sem dias definidos';
+      var alert = conf.length
+        ? '<div class="bp-row-meta" style="color:var(--red);margin-top:4px">' + conf.length + ' marcação(ões) em conflito hoje</div>'
+        : '';
+
       return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(p.nome) +
         ' <span class="bp-badge' + badgeClass + '">' + esc(st.label) + '</span></div>' +
         '<div class="bp-row-meta">' + esc(h.entrada) + '–' + esc(h.saida) +
@@ -352,12 +381,32 @@
         '<br>' + esc(dias) + '</div>' + alert + '</div>' +
         '<button type="button" class="bp-action-btn" data-edit-horario="' + p.id + '">Editar</button></div>';
     }).join('');
-    body.innerHTML = '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Estado de hoje · ' + esc(hojeStr()) + '</div>' + list + '</div>' +
+
+    var insight = '';
+    if (conflitosTotal > 0) {
+      insight = '<div class="bp-alert-banner is-warn"><strong>' + conflitosTotal +
+        (conflitosTotal === 1 ? ' conflito com a agenda' : ' conflitos com a agenda') +
+        '</strong>Há marcações fora do turno ou em dia de folga. Edite o horário ou reagende.</div>';
+    } else {
+      insight = '<div class="bp-alert-banner is-ok"><strong>Escala alinhada com a agenda</strong>Nenhum conflito detectado para hoje.</div>';
+    }
+
+    body.innerHTML =
+      insight +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Em turno</div><div class="bp-kpi-value is-positive">' + emTurno + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Folga</div><div class="bp-kpi-value">' + emFolga + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Conflitos</div><div class="bp-kpi-value' + (conflitosTotal ? ' is-negative' : '') + '">' + conflitosTotal + '</div></div>' +
+      '</div>' +
+      '<p class="bp-ref-line">Estado em tempo real · ' + esc(hojeStr()) + ' · só profissionais activos</p>' +
+      '<div class="bp-section"><div class="bp-section-title">Equipa · hoje</div>' + rows + '</div>' +
       '<div id="bp-horario-editor" style="display:none;margin-top:8px"></div>';
+
     body.querySelectorAll('[data-edit-horario]').forEach(function (btn) {
       btn.onclick = function () { renderEditorHorario(btn.getAttribute('data-edit-horario')); };
     });
   }
+
   function renderEditorHorario(profId) {
     var box = document.getElementById('bp-horario-editor');
     if (!box) return;
@@ -386,11 +435,11 @@
     box.innerHTML =
       '<div style="padding-top:16px;border-top:1px solid var(--border-soft)">' +
       '<div class="bp-section-title">Editar · ' + esc(p.nome) + '</div>' + confHtml +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">' +
-        '<div class="input-group"><label class="input-label">Entrada</label><input type="time" id="bp-h-entrada" class="input-field" value="' + esc(h.entrada) + '"></div>' +
-        '<div class="input-group"><label class="input-label">Saída</label><input type="time" id="bp-h-saida" class="input-field" value="' + esc(h.saida) + '"></div>' +
-        '<div class="input-group"><label class="input-label">Início intervalo</label><input type="time" id="bp-h-i0" class="input-field" value="' + esc(h.intervaloInicio || '13:00') + '"></div>' +
-        '<div class="input-group"><label class="input-label">Fim intervalo</label><input type="time" id="bp-h-i1" class="input-field" value="' + esc(h.intervaloFim || '14:00') + '"></div></div>' +
+      '<div class="bp-form-grid-2" style="margin-bottom:12px">' +
+        '<div class="input-group"><label class="input-label" for="bp-h-entrada">Entrada</label><input type="time" id="bp-h-entrada" class="input-field" value="' + esc(h.entrada) + '"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-h-saida">Saída</label><input type="time" id="bp-h-saida" class="input-field" value="' + esc(h.saida) + '"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-h-i0">Início intervalo</label><input type="time" id="bp-h-i0" class="input-field" value="' + esc(h.intervaloInicio || '13:00') + '"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-h-i1">Fim intervalo</label><input type="time" id="bp-h-i1" class="input-field" value="' + esc(h.intervaloFim || '14:00') + '"></div></div>' +
       '<div class="input-group"><label class="input-label">Dias de trabalho</label><div>' + diasChecks + '</div></div>' +
       '<div class="input-group"><label class="input-label">Folgas futuras</label><div style="margin-bottom:8px">' + folgasHtml + '</div>' +
       '<input type="date" id="bp-h-folga" class="input-field" min="' + hojeStr() + '"></div>' +

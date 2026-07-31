@@ -188,3 +188,80 @@ function storageGetSecure(key, fallback) {
     return fallback;
   }
 }
+
+
+// ====================================================================
+//  MODAIS DO MENU ☰ — shell profissional partilhada (SaaS-grade)
+// ====================================================================
+function ensureBpSheetModal(id, title, eyebrow, subtitle, opts) {
+  opts = opts || {};
+  var el = document.getElementById(id);
+  if (el) {
+    var tEl = el.querySelector('.bp-sheet-title');
+    var eEl = el.querySelector('.bp-sheet-eyebrow');
+    var sEl = el.querySelector('.bp-sheet-subtitle');
+    if (tEl && title) tEl.textContent = title;
+    if (eEl && eyebrow) eEl.textContent = eyebrow;
+    if (sEl) {
+      if (subtitle) {
+        sEl.textContent = subtitle;
+        sEl.hidden = false;
+      } else {
+        sEl.textContent = '';
+        sEl.hidden = true;
+      }
+    }
+    return el;
+  }
+
+  el = document.createElement('div');
+  el.id = id;
+  el.className = 'modal-overlay';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-labelledby', id + '-title');
+
+  var eye = eyebrow || 'BeautyPro';
+  var sub = subtitle || '';
+  var closeLabel = opts.closeLabel || 'Fechar';
+  var primaryHtml = opts.primaryHtml || '';
+
+  el.innerHTML =
+    '<div class="bp-sheet modal-sheet">' +
+      '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+      '<div class="bp-sheet-header">' +
+        '<div class="bp-sheet-eyebrow">' + (typeof escHtml === 'function' ? escHtml(eye) : eye) + '</div>' +
+        '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + (typeof escHtml === 'function' ? escHtml(title) : title) + '</h2>' +
+        '<p class="bp-sheet-subtitle"' + (sub ? '' : ' hidden') + '>' + (typeof escHtml === 'function' ? escHtml(sub) : sub) + '</p>' +
+      '</div>' +
+      '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+      '<div class="bp-sheet-footer modal-actions">' +
+        '<button type="button" class="btn btn-secondary" data-close="' + id + '">' + closeLabel + '</button>' +
+        primaryHtml +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(el);
+
+  el.addEventListener('click', function (e) {
+    if (e.target === el || e.target.getAttribute('data-close') === id) {
+      if (typeof closeModal === 'function') closeModal(id);
+      else el.classList.remove('open');
+    }
+  });
+
+  return el;
+}
+
+function openBpSheetModal(id) {
+  if (typeof openModal === 'function') openModal(id);
+  else {
+    var el = document.getElementById(id);
+    if (el) el.classList.add('open');
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.ensureBpSheetModal = ensureBpSheetModal;
+  window.openBpSheetModal = openBpSheetModal;
+}

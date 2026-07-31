@@ -103,6 +103,15 @@
   transition: var(--transition);
 }
 .sync-dot.online { background: var(--green); }
+.sync-status[data-state="pending"] .sync-dot { background: var(--gold, #C9A227); }
+.sync-status[data-state="offline"] .sync-dot { background: var(--red); }
+.sync-status[data-state="error"] .sync-dot { background: var(--red); }
+.offline-banner-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold-dark); flex-shrink: 0;
+}
+#sync-status-container { max-width: 42vw; }
+#sync-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #menu-btn:hover, #menu-btn:focus-visible { background: rgba(0,0,0,.05); }
 #menu-btn:active { background: rgba(0,0,0,.08); }
 .offline-banner {

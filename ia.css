@@ -197,3 +197,78 @@
   z-index: 10;
 }
 
+
+/* Markdown renderizado nas respostas Benza */
+.ia-msg-bot-corpo {
+  white-space: normal;
+}
+.ia-msg-bot-corpo .ia-md-p {
+  margin: 0 0 0.45em;
+  line-height: 1.55;
+}
+.ia-msg-bot-corpo .ia-md-p:last-child { margin-bottom: 0; }
+.ia-msg-bot-corpo .ia-md-h {
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0.55em 0 0.3em;
+  line-height: 1.3;
+}
+.ia-msg-bot-corpo .ia-md-h1 { font-size: 1rem; }
+.ia-msg-bot-corpo .ia-md-h2 { font-size: 0.92rem; }
+.ia-msg-bot-corpo .ia-md-h3 { font-size: 0.88rem; }
+.ia-msg-bot-corpo .ia-md-ul,
+.ia-msg-bot-corpo .ia-md-ol {
+  margin: 0.35em 0 0.5em;
+  padding-left: 1.25em;
+}
+.ia-msg-bot-corpo .ia-md-ul li,
+.ia-msg-bot-corpo .ia-md-ol li {
+  margin-bottom: 0.25em;
+  line-height: 1.45;
+}
+.ia-msg-bot-corpo .ia-md-gap { height: 0.4em; }
+.ia-msg-bot-corpo .ia-md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8em;
+  background: var(--bg-soft);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.ia-msg-bot-corpo .ia-md-pre {
+  margin: 0.45em 0;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm, 8px);
+  overflow-x: auto;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.ia-msg-bot-corpo .ia-md-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm, 8px);
+}
+.ia-msg-bot-corpo .ia-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  min-width: 220px;
+}
+.ia-msg-bot-corpo .ia-md-table th,
+.ia-msg-bot-corpo .ia-md-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+.ia-msg-bot-corpo .ia-md-table th {
+  font-weight: 700;
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.ia-msg-bot-corpo .ia-md-table tr:last-child td { border-bottom: none; }
+.ia-msg-bot-corpo strong { font-weight: 700; color: var(--text-primary); }

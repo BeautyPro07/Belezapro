@@ -144,29 +144,47 @@ function abrirDetalheVenda(id) {
   const venda = state.movimentos.find(m => m.id === id && m.tipo === 'venda');
   if (!venda) { toast('Venda não encontrada', 'error'); return; }
   vendaAtual = venda;
-  const itensHtml = venda.itens && venda.itens.length > 0 ?
-    `<div class="detalhe-itens-header"><span>Descrição</span><span style="text-align:right">Qtd</span><span style="text-align:right">P.Unit</span><span style="text-align:right">Total</span></div>
-     ${venda.itens.map(item => `
-      <div class="detalhe-item-row">
-        <span class="desc">${escHtml(item.nome)}</span>
-        <span class="qty">${item.quantidade}</span>
-        <span class="pu">${fmtKz(item.precoUnit || item.subtotal)}</span>
-        <span class="sub">${fmtKz(item.subtotal)}</span>
-      </div>`).join('')}` :
-    `<div style="color:var(--text-muted);font-size:.85rem;padding:8px 0;">Sem itens detalhados</div>`;
+  const nomeProf = typeof getProfissionalNome === 'function'
+    ? getProfissionalNome(venda.profissional_id)
+    : (venda.profissional || '—');
   const mp = venda.metodoPagamento || 'Numerário';
-  const mpIcon = { 'Numerário': '', 'Multicaixa Express': '', 'Transferência Bancária': '', 'Cartão': '' } [mp] || '';
-  const nomeProf = getProfissionalNome(venda.profissional_id);
-  document.getElementById('detalhe-venda-conteudo').innerHTML = `
-    <div class="detalhe-meta">
-      <div class="detalhe-meta-row"><span class="label">Cliente</span><span class="val">${escHtml(venda.cliente || 'Anónimo')}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Profissional</span><span class="val">${escHtml(nomeProf)}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Data / Hora</span><span class="val">${venda.data} · ${venda.hora}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Pagamento</span><span class="val"><span class="pagamento-badge">${escHtml(mp)}</span></span></div>
-    </div>
-    <div>${itensHtml}</div>
-    <div class="detalhe-total"><span class="label">Total</span><span class="val">${fmtKz(venda.valor)}</span></div>`;
-  document.getElementById('detalhe-venda-titulo').textContent = 'Venda #' + String(venda.id).slice(0, 8).toUpperCase();
+  const ref = String(venda.reciboNum || venda.id || '').slice(0, 8).toUpperCase();
+
+  let itensHtml = '';
+  if (venda.itens && venda.itens.length > 0) {
+    itensHtml =
+      '<div class="bp-view-section-title">Itens</div>' +
+      '<div class="bp-view-dl">' +
+      '<div class="detalhe-itens-header" style="padding:10px 14px;border-bottom:1px solid var(--border-soft);">' +
+      '<span>Descrição</span><span style="text-align:right">Qtd</span><span style="text-align:right">Unit.</span><span style="text-align:right">Total</span></div>' +
+      venda.itens.map(function (item) {
+        return (
+          '<div class="detalhe-item-row" style="padding-left:14px;padding-right:14px;">' +
+          '<span class="desc">' + escHtml(item.nome) + '</span>' +
+          '<span class="qty">' + (item.quantidade || 1) + '</span>' +
+          '<span class="pu">' + fmtKz(item.precoUnit != null ? item.precoUnit : item.subtotal) + '</span>' +
+          '<span class="sub">' + fmtKz(item.subtotal) + '</span></div>'
+        );
+      }).join('') +
+      '</div>';
+  } else {
+    itensHtml = '<p class="bp-view-value--muted" style="font-size:.85rem;margin:0 0 12px;">Sem linhas de item nesta venda.</p>';
+  }
+
+  const box = document.getElementById('detalhe-venda-conteudo');
+  if (box) {
+    box.innerHTML =
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Cliente</span><span class="bp-view-value">' + escHtml(venda.cliente || 'Avulso') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Profissional</span><span class="bp-view-value">' + escHtml(nomeProf || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Quando</span><span class="bp-view-value">' + escHtml(String(venda.data || '')) + ' · ' + escHtml(String(venda.hora || '').slice(0, 5)) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Pagamento</span><span class="bp-view-value"><span class="pagamento-badge">' + escHtml(mp) + '</span></span></div>' +
+      '</div>' +
+      itensHtml +
+      '<div class="bp-view-total"><span class="bp-view-label">Total</span><span class="bp-view-value">' + fmtKz(Number(venda.valor) || 0) + '</span></div>';
+  }
+  const tit = document.getElementById('detalhe-venda-titulo');
+  if (tit) tit.textContent = ref ? ('Ref. ' + ref) : 'Detalhe da venda';
   openModal('modal-detalhe-venda');
 }
 
@@ -205,6 +223,33 @@ function imprimirRecibo(venda) {
 // ====================================================================
 //  CARRINHO INTELIGENTE (agrupamento, +/- , persistência) — SEM PROFISSIONAL POR ITEM
 // ====================================================================
+
+/** Microinterações do carrinho (respeita prefers-reduced-motion). */
+let _cartAnim = { type: null, idx: -1, nome: null };
+function _cartMotionOk() {
+  try {
+    return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch (e) { return true; }
+}
+function _pulseCartTotal() {
+  if (!_cartMotionOk()) return;
+  const el = document.querySelector('#cart-total-area .ct-val');
+  if (!el) return;
+  el.classList.remove('ct-val--pulse');
+  void el.offsetWidth;
+  el.classList.add('ct-val--pulse');
+  setTimeout(function () { el.classList.remove('ct-val--pulse'); }, 280);
+}
+function _bumpEl(row, sel) {
+  if (!_cartMotionOk() || !row) return;
+  const el = row.querySelector(sel);
+  if (!el) return;
+  el.classList.remove('is-bump');
+  void el.offsetWidth;
+  el.classList.add('is-bump');
+  setTimeout(function () { el.classList.remove('is-bump'); }, 220);
+}
+
 let cartItems = [];
 const CART_STORAGE_KEY = 'bp_cart_items';
 
@@ -230,36 +275,93 @@ function renderCart() {
   if (!list) return;
 
   if (cartItems.length === 0) {
-    list.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:.85rem;">Carrinho vazio — adicione serviços acima</div>';
-    if (totalArea) totalArea.innerHTML = '';
+    list.innerHTML = `
+      <div class="venda-cart-empty">
+        <p class="venda-cart-empty-title">Nenhum item ainda</p>
+        <p class="venda-cart-empty-hint">Escolha um serviço abaixo e toque em «Adicionar à venda».</p>
+      </div>`;
+    if (totalArea) {
+      totalArea.innerHTML = '';
+      totalArea.hidden = true;
+    }
+    updateVendaSaveButton();
     return;
   }
 
-  list.innerHTML = cartItems.map((item, idx) => `
-    <div class="cart-item-row" data-idx="${idx}">
+  list.innerHTML = cartItems.map((item, idx) => {
+    let cls = 'cart-item-row';
+    if (_cartAnim.type === 'add' && (
+      (_cartAnim.idx === idx) || (_cartAnim.nome && item.nome === _cartAnim.nome)
+    )) cls += ' adding';
+    if (_cartAnim.type === 'qty' && _cartAnim.idx === idx) cls += ' is-qty-flash';
+    return `
+    <div class="${cls}" data-idx="${idx}" data-nome="${escHtml(item.nome)}">
       <span class="ci-name">${escHtml(item.nome)}</span>
       <span class="ci-qty-controls">
-        <button class="qty-btn" data-idx="${idx}" data-action="decrement">−</button>
+        <button type="button" class="qty-btn" data-idx="${idx}" data-action="decrement" aria-label="Diminuir quantidade">−</button>
         <span class="qty-number">${item.quantidade}</span>
-        <button class="qty-btn" data-idx="${idx}" data-action="increment">+</button>
+        <button type="button" class="qty-btn" data-idx="${idx}" data-action="increment" aria-label="Aumentar quantidade">+</button>
       </span>
       <span class="ci-val">${fmtKz(item.subtotal)}</span>
-      <button class="ci-del" data-idx="${idx}" aria-label="Remover item">✕</button>
-    </div>
-  `).join('');
+      <button type="button" class="ci-del" data-idx="${idx}" aria-label="Remover item">✕</button>
+    </div>`;
+  }).join('');
+  // Limpar flags após paint + micro-bumps
+  const animType = _cartAnim.type;
+  const animIdx = _cartAnim.idx;
+  _cartAnim = { type: null, idx: -1, nome: null };
+  if (animType && _cartMotionOk()) {
+    requestAnimationFrame(function () {
+      const row = list.querySelector('.cart-item-row[data-idx="' + animIdx + '"]') ||
+        list.querySelector('.cart-item-row.adding') ||
+        list.querySelector('.cart-item-row.is-qty-flash');
+      if (row && (animType === 'qty' || animType === 'add')) {
+        _bumpEl(row, '.qty-number');
+        _bumpEl(row, '.ci-val');
+      }
+      _pulseCartTotal();
+      list.querySelectorAll('.cart-item-row.adding').forEach(function (r) {
+        r.addEventListener('animationend', function () { r.classList.remove('adding'); }, { once: true });
+      });
+      list.querySelectorAll('.cart-item-row.is-qty-flash').forEach(function (r) {
+        setTimeout(function () { r.classList.remove('is-qty-flash'); }, 400);
+      });
+    });
+  } else {
+    _pulseCartTotal();
+  }
 
-  const total = cartItems.reduce((s, i) => s + i.subtotal, 0);
-  const totalItems = cartItems.reduce((s, i) => s + i.quantidade, 0);
+  const total = cartItems.reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
+  const totalItems = cartItems.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
   if (totalArea) {
+    totalArea.hidden = false;
     totalArea.innerHTML = `
       <div class="cart-total-row">
-        <span class="ct-label">Subtotal (${totalItems} itens)</span>
+        <span class="ct-label">${totalItems === 1 ? '1 item' : totalItems + ' itens'}</span>
         <span class="ct-val">${fmtKz(total)}</span>
       </div>
     `;
   }
 
   saveCartToStorage();
+  updateVendaSaveButton();
+}
+
+/** CTA do rodapé: desactivado se vazio; mostra o valor a cobrar. */
+function updateVendaSaveButton() {
+  const btn = document.getElementById('modal-venda-save');
+  if (!btn) return;
+  const total = (cartItems || []).reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
+  const n = (cartItems || []).length;
+  if (n === 0 || total <= 0) {
+    btn.disabled = true;
+    btn.textContent = 'Cobrar';
+    btn.setAttribute('aria-disabled', 'true');
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Cobrar · ' + (typeof fmtKz === 'function' ? fmtKz(total) : total + ' Kz');
+    btn.removeAttribute('aria-disabled');
+  }
 }
 
 // --- Ajustar quantidade ---
@@ -268,29 +370,59 @@ function adjustQuantity(idx, delta) {
   const item = cartItems[idx];
   const newQty = item.quantidade + delta;
   if (newQty <= 0) {
-    cartItems.splice(idx, 1);
-  } else {
-    item.quantidade = newQty;
-    item.subtotal = item.quantidade * item.precoUnit;
+    removeItemFromCart(idx, true);
+    return;
   }
+  item.quantidade = newQty;
+  item.subtotal = item.quantidade * item.precoUnit;
+  _cartAnim = { type: 'qty', idx: idx, nome: item.nome };
   renderCart();
 }
 
 // --- Remover item (com confirmação) ---
-function removeItemFromCart(idx) {
+async function removeItemFromCart(idx, skipConfirm) {
   if (idx < 0 || idx >= cartItems.length) return;
   const item = cartItems[idx];
-  if (item.quantidade > 1) {
-    const choice = confirm(`"${escHtml(item.nome||"")}" tem ${item.quantidade} unidades. Deseja remover todas?`);
-    if (choice) {
-      cartItems.splice(idx, 1);
+  if (!skipConfirm && item.quantidade > 1) {
+    let choice = true;
+    if (typeof showConfirmModal === 'function') {
+      choice = await showConfirmModal(
+        'Remover item?',
+        '"' + (item.nome || 'Item') + '" tem ' + item.quantidade + ' unidades. Remover todas da venda?',
+        true
+      );
     } else {
-      adjustQuantity(idx, -(item.quantidade - 1));
+      choice = confirm('"' + (item.nome || '') + '" tem ' + item.quantidade + ' unidades. Remover todas?');
     }
-  } else {
-    cartItems.splice(idx, 1);
+    if (!choice) {
+      // Deixar só 1 unidade em vez de forçar decisão binária agressiva
+      item.quantidade = 1;
+      item.subtotal = item.precoUnit;
+      _cartAnim = { type: 'qty', idx: idx, nome: item.nome };
+      renderCart();
+      return;
+    }
   }
-  renderCart();
+
+  const list = document.getElementById('cart-items-list');
+  const row = list && list.querySelector('.cart-item-row[data-idx="' + idx + '"]');
+  const finish = function () {
+    cartItems.splice(idx, 1);
+    renderCart();
+  };
+  if (row && _cartMotionOk()) {
+    row.classList.add('removing');
+    let done = false;
+    const once = function () {
+      if (done) return;
+      done = true;
+      finish();
+    };
+    row.addEventListener('animationend', once, { once: true });
+    setTimeout(once, 320); // fallback se animationend não disparar
+  } else {
+    finish();
+  }
 }
 
 // --- Função central de adição ao carrinho (sem profissional) ---
@@ -306,25 +438,25 @@ function addToCart(nome, valor) {
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
+        _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
         renderCart();
-        toast('Preço do item actualizado', 'success');
         return;
       } else {
         cartItems.push({
-          nome: `${escHtml(nome||"")} (${fmtKz(valor)})`,
+          nome: nome + ' (' + fmtKz(valor) + ')',
           quantidade: 1,
           precoUnit: valor,
           subtotal: valor
         });
+        _cartAnim = { type: 'add', idx: cartItems.length - 1, nome: cartItems[cartItems.length - 1].nome };
         renderCart();
-        toast('Adicionado como item separado.', 'success');
         return;
       }
     }
     existing.quantidade += 1;
     existing.subtotal = existing.quantidade * existing.precoUnit;
+    _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
     renderCart();
-    toast('Serviço adicionado ao carrinho', 'success');
     return;
   }
 
@@ -334,8 +466,8 @@ function addToCart(nome, valor) {
     precoUnit: valor,
     subtotal: valor
   });
+  _cartAnim = { type: 'add', idx: cartItems.length - 1, nome: nome };
   renderCart();
-  toast('Serviço adicionado ao carrinho', 'success');
 }
 
 // --- Event listeners (delegação para botões do carrinho) ---
@@ -364,13 +496,23 @@ function openVendaModal() {
   loadCartFromStorage();
   const clientSel = document.getElementById('venda-cliente');
   if (clientSel) {
-    clientSel.innerHTML = (state.clientes || []).map(c =>
-      `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
-    ).join('');
+    const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
+      .concat((state.clientes || []).map(c =>
+        `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
+      ));
+    clientSel.innerHTML = opts.join('');
   }
   populateVendaSelects();
+  const pag = document.getElementById('venda-pagamento');
+  if (pag && !pag.value) pag.value = 'Numerário';
   renderCart();
+  updateVendaSaveButton();
   openModal('modal-venda');
+  // Foco no serviço se carrinho vazio — fluxo mais rápido
+  setTimeout(function () {
+    const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
+    if (el && typeof el.focus === 'function') try { el.focus(); } catch (e) {}
+  }, 120);
 }
 
 // --- Limpar carrinho (após venda ou cancelamento) ---
@@ -389,47 +531,118 @@ window.saveCartToStorage = saveCartToStorage;
 // ====================================================================
 //  SERVIÇO MODAL
 // ====================================================================
+function _servicoProfSelected(selected, p) {
+  const arr = selected || [];
+  return arr.some(function (x) {
+    return x === p.id || x === p.nome || String(x) === String(p.id);
+  });
+}
+
 function renderServicoProfissionais(selected = []) {
   const container = document.getElementById('servico-profissionais-container');
   if (!container) return;
-  if (!state.profissionais.length) {
-    container.innerHTML = '<span style="color:var(--text-muted);font-size:.75rem;">Nenhum profissional cadastrado</span>';
+  const activos = (state.profissionais || []).filter(function (p) {
+    return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+  });
+  if (!activos.length) {
+    container.innerHTML = '<span style="color:var(--text-muted);font-size:.75rem;">Nenhum profissional activo</span>';
     return;
   }
-  container.innerHTML = state.profissionais.map(p => `
-    <label style="display:flex;align-items:center;gap:4px;font-size:.75rem;background:var(--bg-soft);padding:4px 10px;border-radius:30px;border:1px solid var(--border-soft);cursor:pointer;">
-      <input type="checkbox" value="${escHtml(p.nome)}" ${escHtml(selected.includes(p.nome) ? 'checked' : ''||"")}>
-      ${escHtml(p.nome)}
-    </label>
-  `).join('');
+  container.innerHTML = activos.map(p => {
+    const checked = _servicoProfSelected(selected, p) ? ' checked' : '';
+    return (
+      '<label class="bp-chip-check">' +
+      '<input type="checkbox" value="' + escHtml(p.id) + '" data-nome="' + escHtml(p.nome) + '"' + checked + '>' +
+      escHtml(p.nome) +
+      '</label>'
+    );
+  }).join('');
 }
 
+/** Preferência: guarda nomes legíveis + ids resolvíveis no futuro via data-nome */
 function getSelectedProfissionais() {
   const container = document.getElementById('servico-profissionais-container');
   if (!container) return [];
   const checks = container.querySelectorAll('input[type="checkbox"]:checked');
-  return Array.from(checks).map(cb => cb.value);
+  return Array.from(checks).map(function (cb) {
+    // Guardar nome para compatibilidade com dados legados e seed
+    return cb.getAttribute('data-nome') || cb.value;
+  }).filter(Boolean);
+}
+
+function setServicoModalMode(mode) {
+  const modal = document.getElementById('modal-servico');
+  const sheet = document.getElementById('modal-servico-sheet');
+  const view = document.getElementById('servico-view-panel');
+  const form = document.getElementById('servico-form-panel');
+  if (modal) modal.setAttribute('data-mode', mode);
+  if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
+  if (view) view.hidden = mode !== 'view';
+  if (form) form.hidden = mode !== 'edit';
+}
+
+function _labelProfsServico(arr) {
+  const list = arr || [];
+  if (!list.length) return 'Toda a equipa';
+  return list.map(function (x) {
+    const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
+    return byId ? byId.nome : x;
+  }).join(', ');
+}
+
+function abrirDetalheServicoView(id) {
+  const s = (state.servicos || []).find(function (x) { return x.id === id; });
+  if (!s) return;
+  setServicoModalMode('view');
+  const title = document.getElementById('servico-modal-title');
+  if (title) title.textContent = 'Ficha do serviço';
+  const idInput = document.getElementById('servico-id');
+  if (idInput) idInput.value = id;
+  const dur = Number(s.duracao || s.duracaoMin || s.minutos || 60) || 60;
+  const body = document.getElementById('servico-view-body');
+  if (body) {
+    body.innerHTML =
+      '<div class="bp-view-hero">' +
+      '<div class="bp-view-hero-av" style="font-size:0.75rem;letter-spacing:0.02em;">SRV</div>' +
+      '<div><div class="bp-view-hero-name">' + escHtml(s.nome || 'Serviço') + '</div>' +
+      '<div class="bp-view-hero-meta">' + fmtKz(Number(s.precoBase) || 0) + ' · ' + dur + ' min</div></div></div>' +
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Nome</span><span class="bp-view-value">' + escHtml(s.nome || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Preço</span><span class="bp-view-value">' + fmtKz(Number(s.precoBase) || 0) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Duração</span><span class="bp-view-value">' + dur + ' min</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Profissionais</span><span class="bp-view-value">' + escHtml(_labelProfsServico(s.profissionais)) + '</span></div>' +
+      '</div>';
+  }
+  openModal('modal-servico');
 }
 
 function openServicoModal(id = null) {
+  setServicoModalMode('edit');
   const title = document.getElementById('servico-modal-title');
   const nomeInput = document.getElementById('servico-nome');
   const precoInput = document.getElementById('servico-preco');
+  const durInput = document.getElementById('servico-duracao');
   const idInput = document.getElementById('servico-id');
   if (id) {
     const serv = state.servicos.find(s => s.id === id);
     if (!serv) return;
-    title.textContent = 'Editar Serviço';
-    nomeInput.value = serv.nome;
-    precoInput.value = serv.precoBase;
-    idInput.value = id;
+    if (title) title.textContent = 'Editar serviço';
+    if (nomeInput) nomeInput.value = serv.nome || '';
+    if (precoInput) precoInput.value = serv.precoBase != null ? serv.precoBase : '';
+    if (durInput) durInput.value = Number(serv.duracao || serv.duracaoMin || serv.minutos || 60) || 60;
+    if (idInput) idInput.value = id;
     renderServicoProfissionais(serv.profissionais || []);
   } else {
-    title.textContent = 'Novo Serviço';
-    nomeInput.value = '';
-    precoInput.value = '';
-    idInput.value = '';
+    if (title) title.textContent = 'Novo serviço';
+    if (nomeInput) nomeInput.value = '';
+    if (precoInput) precoInput.value = '';
+    if (durInput) durInput.value = '60';
+    if (idInput) idInput.value = '';
     renderServicoProfissionais([]);
   }
   openModal('modal-servico');
 }
+
+window.abrirDetalheServicoView = abrirDetalheServicoView;
+window.openServicoModal = openServicoModal;
+window.setServicoModalMode = setServicoModalMode;

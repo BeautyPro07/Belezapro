@@ -1,97 +1,184 @@
-// ================================================================
-// Agenda — cards profissionais (paridade com Clientes/Equipa)
-// ================================================================
+/* BeautyPro — Agenda cards + acções (Ag-2)
+   Hierarquia: Finalizar (primário) · WhatsApp · Cancelar
+   Todos os botões: mesma altura, grelha estável, área de toque ≥40px
+*/
 (function () {
   "use strict";
 
   function esc(s) {
-    return typeof escHtml === "function" ? escHtml(String(s == null ? "" : s)) : String(s == null ? "" : s);
+    return typeof escHtml === "function" ? escHtml(String(s || "")) : String(s || "");
   }
   function money(v) {
-    return typeof fmtKz === "function" ? fmtKz(v) : Math.round(Number(v) || 0) + " Kz";
+    return typeof fmtKz === "function" ? fmtKz(v) : String(v || 0) + " Kz";
   }
-  function avatarFor(nome) {
-    if (window.BPAvatars && BPAvatars.avatarDataUrl) return BPAvatars.avatarDataUrl(nome);
-    var ini = (nome || "?").charAt(0).toUpperCase();
-    return null;
+  function statusOf(a) {
+    if (typeof _statusAg === "function") return _statusAg(a);
+    return String((a && (a.status || a.estado)) || "agendado").toLowerCase();
+  }
+  function profName(a) {
+    if (typeof getProfissionalNome === "function") return getProfissionalNome(a.profissional_id);
+    return a.profissional || "—";
+  }
+  function clienteTelefone(ag) {
+    var list = (typeof state !== "undefined" && state.clientes) || [];
+    var c = list.find(function (x) {
+      return (ag.cliente_id && x.id === ag.cliente_id) || (ag.cliente && x.nome === ag.cliente);
+    });
+    if (!c || !c.telefone) return "";
+    return String(c.telefone).replace(/\D/g, "");
+  }
+  function waHref(ag) {
+    var digits = clienteTelefone(ag);
+    if (!digits) return "";
+    var num = digits.length === 9 ? "244" + digits : digits;
+    var msg =
+      "Olá " +
+      (ag.cliente || "") +
+      ", lembrete do seu agendamento de " +
+      (ag.servico || "serviço") +
+      " no dia " +
+      (ag.data || "") +
+      " às " +
+      String(ag.hora || "").slice(0, 5) +
+      ".";
+    return "https://wa.me/" + num + "?text=" + encodeURIComponent(msg);
   }
 
   function renderAgendaItemPro(a) {
-    var isRealizado = a.status === "realizado";
-    var isCancelado = a.status === "cancelado";
-    var isExpirado = a.status === "nao_realizado";
-    if (a.status === "agendado") {
-      try {
-        if (typeof agendamentoExpirado === "function" && agendamentoExpirado(a)) {
-          a.status = "nao_realizado";
-          isExpirado = true;
-          if (typeof dbPut === "function") dbPut("agendamentos", a);
-        }
-      } catch (e) {}
-    }
-    var podeFinalizar = a.status === "agendado";
-    var podeCancelar = a.status === "agendado";
-    var nomeProf = typeof getProfissionalNome === "function" ? getProfissionalNome(a.profissional_id) : a.profissional || "—";
+    if (!a) return "";
+    var st = statusOf(a);
+    var isRealizado = st === "realizado";
+    var isCancelado = st === "cancelado";
+    var isExpirado = st === "nao_realizado" || st === "nao-realizado" || st === "expirado";
+    var isAgendado = st === "agendado";
+    var expirado =
+      typeof agendamentoExpirado === "function" ? agendamentoExpirado(a) : false;
+    var podeFinalizar = isAgendado && !expirado;
+    var podeCancelar = isAgendado;
+    var podeWhatsApp = isAgendado && !!clienteTelefone(a);
 
     var statusLabel = "Agendado";
     var statusClass = "bp-ag-st-agendado";
-    if (isRealizado) { statusLabel = "Realizado"; statusClass = "bp-ag-st-ok"; }
-    else if (isCancelado) { statusLabel = "Cancelado"; statusClass = "bp-ag-st-off"; }
-    else if (isExpirado || a.status === "nao_realizado") { statusLabel = "Não realizado"; statusClass = "bp-ag-st-no"; }
+    if (isRealizado) {
+      statusLabel = "Realizado";
+      statusClass = "bp-ag-st-ok";
+    } else if (isCancelado) {
+      statusLabel = "Cancelado";
+      statusClass = "bp-ag-st-off";
+    } else if (isExpirado) {
+      statusLabel = "Não realizado";
+      statusClass = "bp-ag-st-no";
+    }
 
     var hora = String(a.hora || "").slice(0, 5);
-    var avSrc = avatarFor(a.cliente || "");
-    var avHtml = avSrc
-      ? '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' + avSrc + '" alt="" loading="lazy" decoding="async"></div>'
-      : '<div class="avatar bp-ag-avatar">' + esc((a.cliente || "?").charAt(0).toUpperCase()) + "</div>";
+    var nomeProf = profName(a);
 
-    // foto real do cliente se existir
+    var avHtml =
+      '<div class="avatar bp-ag-avatar">' + esc((a.cliente || "?").charAt(0).toUpperCase()) + "</div>";
     try {
-      var cli = (state.clientes || []).find(function (c) {
+      var cli = ((typeof state !== "undefined" && state.clientes) || []).find(function (c) {
         return c.nome === a.cliente || c.id === a.cliente_id;
       });
       if (cli && cli.foto) {
-        avHtml = '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' + cli.foto + '" alt="" loading="lazy" decoding="async"></div>';
+        avHtml =
+          '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' +
+          cli.foto +
+          '" alt="" loading="lazy" decoding="async"></div>';
+      } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
+        avHtml =
+          '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' +
+          BPAvatars.avatarDataUrl(a.cliente || "") +
+          '" alt="" loading="lazy" decoding="async"></div>';
       }
     } catch (e) {}
 
     var actions = "";
-    if (podeFinalizar || podeCancelar) {
-      actions = '<div class="bp-ag-actions">' +
-        (podeFinalizar
-          ? '<button type="button" class="btn btn-sm bp-ag-btn-primary" data-id="' + a.id + '" data-action="finalizar">Finalizar</button>'
-          : "") +
-        (podeCancelar
-          ? '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn-cancel" data-id="' + a.id + '" data-action="cancelar-agenda" data-role="admin,gerente" aria-label="Cancelar" title="Cancelar">Cancelar</button>'
-          : "") +
+    if (podeFinalizar || podeWhatsApp || podeCancelar) {
+      var cells = [];
+      if (podeFinalizar) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-primary bp-ag-btn" data-id="' +
+            a.id +
+            '" data-action="finalizar">Finalizar</button>'
+        );
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' +
+            a.id +
+            '" data-action="reagendar-agenda">Reagendar</button>'
+        );
+      }
+      if (podeWhatsApp) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' +
+            a.id +
+            '" data-action="whatsapp-agenda" aria-label="WhatsApp">WhatsApp</button>'
+        );
+      } else if (podeFinalizar) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" disabled title="Cliente sem telefone">WhatsApp</button>'
+        );
+      }
+      if (podeCancelar) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn bp-ag-btn-muted" data-id="' +
+            a.id +
+            '" data-action="cancelar-agenda" data-role="admin,gerente" aria-label="Cancelar marcação">Cancelar</button>'
+        );
+      }
+      // 1–2 acções: uma linha; 3–4: grelha 2×2 (altura igual, sem desalinhamento)
+      var cols = cells.length <= 2 ? cells.length : 2;
+      actions =
+        '<div class="bp-ag-actions" style="--bp-ag-cols:' +
+        cols +
+        '">' +
+        cells.join("") +
         "</div>";
     }
 
     return (
-      '<div class="list-item bp-ag-card" data-agenda-id="' + a.id + '">' +
-        avHtml +
-        '<div class="info bp-ag-info">' +
-          '<div class="bp-ag-top">' +
-            '<span class="bp-ag-time">' + esc(hora) + "</span>" +
-            '<span class="bp-ag-status ' + statusClass + '">' + statusLabel + "</span>" +
-          "</div>" +
-          '<div class="title">' + esc(a.servico || "Serviço") + "</div>" +
-          '<div class="sub">' + esc(a.cliente || "Cliente") + "</div>" +
-          '<div class="bp-ag-meta">' +
-            '<span class="bp-ag-prof">' + esc(nomeProf) + "</span>" +
-            '<span class="bp-ag-price">' + money(a.preco) + "</span>" +
-          "</div>" +
-          actions +
-        "</div>" +
-      "</div>"
+      '<div class="list-item bp-ag-card" data-agenda-id="' +
+      a.id +
+      '">' +
+      avHtml +
+      '<div class="info bp-ag-info">' +
+      '<div class="bp-ag-top">' +
+      '<span class="bp-ag-time">' +
+      esc(hora) +
+      "</span>" +
+      '<span class="bp-ag-status ' +
+      statusClass +
+      '">' +
+      statusLabel +
+      "</span>" +
+      "</div>" +
+      '<div class="title">' +
+      esc(a.servico || "Serviço") +
+      "</div>" +
+      '<div class="sub">' +
+      esc(a.cliente || "Cliente") +
+      "</div>" +
+      '<div class="bp-ag-meta">' +
+      '<span class="bp-ag-prof">' +
+      esc(nomeProf) +
+      "</span>" +
+      '<span class="bp-ag-price">' +
+      money(a.preco) +
+      "</span>" +
+      "</div>" +
+      actions +
+      "</div></div>"
     );
   }
 
-  function patch() {
-    if (typeof window.renderAgendaItem === "function") {
-      window.renderAgendaItem = renderAgendaItemPro;
-    }
-    // also assign in global scope if const-bound — re-render if possible
+  function install() {
+    try {
+      if (typeof renderAgendaItem === "function") renderAgendaItem = renderAgendaItemPro;
+    } catch (e) {}
+    window.renderAgendaItem = renderAgendaItemPro;
+  }
+
+  function init() {
+    install();
     try {
       if (typeof renderAgendaFull === "function") {
         var tab = document.getElementById("tab-agenda");
@@ -100,49 +187,28 @@
     } catch (e) {}
   }
 
-  // bundle may use function declaration (global)
-  function install() {
-    try {
-      if (typeof renderAgendaItem === "function") {
-        // overwrite global
-        renderAgendaItem = renderAgendaItemPro;
-      }
-      window.renderAgendaItem = renderAgendaItemPro;
-    } catch (e) {
-      window.renderAgendaItem = renderAgendaItemPro;
-    }
-    try {
-      if (typeof renderAgendaFull === "function") {
-        var orig = renderAgendaFull;
-        // no wrap needed if item is global
-      }
-    } catch (e) {}
-  }
-
-  function reRender() {
-    try {
-      if (typeof renderAgendaFull === "function") renderAgendaFull();
-    } catch (e) {}
-  }
-
-  function init() {
-    install();
-    setTimeout(reRender, 100);
-  }
-
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { setTimeout(init, 300); });
-  } else setTimeout(init, 300);
-  setTimeout(init, 1200);
-  setTimeout(init, 3000);
+    document.addEventListener("DOMContentLoaded", function () {
+      setTimeout(init, 200);
+    });
+  } else setTimeout(init, 200);
+  setTimeout(init, 1000);
 
-  // when switching to agenda tab
   document.addEventListener("click", function (e) {
-    if (e.target.closest('[data-tab="agenda"], #tab-btn-agenda, [data-target="agenda"]')) {
+    if (e.target.closest('[data-tab="agenda"]')) {
       install();
-      setTimeout(reRender, 80);
+      setTimeout(function () {
+        try {
+          if (typeof renderAgendaFull === "function") renderAgendaFull();
+        } catch (err) {}
+      }, 60);
     }
   });
 
-  window.BPAgendaUI = { renderAgendaItemPro: renderAgendaItemPro, install: install };
+  window.BPAgendaUI = {
+    renderAgendaItemPro: renderAgendaItemPro,
+    install: install,
+    clienteTelefone: clienteTelefone,
+    waHref: waHref,
+  };
 })();

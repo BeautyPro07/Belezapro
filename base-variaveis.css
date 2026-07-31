@@ -70,6 +70,10 @@
   --ivory:         var(--warm-ivory);
   --ivory-deep:    var(--neutral-50);
 
+  /* ---- Superfícies desktop (canvas fora do app shell) ---- */
+  --surface-canvas:      #E6E2DA; /* fundo página ≥1024px */
+  --surface-canvas-deep: #DDD8CF; /* fundo página ≥1600px */
+
   /* ---- Semântico (verde / vermelho) ---- */
   --green:    #2C7A4D;
   --green-50: #E6F4EC;

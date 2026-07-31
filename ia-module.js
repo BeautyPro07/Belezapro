@@ -23,13 +23,13 @@ function buildContextoIA() {
   vendas30.forEach(v => {
     if (v.profissional_id) {
       const nome = getProfissionalNome(v.profissional_id);
-      byProf[nome] = (byProf[nome] || 0) + v.valor;
+      byProf[nome] = (byProf[nome] || 0) + (Number(v.valor) || 0);
     }
   });
 
   const byServ = {};
   vendas30.forEach(v => { if (v.itens) v.itens.forEach(i => { byServ[i.nome] = (byServ[i.nome] || 0) + (i.quantidade || 1); }); });
-  const totalVendas30 = vendas30.reduce((s, v) => s + v.valor, 0);
+  const totalVendas30 = vendas30.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const ticketMedio = vendas30.length > 0 ? Math.round(totalVendas30 / vendas30.length) : 0;
   const totalVendasHoje = vendasHoje.reduce((s, v) => s + v.valor, 0);
   const totalDespHoje = despHoje.reduce((s, d) => s + d.valor, 0);
@@ -128,7 +128,7 @@ function renderIAResumo() {
   const hojeStr = hoje();
   const hojeD = new Date(hojeStr + 'T00:00:00');
   const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
-  const totalHoje = vendasHoje.reduce((s, v) => s + v.valor, 0);
+  const totalHoje = vendasHoje.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const agHoje = state.agendamentos.filter(a => a.data === hojeStr);
   const pendentesHoje = agHoje.filter(a => a.status !== 'realizado' && a.status !== 'cancelado').length;
   const clientesHoje = new Set(vendasHoje.map(v => v.cliente)).size;
@@ -139,7 +139,7 @@ function renderIAResumo() {
   for (let i = 1; i <= 7; i++) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const ds = d.toISOString().split('T')[0];
-    dias7.push(state.movimentos.filter(m => m.data === ds && m.tipo === 'venda').reduce((s, v) => s + v.valor, 0));
+    dias7.push(state.movimentos.filter(m => m.data === ds && m.tipo === 'venda').reduce((s, v) => s + (Number(v.valor) || 0), 0));
   }
   const media7 = dias7.reduce((s, v) => s + v, 0) / 7;
   const fatTrendEl = document.getElementById('ia-resumo-fat-trend');
@@ -244,28 +244,162 @@ function renderIAResumo() {
   }
 }
 
+function chaveIAPerguntas() {
+  return 'ia_perguntas_' + ((state.config && state.config.salaoId) || 'local') + '_' + hoje();
+}
+
+function getUsoIAHoje() {
+  return parseInt(localStorage.getItem(chaveIAPerguntas()) || '0', 10) || 0;
+}
+
+function setUsoIAHoje(n) {
+  localStorage.setItem(chaveIAPerguntas(), String(Math.max(0, n | 0)));
+  actualizarContadorIA();
+}
+
+function actualizarContadorIA() {
+  const cont = document.getElementById('ia-contador');
+  if (!cont) return;
+  const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
+  const info = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano] : { iaDia: 0 };
+  if (!info.iaDia || info.iaDia === 0) {
+    cont.textContent = '0';
+    return;
+  }
+  cont.textContent = String(getUsoIAHoje());
+}
+
+function normalizarPerguntaIA(q) {
+  return String(q || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Respostas determinísticas a partir dos dados locais (sem gastar cota da API).
+ * Devolve string ou null se não houver intenção clara.
+ */
+function responderIALocal(pergunta) {
+  const q = normalizarPerguntaIA(pergunta);
+  if (!q || q.length < 3) return null;
+  if (!state.movimentos || !state.agendamentos) return null;
+
+  const hojeStr = typeof hoje === 'function' ? hoje() : '';
+  const num = function (v) { return Number(v) || 0; };
+  const vendasHoje = (state.movimentos || []).filter(function (m) {
+    return m.data === hojeStr && m.tipo === 'venda';
+  });
+  const despHoje = (state.movimentos || []).filter(function (m) {
+    return m.data === hojeStr && m.tipo === 'despesa';
+  });
+  const totalVendas = vendasHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  const totalDesp = despHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  const fundo = num(state.config && state.config.fundo);
+  const saldo = fundo + totalVendas - totalDesp;
+  const agHoje = (state.agendamentos || []).filter(function (a) { return a.data === hojeStr; });
+  const pend = agHoje.filter(function (a) {
+    const st = String(a.status || a.estado || '').toLowerCase();
+    return st === 'agendado' || (!st);
+  });
+  const ticket = vendasHoje.length ? Math.round(totalVendas / vendasHoje.length) : 0;
+
+  // Faturamento / vendas hoje
+  if (/(fatur|receita|vendeu|vendas|quanto.*hoje|hoje.*vend|entrada)/.test(q) && !/despes/.test(q)) {
+    return 'Hoje: ' + vendasHoje.length + (vendasHoje.length === 1 ? ' venda' : ' vendas') +
+      ' · total ' + fmtKz(totalVendas) +
+      (ticket ? ' · ticket médio ' + fmtKz(ticket) + '.' : '.');
+  }
+  // Despesas
+  if (/despes|gastou|saida|saídas/.test(q)) {
+    return 'Despesas de hoje: ' + fmtKz(totalDesp) +
+      (despHoje.length ? ' (' + despHoje.length + (despHoje.length === 1 ? ' registo).' : ' registos).') : '.');
+  }
+  // Saldo / caixa
+  if (/saldo|caixa|fundo/.test(q)) {
+    return 'Fundo ' + fmtKz(fundo) + ' · vendas ' + fmtKz(totalVendas) +
+      ' · despesas ' + fmtKz(totalDesp) + ' → saldo estimado ' + fmtKz(saldo) + '.';
+  }
+  // Agenda
+  if (/agenda|marcac|pendente|hoje.*hora|quantos.*cliente/.test(q) && /agenda|marc|pendente|atend/.test(q)) {
+    return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
+  }
+  if (/^agenda|marcacoes de hoje|o que tenho hoje/.test(q)) {
+    return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
+  }
+  // Clientes
+  if (/quantos clientes|numero de clientes|nº de clientes|total de clientes/.test(q)) {
+    const n = (state.clientes || []).length;
+    return 'Tem ' + n + (n === 1 ? ' cliente' : ' clientes') + ' na ficha.';
+  }
+  // Equipa
+  if (/quantos profissionais|tamanho da equipa|quantos na equipa/.test(q)) {
+    const n = (state.profissionais || []).length;
+    return 'Equipa: ' + n + (n === 1 ? ' profissional.' : ' profissionais.');
+  }
+  // Top serviço 30d — lightweight
+  if (/servico.*mais|mais vendido|top servico|melhor servico/.test(q)) {
+    const d30 = new Date();
+    d30.setDate(d30.getDate() - 29);
+    const d30str = d30.toISOString().slice(0, 10);
+    const byServ = {};
+    (state.movimentos || []).forEach(function (m) {
+      if (m.tipo !== 'venda' || m.data < d30str || !m.itens) return;
+      (m.itens || []).forEach(function (it) {
+        const nome = it.nome || '—';
+        byServ[nome] = (byServ[nome] || 0) + (Number(it.quantidade) || 1);
+      });
+    });
+    const top = Object.keys(byServ).sort(function (a, b) { return byServ[b] - byServ[a]; })[0];
+    if (!top) return 'Ainda não há vendas com itens nos últimos 30 dias.';
+    return 'Serviço mais frequente (30 dias): ' + top + ' (' + byServ[top] + '×).';
+  }
+  return null;
+}
+
+let _iaBusy = false;
+
 async function perguntarIA(pergunta) {
-  const plano = getPlanoAtual();
-  const iaDia = PLANOS[plano].iaDia;
+  const q = String(pergunta || '').trim();
+  if (!q) {
+    toast('Escreva uma pergunta.', 'warning');
+    return null;
+  }
+  if (q.length > 500) {
+    toast('Pergunta demasiado longa (máx. 500 caracteres).', 'warning');
+    return null;
+  }
+  if (_iaBusy) return null;
+
+  const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
+  const iaDia = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano].iaDia : 0;
   if (iaDia === 0) {
     mostrarModalUpgrade('O Agente IA está disponível no plano Pro (5 perguntas/dia) e Premium (ilimitado).');
     return null;
   }
 
-  // ================================================================
-  //  CORREÇÃO: chaveData definida antes de ser usada
-  // ================================================================
-  const chaveData = 'ia_perguntas_' + (state.config.salaoId || 'local') + '_' + hoje();
-  const usadas = parseInt(localStorage.getItem(chaveData) || '0');
-
+  const usadas = getUsoIAHoje();
   if (iaDia !== Infinity && usadas >= iaDia) {
     if (plano === 'pro') {
-      mostrarModalUpgrade('Atingiste o limite de 5 perguntas/dia do plano Pro. Faz upgrade para Premium para perguntas ilimitadas.');
+      mostrarModalUpgrade('Atingiu o limite de 5 perguntas/dia do plano Pro. Faça upgrade para Premium para perguntas ilimitadas.');
     } else {
-      toast('Limite de perguntas atingido.', 'warning');
+      toast('Limite de perguntas atingido para hoje.', 'warning');
     }
     return null;
   }
+
+  // 1) Resposta local determinística (não consome cota da API)
+  try {
+    const local = responderIALocal(q);
+    if (local) {
+      iaHistorico.push({ pergunta: q, resposta: local, fonte: 'local' });
+      if (iaHistorico.length > 6) iaHistorico = iaHistorico.slice(-6);
+      return local;
+    }
+  } catch (eLocal) {}
 
   const contexto = buildContextoIA();
   if (contexto && contexto.erro) {
@@ -273,6 +407,7 @@ async function perguntarIA(pergunta) {
     return null;
   }
 
+  _iaBusy = true;
   try {
     const resp = await fetch(IA_EDGE_URL, {
       method: 'POST',
@@ -281,37 +416,47 @@ async function perguntarIA(pergunta) {
         'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
       },
       body: JSON.stringify({
-        pergunta,
-        contexto,
-        plano,
-        salaoId: state.config.salaoId || 'local',
+        pergunta: q,
+        contexto: contexto,
+        plano: plano,
+        salaoId: (state.config && state.config.salaoId) || 'local',
         historico: iaHistorico
       })
     });
 
     if (!resp.ok) {
       if (resp.status === 429) {
-        mostrarModalUpgrade('Limite de perguntas atingido. Faz upgrade para continuar.');
+        mostrarModalUpgrade('Limite de perguntas atingido. Faça upgrade para continuar.');
         return null;
       }
       if (resp.status === 503) {
-        return '⚠️ Agente IA temporariamente indisponível. Tenta dentro de momentos.';
+        return 'Agente IA temporariamente indisponível. Tente dentro de momentos.';
       }
-      return '⚠️ Erro ao contactar o agente IA. Contacta o suporte BeautyPro.';
+      // Fallback local genérico se API falhar
+      const fallback = responderIALocal(q);
+      if (fallback) return fallback;
+      return 'Não foi possível contactar o agente IA. Verifique a ligação e tente de novo.';
     }
 
     const data = await resp.json();
-    localStorage.setItem(chaveData, String(usadas + 1));
-    document.getElementById('ia-contador').textContent = String(usadas + 1);
+    setUsoIAHoje(usadas + 1);
 
-    const resposta = data.resposta || 'Não consegui responder. Tenta de novo.';
-    iaHistorico.push({ pergunta, resposta });
+    const resposta = data.resposta || 'Não consegui responder. Tente de novo.';
+    iaHistorico.push({ pergunta: q, resposta: resposta, fonte: 'api' });
     if (iaHistorico.length > 6) iaHistorico = iaHistorico.slice(-6);
     return resposta;
   } catch (e) {
-    return 'Sem ligação à internet. O agente IA necessita de conexão para responder.';
+    // Offline: tentar local; senão mensagem clara
+    try {
+      const offlineLocal = responderIALocal(q);
+      if (offlineLocal) return offlineLocal;
+    } catch (e2) {}
+    return 'Sem ligação à internet. Posso responder a perguntas simples sobre vendas, caixa e agenda de hoje com os dados locais — tente reformular (ex.: «quanto faturou hoje?»).';
+  } finally {
+    _iaBusy = false;
   }
 }
+
 const IA_NOME_KEY = 'bp_ia_nome';
 // CORREÇÃO (relatório Benza AI): nome fixado — deixa de ler o localStorage / permitir renomear.
 function getNomeIA() { return 'Benza'; }
@@ -335,20 +480,195 @@ function formatarTempoRelativoIA(ts) {
   return `há ${Math.floor(diffH / 24)} dias`;
 }
 function montarMsgUsuarioIA(pergunta) { return `<div class="ia-msg-user">${escHtml(pergunta)}</div>`; }
+
+/**
+ * Markdown seguro → HTML (XSS-safe).
+ * Suporta: negrito, itálico, cabeçalhos, listas, tabelas, código inline, quebras.
+ * Nunca injecta HTML cru da resposta.
+ */
+function formatarRespostaIA(texto) {
+  if (texto == null) return '';
+  var raw = String(texto).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!raw) return '';
+
+  // 1) Escapar tudo primeiro
+  var safe = (typeof escHtml === 'function') ? escHtml(raw) : raw
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  var lines = safe.split('\n');
+  var out = [];
+  var i = 0;
+  var inUl = false;
+  var inOl = false;
+  var inCode = false;
+  var codeBuf = [];
+
+  function closeLists() {
+    if (inUl) { out.push('</ul>'); inUl = false; }
+    if (inOl) { out.push('</ol>'); inOl = false; }
+  }
+
+  function inlineFmt(s) {
+    // código inline `code`
+    s = s.replace(/`([^`]+)`/g, '<code class="ia-md-code">$1</code>');
+    // negrito **text** ou __text__
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    // itálico *text* (evitar conflito com **)
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    return s;
+  }
+
+  function isTableSep(line) {
+    return /^\s*\|?[\s:|-]+\|[\s|:|-]*$/.test(line) && line.indexOf('|') !== -1 && /[-:]/.test(line);
+  }
+
+  function isTableRow(line) {
+    return line.indexOf('|') !== -1 && line.trim().length > 0;
+  }
+
+  function parseTableRow(line) {
+    var cells = line.replace(/^\|/, '').replace(/\|$/, '').split('|');
+    return cells.map(function (c) { return c.trim(); });
+  }
+
+  while (i < lines.length) {
+    var line = lines[i];
+
+    // bloco de código ```
+    if (/^```/.test(line.trim())) {
+      if (!inCode) {
+        closeLists();
+        inCode = true;
+        codeBuf = [];
+      } else {
+        out.push('<pre class="ia-md-pre"><code>' + codeBuf.join('\n') + '</code></pre>');
+        inCode = false;
+        codeBuf = [];
+      }
+      i++;
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      i++;
+      continue;
+    }
+
+    // tabela markdown
+    if (isTableRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      closeLists();
+      var headers = parseTableRow(line);
+      i += 2; // skip header + separator
+      var rows = [];
+      while (i < lines.length && isTableRow(lines[i]) && !isTableSep(lines[i])) {
+        rows.push(parseTableRow(lines[i]));
+        i++;
+      }
+      var html = '<div class="ia-md-table-wrap"><table class="ia-md-table"><thead><tr>';
+      headers.forEach(function (h) { html += '<th>' + inlineFmt(h) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(function (row) {
+        html += '<tr>';
+        for (var c = 0; c < headers.length; c++) {
+          html += '<td>' + inlineFmt(row[c] != null ? row[c] : '') + '</td>';
+        }
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      out.push(html);
+      continue;
+    }
+
+    // cabeçalhos
+    var hm = line.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) {
+      closeLists();
+      var level = hm[1].length;
+      out.push('<div class="ia-md-h ia-md-h' + level + '">' + inlineFmt(hm[2]) + '</div>');
+      i++;
+      continue;
+    }
+
+    // lista não ordenada
+    var ul = line.match(/^\s*[-*•]\s+(.+)$/);
+    if (ul) {
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (!inUl) { out.push('<ul class="ia-md-ul">'); inUl = true; }
+      out.push('<li>' + inlineFmt(ul[1]) + '</li>');
+      i++;
+      continue;
+    }
+
+    // lista ordenada
+    var ol = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
+    if (ol) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (!inOl) { out.push('<ol class="ia-md-ol">'); inOl = true; }
+      out.push('<li>' + inlineFmt(ol[2]) + '</li>');
+      i++;
+      continue;
+    }
+
+    // linha vazia
+    if (!line.trim()) {
+      closeLists();
+      out.push('<div class="ia-md-gap"></div>');
+      i++;
+      continue;
+    }
+
+    // parágrafo
+    closeLists();
+    out.push('<p class="ia-md-p">' + inlineFmt(line) + '</p>');
+    i++;
+  }
+  closeLists();
+  if (inCode && codeBuf.length) {
+    out.push('<pre class="ia-md-pre"><code>' + codeBuf.join('\n') + '</code></pre>');
+  }
+  return out.join('');
+}
+
+/** Texto limpo para clipboard (sem **, | de markdown cru). */
+function textoPlanoRespostaIA(texto) {
+  if (texto == null) return '';
+  var s = String(texto).replace(/\r\n/g, '\n');
+  // remover formatação markdown comum
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+  s = s.replace(/__([^_]+)__/g, '$1');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2');
+  s = s.replace(/^#{1,3}\s+/gm, '');
+  s = s.replace(/`([^`]+)`/g, '$1');
+  s = s.replace(/^```[\w]*\n?/gm, '').replace(/^```$/gm, '');
+  // tabelas → linhas tab-separadas legíveis
+  s = s.split('\n').map(function (line) {
+    if (line.indexOf('|') === -1) return line;
+    if (/^\s*\|?[\s:|-]+\|/.test(line)) return ''; // separador
+    return line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) {
+      return c.trim();
+    }).filter(Boolean).join('\t');
+  }).join('\n');
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+  return s;
+}
+
 function montarMsgBotIA(resposta, ts) {
   const tempo = formatarTempoRelativoIA(ts);
+  const htmlCorpo = formatarRespostaIA(resposta);
+  const planoAttr = escHtml(textoPlanoRespostaIA(resposta));
   return `<div class="ia-msg-bot">
     <div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span>${tempo ? `<span class="ia-msg-bot-tempo">${tempo}</span>` : ''}</div>
-    <div class="ia-msg-bot-corpo">${escHtml(resposta)}</div>
+    <div class="ia-msg-bot-corpo" data-plain="${planoAttr}">${htmlCorpo}</div>
     <div class="ia-msg-bot-acoes">
-      <button class="ia-feedback-btn" data-fb="util" title="Útil">👍 Útil</button>
-      <button class="ia-feedback-btn" data-fb="naoajudou" title="Não ajudou">👎 Não ajudou</button>
-      <button class="ia-feedback-btn ia-copiar-btn" title="Copiar">📋 Copiar</button>
+      <button type="button" class="ia-feedback-btn" data-fb="util" title="Útil">👍 Útil</button>
+      <button type="button" class="ia-feedback-btn" data-fb="naoajudou" title="Não ajudou">👎 Não ajudou</button>
+      <button type="button" class="ia-feedback-btn ia-copiar-btn" title="Copiar">📋 Copiar</button>
     </div>
     <div class="ia-followup-row">
-      <button class="ia-followup-chip" data-pergunta="Quais clientes estão inativos?">Clientes inativos</button>
-      <button class="ia-followup-chip" data-pergunta="Como está o fluxo de caixa?">Fluxo de caixa</button>
-      <button class="ia-followup-chip" data-pergunta="Como está a minha agenda?">Agenda</button>
+      <button type="button" class="ia-followup-chip" data-pergunta="Quais clientes estão inativos?">Clientes inativos</button>
+      <button type="button" class="ia-followup-chip" data-pergunta="Como está o fluxo de caixa?">Fluxo de caixa</button>
+      <button type="button" class="ia-followup-chip" data-pergunta="Como está a minha agenda?">Agenda</button>
     </div>
   </div>`;
 }
@@ -377,8 +697,9 @@ carregarHistoricoIA();
 
 document.getElementById('ia-enviar').addEventListener('click', async () => {
   const input = document.getElementById('ia-input');
+  const btn = document.getElementById('ia-enviar');
   const pergunta = input.value.trim();
-  if (!pergunta) return;
+  if (!pergunta || _iaBusy) return;
   const chat = document.getElementById('ia-chat');
   chat.innerHTML += montarMsgUsuarioIA(pergunta);
   atualizarEstadoVazioIA();
@@ -389,7 +710,13 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
   chat.appendChild(pensando);
   chat.scrollTop = chat.scrollHeight;
   input.value = '';
-  const resposta = await perguntarIA(pergunta);
+  if (btn) btn.disabled = true;
+  let resposta = null;
+  try {
+    resposta = await perguntarIA(pergunta);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
   document.getElementById('ia-pensando')?.remove();
   if (resposta) {
     const ts = Date.now();
@@ -398,7 +725,7 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
     if (iaHistorico.length > 0) iaHistorico[iaHistorico.length - 1].ts = ts;
     guardarHistoricoIA();
   }
-  document.getElementById('ia-contador').textContent = parseInt(localStorage.getItem('ia_perguntas_' + hoje()) || '0');
+  actualizarContadorIA();
 });
 
 document.getElementById('ia-input').addEventListener('keydown', (e) => {
@@ -415,8 +742,15 @@ document.addEventListener('click', (e) => {
   const fb = e.target.closest('.ia-feedback-btn');
   if (fb) {
     if (fb.classList.contains('ia-copiar-btn')) {
-      const texto = fb.closest('.ia-msg-bot')?.querySelector('.ia-msg-bot-corpo')?.textContent || '';
-      navigator.clipboard?.writeText(texto).then(() => toast('Texto copiado', 'success')).catch(() => {});
+      const corpo = fb.closest('.ia-msg-bot')?.querySelector('.ia-msg-bot-corpo');
+      const texto = (corpo && (corpo.getAttribute('data-plain') || corpo.innerText)) || '';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(function () { toast('Texto copiado', 'success'); }).catch(function () {
+          toast('Não foi possível copiar', 'error');
+        });
+      } else {
+        toast('Cópia não suportada neste dispositivo', 'warning');
+      }
     } else {
       toast('Feedback registado', 'success');
       fb.parentElement.querySelectorAll('.ia-feedback-btn').forEach(b => b.disabled = true);
@@ -431,13 +765,27 @@ document.getElementById('ia-offline-retry')?.addEventListener('click', () => {
     toast('Conexão restabelecida!', 'success'); } else { toast('Ainda sem ligação', 'warning'); }
 });
 
-// Upgrade modal
-document.getElementById('modal-upgrade-contato').addEventListener('click', () => {
-  const msg =
-    `Olá, quero assinar um plano do BeautyPro. Salão: ${state.config.storeName} | Plano actual: ${getPlanoAtual()}`;
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
-  closeModal('modal-upgrade');
-});
+// Upgrade modal — handler principal em plano-limites.js (bindUpgradeButtons / abrirWhatsAppVenda).
+// Fallback se o bind ainda não correu (ordem de scripts / bundle).
+(function ensureUpgradeContatoBound() {
+  const contato = document.getElementById('modal-upgrade-contato');
+  if (!contato || contato.dataset.bpUpgradeBound) return;
+  contato.addEventListener('click', async () => {
+    if (typeof abrirWhatsAppVenda === 'function') {
+      const salao = (state && state.config && state.config.storeName) || '—';
+      const actual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : '—';
+      await abrirWhatsAppVenda(
+        `Olá, quero assinar um plano do BeautyPro. Salão: ${salao} | Plano actual: ${actual}`
+      );
+    } else {
+      const msg =
+        `Olá, quero assinar um plano do BeautyPro. Salão: ${(state.config && state.config.storeName) || '—'} | Plano actual: ${typeof getPlanoAtual === 'function' ? getPlanoAtual() : '—'}`;
+      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+    }
+    closeModal('modal-upgrade');
+  });
+  contato.dataset.bpUpgradeBound = '1';
+})();
 
 // Pesquisa clientes
 let searchTimer;

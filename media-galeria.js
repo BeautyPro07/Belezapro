@@ -5,6 +5,14 @@
 (function () {
   "use strict";
 
+  /** Sessão de UI (efémera) — não poluir window._bp* nem BeautyStore. */
+  var session = {
+    editingClienteId: null,
+    editingProfId: null,
+    pendingClienteFoto: null,
+    pendingProfFoto: null
+  };
+
   var GALERIA_KEY = "bp_galeria_v1";
   var MAX_GALERIA = 60;
   var AVATAR_MAX = 256;
@@ -212,7 +220,7 @@
     document.getElementById("bp-cli-foto-btn").onclick = async function () {
       var id = modal.dataset.editId || modal.getAttribute("data-edit-id");
       // try common patterns
-      if (!id) id = window._bpEditingClienteId || null;
+      if (!id) id = session.editingClienteId || null;
       if (!id) {
         // new client — store pending
         var file = await pickImage();
@@ -220,7 +228,7 @@
         try {
           toastMsg("A otimizar foto…", "info");
           var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
-          window._bpPendingClienteFoto = dataUrl;
+          session.pendingClienteFoto = dataUrl;
           showPreview("bp-cli-foto-preview", dataUrl);
           document.getElementById("bp-cli-foto-rm").style.display = "";
           toastMsg("Foto pronta — guarde o cliente", "success");
@@ -246,8 +254,8 @@
       }
     };
     document.getElementById("bp-cli-foto-rm").onclick = async function () {
-      var id = window._bpEditingClienteId;
-      window._bpPendingClienteFoto = null;
+      var id = session.editingClienteId;
+      session.pendingClienteFoto = null;
       if (id) await setClienteFoto(id, null);
       showPreview("bp-cli-foto-preview", null);
       this.style.display = "none";
@@ -273,14 +281,14 @@
     title.parentNode.insertBefore(wrap, title.nextSibling);
 
     document.getElementById("bp-prof-foto-btn").onclick = async function () {
-      var id = window._bpEditingProfId || null;
+      var id = session.editingProfId || null;
       if (!id) {
         var file = await pickImage();
         if (!file) return;
         try {
           toastMsg("A otimizar foto…", "info");
           var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
-          window._bpPendingProfFoto = dataUrl;
+          session.pendingProfFoto = dataUrl;
           showPreview("bp-prof-foto-preview", dataUrl);
           document.getElementById("bp-prof-foto-rm").style.display = "";
           toastMsg("Foto pronta — guarde o profissional", "success");
@@ -304,8 +312,8 @@
       }
     };
     document.getElementById("bp-prof-foto-rm").onclick = async function () {
-      var id = window._bpEditingProfId;
-      window._bpPendingProfFoto = null;
+      var id = session.editingProfId;
+      session.pendingProfFoto = null;
       if (id) await setProfFoto(id, null);
       showPreview("bp-prof-foto-preview", null);
       this.style.display = "none";
@@ -332,18 +340,18 @@
     // observe open modals
     var cli = document.getElementById("modal-cliente");
     if (cli && cli.classList.contains("open")) {
-      var cid = window._bpEditingClienteId;
+      var cid = session.editingClienteId;
       var c = cid ? getCliente(cid) : null;
-      var foto = (c && c.foto) || window._bpPendingClienteFoto || null;
+      var foto = (c && c.foto) || session.pendingClienteFoto || null;
       showPreview("bp-cli-foto-preview", foto);
       var rm = document.getElementById("bp-cli-foto-rm");
       if (rm) rm.style.display = foto ? "" : "none";
     }
     var pr = document.getElementById("modal-prof");
     if (pr && pr.classList.contains("open")) {
-      var pid = window._bpEditingProfId;
+      var pid = session.editingProfId;
       var p = pid ? getProf(pid) : null;
-      var foto2 = (p && p.foto) || window._bpPendingProfFoto || null;
+      var foto2 = (p && p.foto) || session.pendingProfFoto || null;
       showPreview("bp-prof-foto-preview", foto2);
       var rm2 = document.getElementById("bp-prof-foto-rm");
       if (rm2) rm2.style.display = foto2 ? "" : "none";
@@ -365,14 +373,14 @@
             });
             // prefer hidden id if any
             var hid = document.getElementById("cliente-id");
-            if (hid && hid.value) window._bpEditingClienteId = hid.value;
-            else window._bpEditingClienteId = found ? found.id : null;
-            if (!window._bpEditingClienteId) window._bpPendingClienteFoto = window._bpPendingClienteFoto || null;
-            else window._bpPendingClienteFoto = null;
+            if (hid && hid.value) session.editingClienteId = hid.value;
+            else session.editingClienteId = found ? found.id : null;
+            if (!session.editingClienteId) session.pendingClienteFoto = session.pendingClienteFoto || null;
+            else session.pendingClienteFoto = null;
             syncModalPreviews();
           }, 80);
         } else {
-          window._bpEditingClienteId = null;
+          session.editingClienteId = null;
         }
       });
       obs.observe(cliModal, { attributes: true, attributeFilter: ["class"] });
@@ -388,14 +396,14 @@
               return p.nome === nome;
             });
             var hid = document.getElementById("prof-id");
-            if (hid && hid.value) window._bpEditingProfId = hid.value;
-            else window._bpEditingProfId = found ? found.id : null;
-            if (!window._bpEditingProfId) window._bpPendingProfFoto = window._bpPendingProfFoto || null;
-            else window._bpPendingProfFoto = null;
+            if (hid && hid.value) session.editingProfId = hid.value;
+            else session.editingProfId = found ? found.id : null;
+            if (!session.editingProfId) session.pendingProfFoto = session.pendingProfFoto || null;
+            else session.pendingProfFoto = null;
             syncModalPreviews();
           }, 80);
         } else {
-          window._bpEditingProfId = null;
+          session.editingProfId = null;
         }
       });
       obs2.observe(prModal, { attributes: true, attributeFilter: ["class"] });
@@ -407,28 +415,28 @@
     // After client save, attach pending foto if name matches newest
     document.addEventListener("click", function (e) {
       var t = e.target.closest("#modal-cliente-save, #cliente-save, [data-save-cliente]");
-      if (t && window._bpPendingClienteFoto) {
+      if (t && session.pendingClienteFoto) {
         setTimeout(async function () {
           try {
             var nome = (document.getElementById("cliente-nome") || {}).value || "";
             var c = (state.clientes || []).find(function (x) { return x.nome === nome; });
-            if (c && window._bpPendingClienteFoto) {
-              await setClienteFoto(c.id, window._bpPendingClienteFoto);
-              window._bpPendingClienteFoto = null;
+            if (c && session.pendingClienteFoto) {
+              await setClienteFoto(c.id, session.pendingClienteFoto);
+              session.pendingClienteFoto = null;
               enhanceListAvatars();
             }
           } catch (err) {}
         }, 400);
       }
       var t2 = e.target.closest("#modal-prof-save, #prof-save, [data-save-prof]");
-      if (t2 && window._bpPendingProfFoto) {
+      if (t2 && session.pendingProfFoto) {
         setTimeout(async function () {
           try {
             var nome = (document.getElementById("prof-nome") || {}).value || "";
             var p = (state.profissionais || []).find(function (x) { return x.nome === nome; });
-            if (p && window._bpPendingProfFoto) {
-              await setProfFoto(p.id, window._bpPendingProfFoto);
-              window._bpPendingProfFoto = null;
+            if (p && session.pendingProfFoto) {
+              await setProfFoto(p.id, session.pendingProfFoto);
+              session.pendingProfFoto = null;
               enhanceListAvatars();
             }
           } catch (err) {}
@@ -439,30 +447,41 @@
 
   /* ---------- Galeria UI ---------- */
   function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
     var el = document.getElementById(id);
-    if (el) return el;
-    el = document.createElement("div");
+    if (el) {
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
+      return el;
+    }
+    el = document.createElement('div');
     el.id = id;
-    el.className = "modal-overlay";
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-modal", "true");
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
     el.innerHTML =
-      '<div class="bp-sheet">' +
-        '<div class="bp-sheet-handle" aria-hidden="true"></div>' +
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
         '<div class="bp-sheet-header">' +
-          '<div class="bp-sheet-eyebrow">' + esc(eyebrow || "Media") + "</div>" +
-          '<h2 class="bp-sheet-title">' + esc(title) + "</h2>" +
-          (subtitle ? '<p class="bp-sheet-subtitle">' + esc(subtitle) + "</p>" : "") +
-        "</div>" +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
         '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
-        '<div class="bp-sheet-footer">' +
+        '<div class="bp-sheet-footer modal-actions">' +
           '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
-        "</div></div>";
+        '</div>' +
+      '</div>';
     document.body.appendChild(el);
-    el.addEventListener("click", function (e) {
-      if (e.target === el || e.target.getAttribute("data-close") === id) {
-        if (typeof closeModal === "function") closeModal(id);
-        else el.classList.remove("open");
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
       }
     });
     return el;
@@ -632,6 +651,7 @@
     setProfFoto: setProfFoto,
     openGaleria: openGaleria,
     loadGaleria: loadGaleria,
-    enhanceListAvatars: enhanceListAvatars
+    enhanceListAvatars: enhanceListAvatars,
+    session: session
   };
 })();

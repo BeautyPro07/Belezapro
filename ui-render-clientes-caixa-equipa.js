@@ -11,35 +11,113 @@
 // Cache O(1) por render — invalidado quando mudam tamanhos das listas
 let _statsCache = { key: '', map: null };
 
-function _buildStatsMap() {
-  const map = {};
-  (state.agendamentos || []).forEach(a => {
-    if (a.status === 'cancelado' || !a.cliente) return;
-    if (!map[a.cliente]) map[a.cliente] = { visitas: 0, totalGasto: 0, datas: [] };
-    map[a.cliente].visitas++;
-    if (a.data) map[a.cliente].datas.push(a.data);
-  });
-  (state.movimentos || []).forEach(m => {
-    if (m.tipo !== 'venda' || !m.cliente) return;
-    if (!map[m.cliente]) map[m.cliente] = { visitas: 0, totalGasto: 0, datas: [] };
-    map[m.cliente].visitas++;
-    map[m.cliente].totalGasto += Number(m.valor) || 0;
-    if (m.data) map[m.cliente].datas.push(m.data);
-  });
-  Object.keys(map).forEach(k => {
-    map[k].datas.sort();
-    map[k].ultimaVisita = map[k].datas.length ? map[k].datas[map[k].datas.length - 1] : null;
-    delete map[k].datas;
-  });
-  return map;
+function _normNomeCli(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function getEstatisticasCliente(nomeCliente) {
+/** Agrega por cliente_id (preferência) e por nome normalizado (legado). */
+function _buildStatsMap() {
+  const byId = {};
+  const byName = {};
+
+  function touch(bucket, key, patch) {
+    if (!key) return;
+    if (!bucket[key]) bucket[key] = { visitas: 0, totalGasto: 0, datas: [] };
+    const row = bucket[key];
+    if (patch.visita) row.visitas++;
+    if (patch.gasto) row.totalGasto += patch.gasto;
+    if (patch.data) row.datas.push(patch.data);
+  }
+
+  (state.agendamentos || []).forEach(a => {
+    const st = String(a.status || a.estado || '').toLowerCase();
+    if (st === 'cancelado') return;
+    const nome = a.cliente;
+    if (!nome && !a.cliente_id) return;
+    // Visita conta agenda realizada ou ainda agendada (presença no salão)
+    const conta = st === 'realizado' || st === 'agendado' || !st;
+    if (!conta) return;
+    const patch = { visita: true, data: a.data || null };
+    if (a.cliente_id) touch(byId, String(a.cliente_id), patch);
+    if (nome) touch(byName, _normNomeCli(nome), patch);
+  });
+
+  (state.movimentos || []).forEach(m => {
+    if (m.tipo !== 'venda') return;
+    const nome = m.cliente;
+    if (!nome && !m.cliente_id) return;
+    const patch = { visita: true, gasto: Number(m.valor) || 0, data: m.data || null };
+    if (m.cliente_id) touch(byId, String(m.cliente_id), patch);
+    if (nome) touch(byName, _normNomeCli(nome), patch);
+  });
+
+  function finalize(bucket) {
+    Object.keys(bucket).forEach(k => {
+      bucket[k].datas.sort();
+      const d = bucket[k].datas;
+      bucket[k].ultimaVisita = d.length ? d[d.length - 1] : null;
+      delete bucket[k].datas;
+    });
+  }
+  finalize(byId);
+  finalize(byName);
+  return { byId, byName };
+}
+
+/**
+ * Aceita: objecto cliente | id | nome.
+ * Preferência: id → merge com nome se ambos existirem (legado sem id nas vendas).
+ */
+function getEstatisticasCliente(ref) {
   const key = (state.agendamentos || []).length + ':' + (state.movimentos || []).length;
   if (!_statsCache.map || _statsCache.key !== key) {
     _statsCache = { key, map: _buildStatsMap() };
   }
-  return _statsCache.map[nomeCliente] || { visitas: 0, totalGasto: 0, ultimaVisita: null };
+  const empty = { visitas: 0, totalGasto: 0, ultimaVisita: null };
+  if (ref == null || ref === '') return empty;
+
+  let id = null;
+  let nome = null;
+  if (typeof ref === 'object') {
+    id = ref.id || null;
+    nome = ref.nome || null;
+  } else {
+    const s = String(ref);
+    const asCli = (state.clientes || []).find(c => c.id === s || c.nome === s);
+    if (asCli) {
+      id = asCli.id;
+      nome = asCli.nome;
+    } else {
+      nome = s;
+    }
+  }
+
+  const a = id ? (_statsCache.map.byId[String(id)] || empty) : empty;
+  const b = nome ? (_statsCache.map.byName[_normNomeCli(nome)] || empty) : empty;
+
+  // Se há id, preferir id para gasto; visitas = max para não duplicar quando ambos apontam ao mesmo histórico
+  if (id && a.visitas) {
+    // Histórico com cliente_id: usar byId; acrescentar gasto de byName só se byId não tiver gasto (dados mistos)
+    return {
+      visitas: Math.max(a.visitas, b.visitas),
+      totalGasto: a.totalGasto > 0 ? a.totalGasto : b.totalGasto,
+      ultimaVisita: (a.ultimaVisita && b.ultimaVisita)
+        ? (a.ultimaVisita > b.ultimaVisita ? a.ultimaVisita : b.ultimaVisita)
+        : (a.ultimaVisita || b.ultimaVisita)
+    };
+  }
+  return {
+    visitas: b.visitas || a.visitas,
+    totalGasto: b.totalGasto || a.totalGasto,
+    ultimaVisita: b.ultimaVisita || a.ultimaVisita
+  };
+}
+
+function resolverClienteIdPorNome(nome) {
+  const n = _normNomeCli(nome);
+  if (!n) return null;
+  const hit = (state.clientes || []).find(c => _normNomeCli(c.nome) === n);
+  return hit ? hit.id : null;
 }
 
 function formatarUltimaVisita(iso) {
@@ -80,36 +158,55 @@ function renderClientes() {
     if (cont0) cont0.innerHTML = '<div class="empty-state">A carregar clientes...</div>';
     return;
   }
-  const search = document.getElementById('search-cliente')?.value.toLowerCase() || '';
+  const rawSearch = document.getElementById('search-cliente')?.value || '';
+  const search = rawSearch.trim().toLowerCase();
+  const searchDigits = rawSearch.replace(/\D/g, '');
   const filtro = state.filtroClientes || 'todos';
-  const freqMap = {};
-  (state.agendamentos || []).filter(a => a.status !== 'cancelado').forEach(a => { freqMap[a.cliente] = (freqMap[a.cliente] || 0) + 1; });
-  (state.movimentos || []).filter(m => m.tipo === 'venda').forEach(v => { freqMap[v.cliente] = (freqMap[v.cliente] || 0) + 1; });
 
-  let filtered = state.clientes.filter(c => c.nome.toLowerCase().includes(search));
-  if (filtro === 'mais') filtered.sort((a, b) => (freqMap[b.nome] || 0) - (freqMap[a.nome] || 0));
-  else if (filtro === 'menos') filtered.sort((a, b) => (freqMap[a.nome] || 0) - (freqMap[b.nome] || 0));
+  let filtered = (state.clientes || []).filter(c => {
+    if (!search && !searchDigits) return true;
+    const nome = String(c.nome || '').toLowerCase();
+    const tel = String(c.telefone || '').replace(/\D/g, '');
+    if (search && nome.includes(search)) return true;
+    if (searchDigits && tel.includes(searchDigits)) return true;
+    if (search && String(c.notas || '').toLowerCase().includes(search)) return true;
+    return false;
+  });
+
+  if (filtro === 'mais' || filtro === 'menos') {
+    filtered = filtered.slice().sort((a, b) => {
+      const fa = getEstatisticasCliente(a).visitas;
+      const fb = getEstatisticasCliente(b).visitas;
+      return filtro === 'mais' ? (fb - fa) : (fa - fb);
+    });
+  } else {
+    filtered = filtered.slice().sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt'));
+  }
 
   const cont = document.getElementById('clientes-list');
   if (filtered.length === 0) {
-    cont.innerHTML = `<div class="empty-state">${svgPessoa}<p>${search ? 'Nenhum resultado' : 'Nenhum cliente ainda'}</p></div>`;
+    const msg = search || searchDigits
+      ? 'Nenhum cliente corresponde à pesquisa'
+      : 'Ainda sem clientes — adicione o primeiro';
+    cont.innerHTML = `<div class="empty-state">${typeof svgPessoa !== 'undefined' ? svgPessoa : ''}<p>${msg}</p></div>`;
     return;
   }
 
   // Progressive render: primeiros 60 itens, resto sob demanda (P1 performance)
   const INITIAL = 60;
   const rowHtml = (c) => {
-    const { visitas, totalGasto, ultimaVisita } = getEstatisticasCliente(c.nome);
+    const { visitas, totalGasto, ultimaVisita } = getEstatisticasCliente(c);
     const clienteNovo = visitas === 0;
     return `
       <div class="list-item cliente-item" data-cliente-id="${c.id}" style="cursor:pointer;">
         <div class="avatar">${(c.nome||'?').charAt(0).toUpperCase()}</div>
         <div class="info">
           <div class="title">${escHtml(c.nome)}</div>
-          <div class="sub">${escHtml(c.telefone || 'Sem contacto')}${c.notas ? ' · ' + escHtml(c.notas) : ''}</div>
+          <div class="sub">${c.telefone ? escHtml(String(c.telefone)) : 'Sem contacto'}${c.notas ? ' · ' + escHtml(c.notas) : ''}</div>
           <div class="cliente-stats">
             <span class="cliente-stat">${visitas} ${visitas === 1 ? 'visita' : 'visitas'}</span>
             ${totalGasto > 0 ? `<span class="cliente-stat cliente-stat--gasto">${fmtKz(totalGasto)} gastos</span>` : ''}
+            ${(Number(c.pontos) || 0) > 0 ? `<span class="cliente-stat">${Number(c.pontos)} pts</span>` : ''}
             ${clienteNovo ? `<span class="cliente-stat cliente-stat--novo">Novo</span>` : `<span class="cliente-stat">${formatarUltimaVisita(ultimaVisita)}</span>`}
           </div>
         </div>
@@ -160,26 +257,41 @@ function renderCaixa() {
     return;
   }
   const hojeStr = hoje();
-  const entradas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda').reduce((s, m) => s + m.valor, 0);
-  const despesas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa').reduce((s, m) => s + m.valor, 0);
-  document.getElementById('caixa-saldo').textContent = fmtKz(state.config.fundo + entradas - despesas);
-  document.getElementById('caixa-fundo').textContent = fmtKz(state.config.fundo);
-  // Variação do faturamento de hoje face a ontem
+  const _num = (v) => Number(v) || 0;
+  const entradas = state.movimentos
+    .filter(m => m.data === hojeStr && m.tipo === 'venda')
+    .reduce((s, m) => s + _num(m.valor), 0);
+  const despesas = state.movimentos
+    .filter(m => m.data === hojeStr && m.tipo === 'despesa')
+    .reduce((s, m) => s + _num(m.valor), 0);
+  const fundo = _num(state.config && state.config.fundo);
+  const saldoEl = document.getElementById('caixa-saldo');
+  const fundoEl = document.getElementById('caixa-fundo');
+  if (saldoEl) saldoEl.textContent = fmtKz(fundo + entradas - despesas);
+  if (fundoEl) fundoEl.textContent = fmtKz(fundo);
+  // Variação vendas hoje vs ontem (honesta: sem baseline → "—")
   const dOntem = new Date();
   dOntem.setDate(dOntem.getDate() - 1);
-  const ontemStr = dOntem.getFullYear() + '-' + String(dOntem.getMonth() + 1).padStart(2, '0') + '-' + String(dOntem.getDate()).padStart(2, '0');
-  const totalOntem = state.movimentos.filter(m => m.data === ontemStr && m.tipo === 'venda').reduce((s, m) => s + m.valor, 0);
+  const ontemStr = (typeof formatarDataISO === 'function')
+    ? formatarDataISO(dOntem)
+    : dOntem.getFullYear() + '-' + String(dOntem.getMonth() + 1).padStart(2, '0') + '-' + String(dOntem.getDate()).padStart(2, '0');
+  const totalOntem = state.movimentos
+    .filter(m => m.data === ontemStr && m.tipo === 'venda')
+    .reduce((s, m) => s + _num(m.valor), 0);
   const variacaoEl = document.getElementById('caixa-variacao');
   if (variacaoEl) {
-    let variacao = 0;
     if (totalOntem > 0) {
-      variacao = ((entradas - totalOntem) / totalOntem) * 100;
+      const variacao = ((entradas - totalOntem) / totalOntem) * 100;
+      const subiu = variacao >= 0;
+      variacaoEl.textContent = (subiu ? '↑ ' : '↓ ') + Math.abs(variacao).toFixed(0) + '%';
+      variacaoEl.style.color = subiu ? 'var(--green)' : 'var(--red)';
     } else if (entradas > 0) {
-      variacao = 100;
+      variacaoEl.textContent = '↑ novo';
+      variacaoEl.style.color = 'var(--green)';
+    } else {
+      variacaoEl.textContent = '—';
+      variacaoEl.style.color = 'var(--text-muted)';
     }
-    const subiu = variacao >= 0;
-    variacaoEl.textContent = `${subiu ? '↑' : '↓'} ${Math.abs(Math.round(variacao))}%`;
-    variacaoEl.style.color = subiu ? 'var(--green)' : 'var(--red)';
   }
 
   const periodo = state.histPeriodo || 'hoje';
@@ -198,9 +310,9 @@ function renderCaixa() {
         <div class="avatar" style="background:${isV ? '#E6F4EC' : '#FDE8E8'};color:${isV ? 'var(--green)' : 'var(--red)'};font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
         <div class="info">
           <div class="title">${escHtml(m.descricao||'')}</div>
-          <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}</div>
+          <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}${m.tipo === 'despesa' && m.categoria ? ' · ' + escHtml(m.categoria) : ''}</div>
         </div>
-        <div class="action" style="color:${isV ? 'var(--green)' : 'var(--red)'};">${isV ? '+' : '−'}${fmtKz(m.valor)}</div>
+        <div class="action" style="color:${isV ? 'var(--green)' : 'var(--red)'};">${isV ? '+' : '−'}${fmtKz(Number(m.valor) || 0)}</div>
       </div>`;
   };
   const movFirst = movs.slice(0, MOV_INITIAL);
@@ -295,27 +407,49 @@ function tituloPeriodoCaixa(periodo) {
   return map[periodo] || 'Movimentos';
 }
 
+function _receitaProfMes(profId) {
+  const mes = (typeof hoje === 'function' ? hoje() : '').slice(0, 7);
+  if (!mes || !profId) return 0;
+  return (state.movimentos || []).filter(m =>
+    m.tipo === 'venda' && String(m.profissional_id) === String(profId) && String(m.data || '').startsWith(mes)
+  ).reduce((s, m) => s + (Number(m.valor) || 0), 0);
+}
+
 function renderProfissionais() {
   const cont = document.getElementById('profissionais-list');
   if (!cont) return;
-  const plano = getPlanoAtual();
+  const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
   const aviso = document.getElementById('plano-aviso');
   if (aviso) aviso.style.display = (plano === 'trial' || plano === 'starter') ? 'block' : 'none';
 
-  if (state.profissionais.length === 0) {
-    cont.innerHTML = `<div class="empty-state">${svgPessoas}<p>Adicione o primeiro profissional</p></div>`;
+  const activos = (state.profissionais || []).filter(function (p) {
+    return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+  });
+  if (!activos.length) {
+    cont.innerHTML = `<div class="empty-state">${typeof svgPessoas !== 'undefined' ? svgPessoas : ''}<p>Ainda sem profissionais — adicione o primeiro</p></div>`;
     return;
   }
-  const profissionaisOrdenados = [...state.profissionais].sort((a, b) => a.nome.localeCompare(b.nome));
-  cont.innerHTML = profissionaisOrdenados.map(p => `
+  const profissionaisOrdenados = [...activos].sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt'));
+  cont.innerHTML = profissionaisOrdenados.map(p => {
+    const receita = _receitaProfMes(p.id);
+    const meta = Number(p.meta_mensal != null ? p.meta_mensal : p.meta) || 0;
+    let statExtra = '';
+    if (meta > 0) {
+      const pct = Math.min(100, Math.round((receita / meta) * 100));
+      statExtra = `<span class="cliente-stat">${pct}% meta</span>`;
+    } else if (receita > 0) {
+      statExtra = `<span class="cliente-stat cliente-stat--gasto">${fmtKz(receita)}</span>`;
+    }
+    const contacto = p.contacto ? String(p.contacto).replace(/\D/g, '') : '';
+    return `
     <div class="list-item" data-prof-id="${p.id}" style="cursor:pointer;">
-      <div class="avatar">${p.nome.charAt(0).toUpperCase()}</div>
+      <div class="avatar">${escHtml((p.nome || '?').charAt(0).toUpperCase())}</div>
       <div class="info">
-        <div class="title">${escHtml(p.nome)}</div>
-        <div class="sub">${escHtml(p.especialidade || 'Sem especialidade definida')}</div>
+        <div class="title">${escHtml(p.nome || 'Profissional')}</div>
+        <div class="sub">${escHtml(p.especialidade || 'Sem especialidade')}${contacto ? ' · ' + escHtml(contacto) : ''}</div>
         <div class="cliente-stats">
-          ${p.idade ? `<span class="cliente-stat">${p.idade} anos</span>` : ''}
-          ${p.contacto ? `<span class="cliente-stat">${escHtml(p.contacto)}</span>` : ''}
+          ${statExtra}
+          ${p.taxa_comissao != null || p.taxa != null ? `<span class="cliente-stat">${Number(p.taxa_comissao != null ? p.taxa_comissao : p.taxa) || 0}%</span>` : ''}
         </div>
       </div>
       <div class="actions">
@@ -323,26 +457,37 @@ function renderProfissionais() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="12" cy="19" r="1.75"/></svg>
         </button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderServicos() {
   const container = document.getElementById('servicos-list');
   if (!container) return;
-  if (state.servicos.length === 0) {
-    container.innerHTML = `<div class="empty-state">${svgTesoura}<p>Nenhum serviço cadastrado</p></div>`;
+  const servicosActivos = (state.servicos || []).filter(function (s) {
+    return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s.ativo !== false);
+  });
+  if (!servicosActivos.length) {
+    container.innerHTML = `<div class="empty-state">${typeof svgTesoura !== 'undefined' ? svgTesoura : ''}<p>Ainda sem serviços — adicione o primeiro</p></div>`;
     return;
   }
-  const servicosOrdenados = [...state.servicos].sort((a, b) => a.nome.localeCompare(b.nome));
+  const servicosOrdenados = [...servicosActivos].sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt'));
   container.innerHTML = servicosOrdenados.map(s => {
-    const profs = s.profissionais && s.profissionais.length > 0 ? s.profissionais.join(', ') : 'Todos os profissionais disponíveis';
+    const profs = (function () {
+      const arr = s.profissionais || [];
+      if (!arr.length) return 'Todos os profissionais';
+      return arr.map(function (x) {
+        const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
+        if (byId) return byId.nome;
+        return x;
+      }).join(', ');
+    })();
     return `
-      <div class="list-item" style="cursor:default;">
+      <div class="list-item" data-servico-id="${s.id}" style="cursor:pointer;">
         <div class="avatar" style="background:var(--gold-light);color:var(--gold-dark);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
         <div class="info">
           <div class="title">${escHtml(s.nome)}</div>
-          <div class="sub">${fmtKz(s.precoBase)} · ${escHtml(profs)}</div>
+          <div class="sub">${fmtKz(Number(s.precoBase) || 0)} · ${Number(s.duracao || s.duracaoMin || s.minutos || 60) || 60} min · ${escHtml(profs)}</div>
         </div>
         <div class="actions">
           <button class="row-menu-btn" data-action="row-menu" data-tipo="servico" data-id="${s.id}" data-role="admin" aria-label="Mais ações" aria-haspopup="menu">
@@ -411,21 +556,24 @@ function populateAgendaSelects() {
 
   const filtrarProfsAgenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia
-    if (state.profissionais.length === 0) {
+    const activos = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
+    if (activos.length === 0) {
       profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
       return;
     }
 
     let profs;
     if (!servicoNome || servicoNome === 'Outro') {
-      profs = state.profissionais.map(p => ({ id: p.id, nome: p.nome }));
+      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = serv && serv.profissionais && serv.profissionais.length > 0
         ? serv.profissionais
-        : state.profissionais.map(p => p.nome);
-      profs = state.profissionais
-        .filter(p => nomes.includes(p.nome))
+        : activos.map(p => p.nome);
+      profs = activos
+        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
         .map(p => ({ id: p.id, nome: p.nome }));
     }
     const prevProfId = profSel.value;
@@ -447,7 +595,10 @@ function populateVendaSelects() {
   if (!profSel || !catSel) return;
 
   // Verificar se há serviços
-  if (state.servicos.length === 0) {
+  const servicosActivos = (state.servicos || []).filter(function (s) {
+    return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s.ativo !== false);
+  });
+  if (servicosActivos.length === 0) {
     catSel.innerHTML = '<option value="">Nenhum serviço disponível</option>';
     profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
     return;
@@ -456,28 +607,31 @@ function populateVendaSelects() {
   catSel.selectedIndex = -1;
 
   catSel.innerHTML = `<option value="">Selecionar serviço</option>` +
-    state.servicos.map(s =>
+    servicosActivos.map(s =>
       `<option value="${escHtml(s.nome)}" data-preco="${s.precoBase}">${escHtml(s.nome)}</option>`
     ).join('') +
     '<option value="__custom" data-preco="">Outro (personalizado)</option>';
 
   const filtrarProfsVenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia
-    if (state.profissionais.length === 0) {
+    const activos = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
+    if (activos.length === 0) {
       profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
       return;
     }
 
     let profs;
     if (!servicoNome || servicoNome === '__custom') {
-      profs = state.profissionais.map(p => ({ id: p.id, nome: p.nome }));
+      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = serv && serv.profissionais && serv.profissionais.length > 0
         ? serv.profissionais
-        : state.profissionais.map(p => p.nome);
-      profs = state.profissionais
-        .filter(p => nomes.includes(p.nome))
+        : activos.map(p => p.nome);
+      profs = activos
+        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
         .map(p => ({ id: p.id, nome: p.nome }));
     }
     profSel.innerHTML = `<option value="">Selecionar profissional</option>` +

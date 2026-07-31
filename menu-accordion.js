@@ -105,6 +105,8 @@
     GROUPS.forEach(function (g) {
       var group = document.createElement("div");
       group.className = "bp-acc-group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", g.label);
 
       var toggle = document.createElement("button");
       toggle.type = "button";

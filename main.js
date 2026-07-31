@@ -120,11 +120,11 @@ document.addEventListener('DOMContentLoaded', async function init() {
     const pendentes = fila.filter(op => op.failed !== true).length;
     // Skip pull pesado se nada pendente e último pull < 90s (throttle)
     const now = Date.now();
-    if (pendentes === 0 && window._lastSupabasePull && (now - window._lastSupabasePull) < 90000) {
+    if (pendentes === 0 && window.BPRuntime && window.BPRuntime.lastSupabasePull && (now - window.BPRuntime.lastSupabasePull) < 90000) {
       return;
     }
     carregarDoSupabase().then(atualizado => {
-      window._lastSupabasePull = Date.now();
+      window.BPRuntime = window.BPRuntime || {}; window.BPRuntime.lastSupabasePull = Date.now();
       if (atualizado) {
         updateUI();
         if (typeof renderBadges === 'function') renderBadges();

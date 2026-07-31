@@ -127,8 +127,33 @@
     var stLabel = st === "realizado" ? "Realizado"
       : st === "cancelado" ? "Cancelado"
       : st === "nao_realizado" ? "Não realizado" : "Agendado";
-    var podeFinalizar = st === "agendado";
-    var podeCancelar = st === "agendado";
+    var stNorm = String(st || "agendado").toLowerCase();
+    var podeFinalizar = stNorm === "agendado";
+    var podeCancelar = stNorm === "agendado";
+    var podeWhatsApp = false;
+    try {
+      if (window.BPAgendaUI && typeof BPAgendaUI.clienteTelefone === "function") {
+        podeWhatsApp = !!BPAgendaUI.clienteTelefone(ag);
+      }
+    } catch (e) {}
+
+    var cells = [];
+    if (podeFinalizar) {
+      cells.push('<button type="button" class="btn btn-sm btn-primary bp-ag-btn" data-id="' + ag.id + '" data-action="finalizar">Finalizar</button>');
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' + ag.id + '" data-action="reagendar-agenda">Reagendar</button>');
+    }
+    if (podeWhatsApp) {
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' + ag.id + '" data-action="whatsapp-agenda">WhatsApp</button>');
+    } else if (podeFinalizar) {
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" disabled title="Cliente sem telefone">WhatsApp</button>');
+    }
+    if (podeCancelar) {
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn bp-ag-btn-muted" data-id="' + ag.id + '" data-action="cancelar-agenda">Cancelar</button>');
+    }
+    var cols = cells.length <= 2 ? cells.length || 1 : 2;
+    var actionsHtml = cells.length
+      ? '<div class="bp-ag-actions bp-ad-actions" style="--bp-ag-cols:' + cols + '">' + cells.join("") + "</div>"
+      : "";
 
     detail.classList.remove("is-empty");
     detail.innerHTML =
@@ -138,26 +163,28 @@
       '<div class="bp-ad-row"><span>Profissional</span><span>' + esc(nomeProf) + "</span></div>" +
       '<div class="bp-ad-row"><span>Valor</span><span>' + money(ag.preco) + "</span></div>" +
       '<div class="bp-ad-row"><span>Estado</span><span>' + esc(stLabel) + "</span></div>" +
-      '<div class="bp-ad-actions">' +
-        (podeFinalizar
-          ? '<button type="button" class="btn btn-primary" data-id="' + ag.id + '" data-action="finalizar">Finalizar atendimento</button>'
-          : "") +
-        (podeCancelar
-          ? '<button type="button" class="btn btn-secondary" data-id="' + ag.id + '" data-action="cancelar-agenda">Cancelar marcação</button>'
-          : "") +
-      "</div>";
+      actionsHtml;
 
-    // wire actions to existing handlers
     detail.querySelectorAll("[data-action]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var action = btn.getAttribute("data-action");
         var aid = btn.getAttribute("data-id");
         if (action === "finalizar" && typeof abrirFinalizarAtendimento === "function") {
           abrirFinalizarAtendimento(aid);
-        } else {
-          // synthesize click on list button if present
-          var src = document.querySelector('[data-action="' + action + '"][data-id="' + aid + '"]');
+        } else if (action === "reagendar-agenda" && typeof abrirReagendarAgendamento === "function") {
+          abrirReagendarAgendamento(aid);
+        } else if (action === "whatsapp-agenda") {
+          var src = document.querySelector('[data-action="whatsapp-agenda"][data-id="' + aid + '"]');
           if (src && src !== btn) src.click();
+          else {
+            try {
+              var href = window.BPAgendaUI && BPAgendaUI.waHref && BPAgendaUI.waHref(ag);
+              if (href) window.open(href, "_blank", "noopener,noreferrer");
+            } catch (err) {}
+          }
+        } else {
+          var src2 = document.querySelector('[data-action="' + action + '"][data-id="' + aid + '"]');
+          if (src2 && src2 !== btn) src2.click();
         }
       });
     });

@@ -316,11 +316,18 @@
       return c.id === nomeOuId || String(c.nome || "").toLowerCase() === String(nomeOuId).toLowerCase();
     }) || null;
     var nome = cliente ? cliente.nome : String(nomeOuId);
+    var cid = cliente ? cliente.id : null;
     var eventos = [];
+
+    function matchCliente(row) {
+      if (cid && row.cliente_id && String(row.cliente_id) === String(cid)) return true;
+      if (nome && String(row.cliente || "").toLowerCase() === String(nome).toLowerCase()) return true;
+      return false;
+    }
 
     (state.movimentos || []).forEach(function (m) {
       if (m.tipo !== "venda") return;
-      if (String(m.cliente || "").toLowerCase() !== nome.toLowerCase()) return;
+      if (!matchCliente(m)) return;
       eventos.push({
         tipo: "venda",
         data: m.data,
@@ -331,7 +338,7 @@
       });
     });
     (state.agendamentos || []).forEach(function (a) {
-      if (String(a.cliente || "").toLowerCase() !== nome.toLowerCase()) return;
+      if (!matchCliente(a)) return;
       eventos.push({
         tipo: "agenda",
         data: a.data,
@@ -567,34 +574,41 @@
 
   /* ========== UI SHELL ========== */
   function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
     var el = document.getElementById(id);
     if (el) {
-      var t = el.querySelector(".bp-sheet-title");
-      if (t && title) t.textContent = title;
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
       return el;
     }
-    el = document.createElement("div");
+    el = document.createElement('div');
     el.id = id;
-    el.className = "modal-overlay";
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-modal", "true");
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
     el.innerHTML =
-      '<div class="bp-sheet">' +
-        '<div class="bp-sheet-handle" aria-hidden="true"></div>' +
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
         '<div class="bp-sheet-header">' +
-          '<div class="bp-sheet-eyebrow">' + esc(eyebrow || "BeautyPro") + "</div>" +
-          '<h2 class="bp-sheet-title">' + esc(title) + "</h2>" +
-          (subtitle ? '<p class="bp-sheet-subtitle">' + esc(subtitle) + "</p>" : "") +
-        "</div>" +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
         '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
-        '<div class="bp-sheet-footer">' +
+        '<div class="bp-sheet-footer modal-actions">' +
           '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
-        "</div></div>";
+        '</div>' +
+      '</div>';
     document.body.appendChild(el);
-    el.addEventListener("click", function (e) {
-      if (e.target === el || e.target.getAttribute("data-close") === id) {
-        if (typeof closeModal === "function") closeModal(id);
-        else el.classList.remove("open");
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
       }
     });
     return el;
@@ -634,16 +648,33 @@
         '<button type="button" class="bp-action-btn is-primary" data-stock-in="' + p.id + '">+</button></div></div></div>';
     }).join("") || '<div class="bp-empty"><strong>Stock vazio</strong>Adicione o primeiro produto abaixo.</div>';
 
-    body.innerHTML = kpis +
+    var alertHtml = "";
+    if (baixo.length) {
+      alertHtml = '<div class="bp-alert-banner is-warn"><strong>' + baixo.length + (baixo.length === 1 ? " produto abaixo do mínimo" : " produtos abaixo do mínimo") +
+        "</strong>" + baixo.slice(0, 3).map(function (p) { return esc(p.nome); }).join(", ") +
+        (baixo.length > 3 ? "…" : "") + "</div>";
+    }
+    rows = list.map(function (p) {
+      var alert = (Number(p.qtd_min) > 0 && p.qtd <= p.qtd_min) ? ' <span class="bp-badge is-red">Mín.</span>' : "";
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(p.nome) + alert + "</div>" +
+        '<div class="bp-row-meta">' + (p.sku ? esc(p.sku) + " · " : "") + fmt(p.preco_custo) + "/un · mín " + (p.qtd_min || 0) + "</div></div>" +
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">' +
+        '<div class="bp-row-value">' + p.qtd + " " + esc(p.unidade || "un") + "</div>" +
+        '<div class="bp-stepper">' +
+        '<button type="button" class="bp-action-btn" data-stock-out="' + p.id + '" aria-label="Saída">−</button>' +
+        '<button type="button" class="bp-action-btn is-primary" data-stock-in="' + p.id + '" aria-label="Entrada">+</button></div></div></div>';
+    }).join("") || '<div class="bp-empty"><strong>Stock vazio</strong>Adicione o primeiro produto abaixo.</div>';
+
+    body.innerHTML = alertHtml + kpis +
       '<div class="bp-section"><div class="bp-section-title">Inventário</div>' + rows + "</div>" +
       '<div class="bp-section"><div class="bp-section-title">Novo produto</div>' +
-      '<div class="input-group"><label class="input-label">Nome</label><input id="bp-st-nome" class="input-field" placeholder="Ex: Shampoo 1L"></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
-        '<div class="input-group"><label class="input-label">Qtd inicial</label><input type="number" id="bp-st-qtd" class="input-field" min="0" value="0"></div>' +
-        '<div class="input-group"><label class="input-label">Qtd mínima</label><input type="number" id="bp-st-min" class="input-field" min="0" value="2"></div>' +
-        '<div class="input-group"><label class="input-label">Custo unit. (Kz)</label><input type="number" id="bp-st-custo" class="input-field" min="0" value="0"></div>' +
-        '<div class="input-group"><label class="input-label">SKU</label><input id="bp-st-sku" class="input-field" placeholder="Opcional"></div></div>' +
-      '<button type="button" class="btn btn-primary btn-block" id="bp-st-add">Adicionar produto</button></div>';
+      '<div class="input-group"><label class="input-label" for="bp-st-nome">Nome</label><input id="bp-st-nome" class="input-field" placeholder="Ex: Shampoo 1L" autocomplete="off"></div>' +
+      '<div class="bp-form-grid-2">' +
+        '<div class="input-group"><label class="input-label" for="bp-st-qtd">Qtd inicial</label><input type="number" id="bp-st-qtd" class="input-field" min="0" value="0" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-st-min">Qtd mínima</label><input type="number" id="bp-st-min" class="input-field" min="0" value="2" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-st-custo">Custo unit. (Kz)</label><input type="number" id="bp-st-custo" class="input-field" min="0" value="0" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-st-sku">SKU</label><input id="bp-st-sku" class="input-field" placeholder="Opcional"></div></div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-st-add" style="margin-top:12px">Adicionar produto</button></div>';
 
     var add = document.getElementById("bp-st-add");
     if (add) add.onclick = function () {
@@ -766,25 +797,36 @@
     var clientes = ((state && state.clientes) || []).map(function (c) {
       return '<option value="' + esc(c.nome) + '">' + esc(c.nome) + "</option>";
     }).join("");
+    var insight = "";
+    if (stats.total === 0) {
+      insight = '<div class="bp-alert-banner"><strong>Ainda sem avaliações</strong>Peça uma nota 0–10 após o atendimento para medir a satisfação.</div>';
+    } else if (stats.nps != null && stats.nps >= 50) {
+      insight = '<div class="bp-alert-banner is-ok"><strong>NPS saudável (' + stats.nps + ')</strong>Boa proporção de promotores nos últimos 90 dias.</div>';
+    } else if (stats.nps != null && stats.nps < 0) {
+      insight = '<div class="bp-alert-banner is-warn"><strong>NPS negativo (' + stats.nps + ')</strong>Há mais detractores do que promotores — vale rever a experiência.</div>';
+    }
     var kpis =
+      insight +
       '<div class="bp-kpi-grid">' +
         '<div class="bp-kpi"><div class="bp-kpi-label">NPS 90d</div><div class="bp-kpi-value' + (stats.nps != null && stats.nps < 0 ? " is-negative" : " is-gold") + '">' + (stats.nps != null ? stats.nps : "—") + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Média</div><div class="bp-kpi-value">' + (stats.media != null ? stats.media : "—") + "</div></div>" +
         '<div class="bp-kpi"><div class="bp-kpi-label">Respostas</div><div class="bp-kpi-value">' + stats.total + "</div></div></div>" +
-      '<p style="font-size:.75rem;color:var(--text-muted);margin:-4px 0 12px">Promotores ' + stats.promotores + " · Passivos " + stats.passivos + " · Detractores " + stats.detractores + "</p>";
+      '<p class="bp-ref-line">Promotores ' + stats.promotores + " · Passivos " + stats.passivos + " · Detractores " + stats.detractores + "</p>";
 
     var recent = loadNps().slice().reverse().slice(0, 12).map(function (n) {
+      var badgeCls = n.score >= 9 ? " is-green" : (n.score <= 6 ? " is-red" : "");
       return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(n.cliente || "Anónimo") +
-        ' <span class="bp-badge">' + n.score + "/10</span></div>" +
+        ' <span class="bp-badge' + badgeCls + '">' + n.score + "/10</span></div>" +
         '<div class="bp-row-meta">' + esc(n.data) + " · " + esc(n.tipo) + (n.comentario ? " · " + esc(n.comentario) : "") + "</div></div></div>";
-    }).join("") || '<div class="bp-empty">Ainda sem avaliações.</div>';
+    }).join("") || '<div class="bp-empty"><strong>Sem avaliações</strong>As notas aparecem aqui após registar.</div>';
 
     body.innerHTML = kpis +
       '<div class="bp-section"><div class="bp-section-title">Nova avaliação</div>' +
-      '<div class="input-group"><label class="input-label">Cliente</label><select id="bp-nps-cli" class="input-field"><option value="">— opcional —</option>' + clientes + "</select></div>" +
-      '<div class="input-group"><label class="input-label">Nota (0–10)</label><input type="number" id="bp-nps-score" class="input-field" min="0" max="10" step="1" value="9"></div>' +
-      '<div class="input-group"><label class="input-label">Comentário</label><input id="bp-nps-com" class="input-field" placeholder="Opcional" maxlength="300"></div>' +
-      '<button type="button" class="btn btn-primary btn-block" id="bp-nps-save">Guardar NPS</button></div>' +
+      '<div class="input-group"><label class="input-label" for="bp-nps-cli">Cliente</label><select id="bp-nps-cli" class="input-field"><option value="">— opcional —</option>' + clientes + "</select></div>" +
+      '<div class="bp-form-grid-2">' +
+        '<div class="input-group"><label class="input-label" for="bp-nps-score">Nota (0–10)</label><input type="number" id="bp-nps-score" class="input-field" min="0" max="10" step="1" value="9" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-nps-com">Comentário</label><input id="bp-nps-com" class="input-field" placeholder="Opcional" maxlength="300"></div></div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-nps-save" style="margin-top:12px">Guardar NPS</button></div>' +
       '<div class="bp-section"><div class="bp-section-title">Recentes</div>' + recent + "</div>";
 
     var save = document.getElementById("bp-nps-save");
@@ -803,7 +845,7 @@
 
   /* ----- Timeline UI ----- */
   function openTimeline() {
-    ensureShell("modal-bp-timeline", "Histórico do cliente", "CRM", "Timeline de vendas, marcações, NPS e pacotes.");
+    ensureShell("modal-bp-timeline", "Histórico do cliente", "CRM", "Vendas, marcações, NPS e pacotes num só lugar.");
     renderTimeline();
     openShell("modal-bp-timeline");
   }
@@ -811,30 +853,69 @@
     var body = document.getElementById("modal-bp-timeline-body");
     if (!body) return;
     var clientes = ((state && state.clientes) || []).slice().sort(function (a, b) {
-      return String(a.nome || "").localeCompare(String(b.nome || ""));
+      return String(a.nome || "").localeCompare(String(b.nome || ""), "pt");
     });
+    if (!clientes.length) {
+      body.innerHTML = '<div class="bp-empty"><strong>Sem clientes</strong>Cadastre clientes na aba Clientes para ver o histórico.</div>';
+      return;
+    }
+
     var opts = clientes.map(function (c) {
       return '<option value="' + esc(c.nome) + '"' + (nomePreset && nomePreset === c.nome ? " selected" : "") + ">" + esc(c.nome) + "</option>";
     }).join("");
-    var selected = nomePreset || (clientes[0] && clientes[0].nome) || "";
-    var tl = selected ? timelineCliente(selected) : { eventos: [], totalGasto: 0, pontos: 0, cliente: null };
+    var selected = nomePreset || "";
+    if (!selected) {
+      // manter seleção do select se re-render interno
+      var prev = document.getElementById("bp-tl-cli");
+      if (prev && prev.value) selected = prev.value;
+    }
 
-    var head = selected
-      ? '<div class="bp-kpi-grid"><div class="bp-kpi"><div class="bp-kpi-label">Gasto total</div><div class="bp-kpi-value" style="font-size:.75rem">' + fmt(tl.totalGasto) + "</div></div>" +
-        '<div class="bp-kpi"><div class="bp-kpi-label">Pontos</div><div class="bp-kpi-value is-gold">' + (tl.pontos || 0) + "</div></div>" +
-        '<div class="bp-kpi"><div class="bp-kpi-label">Eventos</div><div class="bp-kpi-value">' + tl.eventos.length + "</div></div></div>"
-      : "";
+    var head = "";
+    var events = "";
+    var insight = "";
 
-    var events = (tl.eventos || []).slice(0, 40).map(function (e) {
-      var badge = e.tipo === "venda" ? "Venda" : e.tipo === "agenda" ? "Agenda" : e.tipo === "nps" ? "NPS" : "Pacote";
-      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title"><span class="bp-badge">' + badge + "</span> " + esc(e.titulo) + "</div>" +
-        '<div class="bp-row-meta">' + esc(e.data || "") + (e.detalhe ? " · " + esc(e.detalhe) : "") + "</div></div></div>";
-    }).join("") || '<div class="bp-empty">Sem eventos para este cliente.</div>';
+    if (!selected) {
+      insight = '<div class="bp-alert-banner"><strong>Seleccione um cliente</strong>Veja vendas, agenda, avaliações e pacotes associados.</div>';
+      events = '<div class="bp-empty"><strong>Nenhum cliente seleccionado</strong>Escolha um nome acima.</div>';
+    } else {
+      var tl = timelineCliente(selected);
+      var nVendas = (tl.eventos || []).filter(function (e) { return e.tipo === "venda"; }).length;
+      var nAgenda = (tl.eventos || []).filter(function (e) { return e.tipo === "agenda"; }).length;
+      var ultimo = (tl.eventos || [])[0];
+
+      if (!(tl.eventos || []).length) {
+        insight = '<div class="bp-alert-banner"><strong>Sem eventos</strong>Este cliente ainda não tem vendas, marcações, NPS ou pacotes registados.</div>';
+      } else if (ultimo) {
+        insight = '<div class="bp-alert-banner is-ok"><strong>Última actividade</strong>' +
+          esc(ultimo.data || "") + " · " + esc(ultimo.titulo || "") +
+          (ultimo.detalhe ? " — " + esc(String(ultimo.detalhe).slice(0, 80)) : "") + "</div>";
+      }
+
+      head =
+        '<div class="bp-kpi-grid">' +
+          '<div class="bp-kpi"><div class="bp-kpi-label">Gasto total</div><div class="bp-kpi-value is-positive" style="font-size:.75rem">' + fmt(tl.totalGasto) + "</div></div>" +
+          '<div class="bp-kpi"><div class="bp-kpi-label">Pontos</div><div class="bp-kpi-value is-gold">' + (tl.pontos || 0) + "</div></div>" +
+          '<div class="bp-kpi"><div class="bp-kpi-label">Eventos</div><div class="bp-kpi-value">' + (tl.eventos || []).length + "</div></div>" +
+        "</div>" +
+        '<p class="bp-ref-line">' + nVendas + " vendas · " + nAgenda + " marcações · últimos 40 eventos</p>";
+
+      events = (tl.eventos || []).slice(0, 40).map(function (e) {
+        var badgeCls = "";
+        var badge = "Evento";
+        if (e.tipo === "venda") { badge = "Venda"; badgeCls = " is-green"; }
+        else if (e.tipo === "agenda") { badge = "Agenda"; badgeCls = " is-gold"; }
+        else if (e.tipo === "nps") { badge = "NPS"; }
+        else if (e.tipo === "pacote") { badge = "Pacote"; }
+        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title"><span class="bp-badge' + badgeCls + '">' + badge + "</span> " + esc(e.titulo) + "</div>" +
+          '<div class="bp-row-meta">' + esc(e.data || "") + (e.detalhe ? " · " + esc(e.detalhe) : "") + "</div></div></div>";
+      }).join("") || '<div class="bp-empty"><strong>Sem eventos</strong>Nada registado para este cliente.</div>';
+    }
 
     body.innerHTML =
-      '<div class="input-group"><label class="input-label">Cliente</label>' +
+      '<div class="input-group"><label class="input-label" for="bp-tl-cli">Cliente</label>' +
       '<select id="bp-tl-cli" class="input-field"><option value="">— seleccionar —</option>' + opts + "</select></div>" +
-      head + '<div class="bp-section"><div class="bp-section-title">Timeline</div>' + events + "</div>";
+      insight + head +
+      '<div class="bp-section"><div class="bp-section-title">Timeline</div>' + events + "</div>";
 
     var sel = document.getElementById("bp-tl-cli");
     if (sel) {
@@ -856,7 +937,7 @@
         '<div class="bp-kpi"><div class="bp-kpi-label">Janela</div><div class="bp-kpi-value" style="font-size:.8rem">45 dias</div></div>' +
         '<div class="bp-kpi"><div class="bp-kpi-label">Formato</div><div class="bp-kpi-value" style="font-size:.8rem">.ics</div></div>' +
       '</div>' +
-      '<p style="font-size:.85rem;color:var(--text-secondary);line-height:1.5;margin:0 0 16px">Gera um ficheiro padrão iCalendar com as marcações futuras. Abra no telemóvel ou importe no Google Calendar / Apple Calendar.</p>' +
+      '<div class="bp-alert-banner"><strong>Calendário .ics</strong>Importe no Google Calendar, Apple Calendar ou Outlook. Janela de 45 dias.</div>' +
       '<button type="button" class="btn btn-primary btn-block" id="bp-cal-dl">Descarregar agenda.ics</button>';
     var btn = document.getElementById("bp-cal-dl");
     if (btn) btn.onclick = downloadIcs;

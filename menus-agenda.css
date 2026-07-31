@@ -236,3 +236,21 @@
   gap: 4px;
 }
 .agenda-periodo-filter--status.active { background: var(--text-primary); border-color: var(--text-primary); }
+
+
+.timeline-item .event .timeline-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+.timeline-item .event .timeline-actions .btn {
+  min-height: 40px;
+  height: 40px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}

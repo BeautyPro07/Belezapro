@@ -103,7 +103,7 @@ function renderPlanoInfo() {
   } else if (plano === 'trial' && !isTrialAtivo()) {
     countdown.style.display = 'inline-block';
     countdown.textContent = 'Trial expirado';
-    countdown.style.color = '#B33A4A';
+    countdown.style.color = 'var(--red)';
   } else {
     countdown.style.display = 'none';
     countdown.style.color = '';
@@ -113,13 +113,16 @@ function renderPlanoInfo() {
     const limite = info.iaDia;
     iaInfo.textContent = limite > 0 ? `${info.label}: ${limite} perguntas/dia` : 'IA não disponível neste plano';
   }
-  const cont = document.getElementById('ia-contador');
-  if (cont) {
-    if (info.iaDia === 0) {
-      cont.textContent = '0';
-    } else {
-      const chave = 'ia_perguntas_' + (state.config.salaoId || 'local') + '_' + hoje();
-      cont.textContent = parseInt(localStorage.getItem(chave) || '0');
+  if (typeof actualizarContadorIA === 'function') {
+    actualizarContadorIA();
+  } else {
+    const cont = document.getElementById('ia-contador');
+    if (cont) {
+      if (info.iaDia === 0) cont.textContent = '0';
+      else {
+        const chave = 'ia_perguntas_' + ((state.config && state.config.salaoId) || 'local') + '_' + hoje();
+        cont.textContent = String(parseInt(localStorage.getItem(chave) || '0', 10) || 0);
+      }
     }
   }
 }
@@ -197,42 +200,68 @@ function getIntervaloDashAtual() {
 }
 
 // ====================================================================
-//  RENDER DASHBOARD (mantém sparkline funcional)
+//  RENDER DASHBOARD — modelo de verdade unificado (Fase A1+A2)
+//  Um período (dashPeriodo) alimenta KPIs, sparkline e gráfico.
 // ====================================================================
+function _statusAg(a) {
+  return String(a.status || a.estado || 'agendado').toLowerCase();
+}
+
+function _somaVendas(lista) {
+  return (lista || []).reduce((s, v) => s + (Number(v.valor) || 0), 0);
+}
+
 function renderDashboard() {
   const intervalo = getIntervaloDashAtual();
-  const agPeriodo = state.agendamentos.filter(a => a.data >= intervalo.inicio && a.data <= intervalo.fim);
-  const vendasPeriodo = state.movimentos.filter(m => m.data >= intervalo.inicio && m.data <= intervalo.fim && m.tipo === 'venda');
-  const totalRev = vendasPeriodo.reduce((s, v) => s + v.valor, 0);
+  const movs = state.movimentos || [];
+  const ags = state.agendamentos || [];
+
+  const vendasPeriodo = movs.filter(m =>
+    m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim
+  );
+  const totalRev = _somaVendas(vendasPeriodo);
   const totalVendas = vendasPeriodo.length;
   const ticket = totalVendas > 0 ? totalRev / totalVendas : 0;
-  const realizados = agPeriodo.filter(a => a.status === 'realizado').length;
+
+  // Agenda no período: estados explícitos (não misturar cancelados no "sucesso")
+  const agPeriodo = ags.filter(a => a.data >= intervalo.inicio && a.data <= intervalo.fim);
+  const realizados = agPeriodo.filter(a => _statusAg(a) === 'realizado').length;
+  const cancelados = agPeriodo.filter(a => _statusAg(a) === 'cancelado').length;
+  const naoRealizados = agPeriodo.filter(a => {
+    const st = _statusAg(a);
+    return st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
+  }).length;
+  const pendentesPeriodo = agPeriodo.filter(a => _statusAg(a) === 'agendado').length;
+  const agAtivos = agPeriodo.length - cancelados; // marcados válidos (exclui cancelados)
 
   const todayEl = document.getElementById('today-date');
   if (todayEl) todayEl.textContent = intervalo.label;
 
   animateKpi('kpi-revenue', fmtKz(totalRev));
   const revenueCount = document.getElementById('kpi-revenue-count');
-  if (revenueCount) revenueCount.textContent = totalVendas + ' serviços';
+  if (revenueCount) {
+    revenueCount.textContent = totalVendas === 1 ? '1 venda' : totalVendas + ' vendas';
+  }
 
-  animateKpi('kpi-agendamentos', String(agPeriodo.length));
+  // Número principal = marcações válidas no período; sub = breakdown honesto
+  animateKpi('kpi-agendamentos', String(Math.max(0, agAtivos)));
   const agStatus = document.getElementById('kpi-agendamentos-status');
-  if (agStatus) agStatus.textContent = realizados + ' realizados';
+  if (agStatus) {
+    const parts = [realizados + ' realizados'];
+    if (pendentesPeriodo) parts.push(pendentesPeriodo + ' pend.');
+    if (naoRealizados) parts.push(naoRealizados + ' falhados');
+    if (cancelados) parts.push(cancelados + ' cancel.');
+    agStatus.textContent = parts.join(' · ');
+  }
 
   animateKpi('kpi-ticket', fmtKz(ticket));
   const ticketSub = document.getElementById('kpi-ticket-sub');
-  if (ticketSub) ticketSub.textContent = 'por cliente';
+  if (ticketSub) ticketSub.textContent = 'por venda';
 
-  // ================================================================
-  //  SPARKLINE + % INTELIGENTE (ligado ao filtro do dashboard)
-  //  1) Pontos = ticket médio de cada dia do intervalo actual
-  //  2) % = ticket médio do período actual vs período anterior equivalente
-  // ================================================================
+  // --- Sparkline: receita diária no intervalo (mesma unidade do KPI primário) ---
   const canvas = document.getElementById('ticket-sparkline');
   if (canvas) {
     canvas.style.display = 'block';
-    canvas.style.visibility = 'visible';
-    canvas.style.opacity = '1';
     const parent = canvas.parentElement;
     const rect = parent ? parent.getBoundingClientRect() : { width: 84 };
     const dpr = window.devicePixelRatio || 1;
@@ -244,107 +273,150 @@ function renderDashboard() {
     canvas.style.height = cssHeight + 'px';
   }
 
-  // Construir série de ticket médio dia-a-dia dentro do intervalo do filtro
-  const serieTicket = [];
+  const serieReceita = [];
   const dInicio = new Date(intervalo.inicio + 'T00:00:00');
   const dFim = new Date(intervalo.fim + 'T00:00:00');
   const msDia = 86400000;
   const diasNoPeriodo = Math.max(1, Math.round((dFim - dInicio) / msDia) + 1);
-  // Limitar a 31 pontos para performance visual
   const passo = diasNoPeriodo > 31 ? Math.ceil(diasNoPeriodo / 31) : 1;
   for (let i = 0; i < diasNoPeriodo; i += passo) {
     const d = new Date(dInicio.getTime() + i * msDia);
-    const ds = d.toISOString().split('T')[0];
-    const vendasDia = state.movimentos.filter(m => m.data === ds && m.tipo === 'venda');
-    const totalDia = vendasDia.reduce((s, v) => s + v.valor, 0);
-    const qtdDia = vendasDia.length;
-    serieTicket.push(qtdDia > 0 ? totalDia / qtdDia : 0);
+    const ds = formatarDataISO(d);
+    const totalDia = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === ds));
+    serieReceita.push(totalDia);
   }
-  // Garantir pelo menos 2 pontos
-  if (serieTicket.length < 2) {
-    serieTicket.push(serieTicket[0] || 0);
-  }
+  if (serieReceita.length < 2) serieReceita.push(serieReceita[0] || 0);
 
+  const goldColor = (typeof getComputedStyle === 'function')
+    ? (getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#D4AF37')
+    : '#D4AF37';
   if (typeof desenharSparkline === 'function') {
     setTimeout(() => {
-      try { desenharSparkline('ticket-sparkline', serieTicket, '#D4AF37'); }
+      try { desenharSparkline('ticket-sparkline', serieReceita, goldColor); }
       catch (e) { console.warn('[Sparkline]', e); }
     }, 40);
   }
 
-  // % = ticket médio do período actual vs período anterior de mesma duração
+  // % variação: receita do período vs período anterior de igual duração (não ticket)
   const duracaoMs = (dFim - dInicio) + msDia;
   const prevFim = new Date(dInicio.getTime() - msDia);
   const prevInicio = new Date(prevFim.getTime() - duracaoMs + msDia);
-  const prevInicioStr = prevInicio.toISOString().split('T')[0];
-  const prevFimStr = prevFim.toISOString().split('T')[0];
-  const vendasPrev = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= prevInicioStr && m.data <= prevFimStr);
-  const totalPrev = vendasPrev.reduce((s, v) => s + v.valor, 0);
-  const ticketPrev = vendasPrev.length > 0 ? totalPrev / vendasPrev.length : 0;
+  const prevInicioStr = formatarDataISO(prevInicio);
+  const prevFimStr = formatarDataISO(prevFim);
+  const totalPrev = _somaVendas(movs.filter(m =>
+    m.tipo === 'venda' && m.data >= prevInicioStr && m.data <= prevFimStr
+  ));
 
-  let variacao = 0;
-  if (ticketPrev > 0 && isFinite(ticket) && isFinite(ticketPrev)) {
-    variacao = ((ticket - ticketPrev) / ticketPrev) * 100;
-  } else if (ticket > 0 && ticketPrev === 0) {
-    variacao = 100;
-  }
-  if (!isFinite(variacao) || isNaN(variacao)) variacao = 0;
-
-  const subiu = variacao >= 0;
-  const sinal = subiu ? '↑' : '↓';
   const percentEl = document.getElementById('ticket-trend-percent');
   if (percentEl) {
-    percentEl.className = subiu ? 'trend-up' : 'trend-down';
-    // Uma casa decimal (ex: 10.7%)
-    const absVar = Math.abs(variacao);
-    const texto = absVar >= 10 ? absVar.toFixed(1) : absVar.toFixed(1);
-    percentEl.innerHTML = `<span class="trend-arrow">${sinal}</span> ${texto}%`;
-    percentEl.style.display = 'inline-flex';
+    if (totalPrev > 0 && isFinite(totalRev)) {
+      const variacao = ((totalRev - totalPrev) / totalPrev) * 100;
+      const subiu = variacao >= 0;
+      percentEl.className = subiu ? 'trend-up' : 'trend-down';
+      percentEl.innerHTML = `<span class="trend-arrow">${subiu ? '↑' : '↓'}</span> ${Math.abs(variacao).toFixed(1)}%`;
+      percentEl.style.display = 'inline-flex';
+      percentEl.setAttribute('title', 'Receita vs período anterior equivalente');
+    } else if (totalRev > 0 && totalPrev === 0) {
+      percentEl.className = 'trend-up';
+      percentEl.innerHTML = `<span class="trend-arrow">↑</span> novo`;
+      percentEl.style.display = 'inline-flex';
+      percentEl.setAttribute('title', 'Sem vendas no período anterior');
+    } else {
+      percentEl.className = 'trend-up';
+      percentEl.textContent = '—';
+      percentEl.style.display = 'inline-flex';
+      percentEl.removeAttribute('title');
+    }
+  }
+  const trendPeriodEl = document.getElementById('ticket-trend-period');
+  if (trendPeriodEl) trendPeriodEl.textContent = 'vs período anterior';
+
+  // --- Meta mensal (BPFinance) + saldo de caixa (admin) ---
+  const metaWrap = document.getElementById('dash-meta-wrap');
+  if (metaWrap) {
+    let prog = null;
+    try {
+      if (window.BPFinance && typeof BPFinance.getProgressoMetaSalao === 'function') {
+        prog = BPFinance.getProgressoMetaSalao();
+      }
+    } catch (_) {}
+    if (prog && prog.meta > 0) {
+      metaWrap.hidden = false;
+      const fill = document.getElementById('dash-meta-fill');
+      const label = document.getElementById('dash-meta-label');
+      if (fill) fill.style.width = Math.min(100, prog.pct) + '%';
+      if (label) {
+        label.textContent = fmtKz(prog.volume) + ' / ' + fmtKz(prog.meta) + ' · ' + prog.pct + '%' +
+          (prog.atingida ? ' · Meta atingida' : '');
+      }
+    } else {
+      metaWrap.hidden = true;
+    }
+  }
+  const caixaEl = document.getElementById('dash-caixa-saldo');
+  if (caixaEl) {
+    const hojeStr = hoje();
+    const entradas = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === hojeStr));
+    const saidas = movs.filter(m => m.tipo === 'despesa' && m.data === hojeStr)
+      .reduce((s, m) => s + (Number(m.valor) || 0), 0);
+    const saldo = (Number(state.config && state.config.fundo) || 0) + entradas - saidas;
+    caixaEl.textContent = fmtKz(saldo);
   }
 
-  const trendPeriodEl = document.getElementById('ticket-trend-period');
-  if (trendPeriodEl) trendPeriodEl.textContent = intervalo.label;
-
-  // Próximos atendimentos — apenas HOJE e status "agendado" (após expirar os passados)
-  atualizarAgendamentosExpirados();
+  // Próximos atendimentos — só HOJE, status agendado, hora >= agora
+  if (typeof atualizarAgendamentosExpirados === 'function') atualizarAgendamentosExpirados();
   const hojeStr2 = hoje();
   const agora = new Date();
-  const agHoje = (state.agendamentos || []).filter(a => a.data === hojeStr2);
-  // Pendentes reais: status agendado E data/hora ainda no futuro (ou agora)
+  const agHoje = ags.filter(a => a.data === hojeStr2);
   const proximos = agHoje
     .filter(a => {
-      if (a.status !== 'agendado') return false;
-      const agDate = new Date(a.data + 'T' + (a.hora || '00:00') + ':00');
-      return agDate >= agora;
+      if (_statusAg(a) !== 'agendado') return false;
+      const hora = String(a.hora || '00:00').slice(0, 5);
+      const agDate = new Date(a.data + 'T' + hora + ':00');
+      return !isNaN(agDate.getTime()) && agDate >= agora;
     })
-    .sort((a, b) => a.hora.localeCompare(b.hora))
+    .sort((a, b) => String(a.hora || '').localeCompare(String(b.hora || '')))
     .slice(0, 6);
+
   const cont = document.getElementById('agenda-today-list');
-  if (!cont) return;
-  if (proximos.length === 0) {
-    const temRealizados = agHoje.some(a => a.status === 'realizado');
-    const temExpirados = agHoje.some(a => a.status === 'nao_realizado');
-    let mensagemVazio = 'Nenhum atendimento pendente hoje';
-    if (temRealizados && !temExpirados) mensagemVazio = 'Todos os atendimentos de hoje foram realizados';
-    else if (temExpirados && !temRealizados) mensagemVazio = 'Sem atendimentos pendentes';
-    cont.innerHTML = `<div class="empty-state"><p>${mensagemVazio}</p></div>`;
-  } else {
-    cont.innerHTML = proximos.map(a => {
-      const nomeProf = getProfissionalNome(a.profissional_id);
-      return `
-        <div class="list-item">
-          <div class="avatar">${(a.cliente || '?').charAt(0).toUpperCase()}</div>
-          <div class="info">
-            <div class="title" style="color:var(--gold-dark);font-weight:700;">${escHtml(a.servico)}</div>
-            <div class="sub">${escHtml(a.cliente)} · ${a.hora} · ${escHtml(nomeProf)}</div>
-          </div>
-          <div class="action" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span class="pill pill-warning" style="font-size:.6rem;">Pendente</span>
-            <span style="font-weight:700;font-size:.8rem;">${fmtKz(a.preco)}</span>
-          </div>
-        </div>
-      `;
-    }).join('');
+  if (cont) {
+    if (proximos.length === 0) {
+      const temRealizados = agHoje.some(a => _statusAg(a) === 'realizado');
+      const temExpirados = agHoje.some(a => {
+        const st = _statusAg(a);
+        return st === 'nao_realizado' || st === 'nao-realizado';
+      });
+      let mensagemVazio = 'Nenhum atendimento pendente hoje';
+      if (temRealizados && !temExpirados) mensagemVazio = 'Todos os atendimentos de hoje foram realizados';
+      else if (temExpirados && !temRealizados) mensagemVazio = 'Sem atendimentos pendentes';
+      cont.innerHTML = `<div class="empty-state"><p>${mensagemVazio}</p></div>`;
+    } else {
+      cont.innerHTML = proximos.map(a => {
+        const nomeProf = getProfissionalNome(a.profissional_id);
+        const inicial = (a.cliente || '?').charAt(0).toUpperCase();
+        let avHtml = `<div class="avatar">${escHtml(inicial)}</div>`;
+        try {
+          const cli = (state.clientes || []).find(c => c.nome === a.cliente || c.id === a.cliente_id);
+          if (cli && cli.foto) {
+            avHtml = `<div class="avatar bp-avatar-img"><img src="${cli.foto}" alt="" loading="lazy" decoding="async"></div>`;
+          } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === 'function') {
+            avHtml = `<div class="avatar bp-avatar-img"><img src="${BPAvatars.avatarDataUrl(a.cliente || '')}" alt="" loading="lazy" decoding="async"></div>`;
+          }
+        } catch (_) {}
+        return `
+          <div class="list-item">
+            ${avHtml}
+            <div class="info">
+              <div class="title dash-next-title">${escHtml(a.servico || 'Serviço')}</div>
+              <div class="sub">${escHtml(a.cliente || 'Cliente')} · ${escHtml(String(a.hora || '').slice(0, 5))} · ${escHtml(nomeProf)}</div>
+            </div>
+            <div class="action dash-next-action">
+              <span class="pill pill-warning">Pendente</span>
+              <span class="dash-next-price">${fmtKz(a.preco)}</span>
+            </div>
+          </div>`;
+      }).join('');
+    }
   }
   const countEl = document.getElementById('agenda-count');
   if (countEl) {
@@ -412,7 +484,10 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     localStorage.setItem('bp_dash_periodo', state.dashPeriodo);
     localStorage.setItem('bp_dash_offset', String(state.dashOffset));
     closeModal('modal-periodo-dashboard');
+    // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
+    if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
     renderDashboard();
+    if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
 });
 
@@ -429,7 +504,9 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
   localStorage.setItem('bp_dash_custom_inicio', ini);
   localStorage.setItem('bp_dash_custom_fim', fim);
   closeModal('modal-periodo-dashboard');
+  state.chartPeriodo = 'semana';
   renderDashboard();
+  if (typeof renderizarGrafico === 'function') renderizarGrafico();
 });
 
 // Fechar o popover ao tocar fora dele (mesmo padrão já usado no menu hambúrguer)
@@ -451,64 +528,97 @@ let agendaFilter = localStorage.getItem(agendaFilterKey) || 'hoje';
 
 // Função para verificar se um agendamento expirou
 function agendamentoExpirado(ag) {
-  const now = new Date();
-  const agDate = new Date(ag.data + 'T' + (ag.hora || '00:00') + ':00');
-  return agDate < now;
+  if (!ag || !ag.data) return false;
+  const hora = String(ag.hora || '00:00').slice(0, 5);
+  const agDate = new Date(ag.data + 'T' + hora + ':00');
+  if (isNaN(agDate.getTime())) return false;
+  return agDate < new Date();
 }
 
-// Função para atualizar status de agendamentos expirados
+// Atualiza expirados sem reentrar em render (evita loop render → expirar → render)
+let _expirandoAgenda = false;
 function atualizarAgendamentosExpirados() {
+  if (_expirandoAgenda || !state.agendamentos) return;
+  _expirandoAgenda = true;
   let atualizado = false;
-  for (const ag of state.agendamentos) {
-    if (ag.status === 'agendado' && agendamentoExpirado(ag)) {
-      ag.status = 'nao_realizado';
-      ag.updated_at = new Date().toISOString();
-      dbPut('agendamentos', ag); // atualiza localmente
-      atualizado = true;
+  try {
+    for (const ag of state.agendamentos) {
+      if (_statusAg(ag) === 'agendado' && agendamentoExpirado(ag)) {
+        ag.status = 'nao_realizado';
+        ag.updated_at = new Date().toISOString();
+        if (typeof dbPut === 'function') dbPut('agendamentos', ag);
+        atualizado = true;
+      }
     }
+  } finally {
+    _expirandoAgenda = false;
   }
-  if (atualizado) {
-    if (activeTab === 'agenda') renderAgendaFull();
-    renderBadges();
+  // NÃO chama renderAgendaFull aqui — o caller já renderiza
+  if (atualizado && typeof renderBadges === 'function') {
+    // badge only; avoid recursive full render
+    try {
+      const agora = new Date();
+      const disponiveis = state.agendamentos.filter(a => {
+        if (_statusAg(a) !== 'agendado') return false;
+        const hora = String(a.hora || '00:00').slice(0, 5);
+        const agDate = new Date(a.data + 'T' + hora + ':00');
+        return !isNaN(agDate.getTime()) && agDate >= agora;
+      });
+      const badge = document.getElementById('agenda-badge');
+      if (badge) {
+        const count = disponiveis.length;
+        if (count > 0) {
+          badge.textContent = count > 9 ? '9+' : String(count);
+          badge.classList.add('show');
+        } else {
+          badge.classList.remove('show');
+        }
+      }
+    } catch (_) {}
   }
 }
 
 // Função para obter agendamentos filtrados (com suporte a dia exato)
 function getAgendamentosFiltrados() {
-  // Primeiro, atualizar expirados
   atualizarAgendamentosExpirados();
 
   const hojeStr = hoje();
+  const list = state.agendamentos || [];
 
-  // Se o filtro for 'dia', usar a data exata
   if (agendaFilter === 'dia') {
     const dataExata = localStorage.getItem('bp_agenda_data_exata') || hojeStr;
-    return state.agendamentos.filter(a => a.data === dataExata && a.status !== 'cancelado');
+    return list.filter(a => a.data === dataExata && _statusAg(a) !== 'cancelado');
   }
 
-  // Vistas por estado (qualquer data, sem excepção de nenhum dia)
   if (agendaFilter === 'realizados') {
-    return state.agendamentos.filter(a => a.status === 'realizado');
+    return list.filter(a => _statusAg(a) === 'realizado');
   }
-  if (agendaFilter === 'cancelados' || agendaFilter === 'nao_realizado') {
-    // "Não realizados" = expirados + cancelados (tudo o que não chegou a ser feito)
-    return state.agendamentos.filter(a => a.status === 'nao_realizado' || a.status === 'cancelado');
+  if (agendaFilter === 'cancelados') {
+    return list.filter(a => _statusAg(a) === 'cancelado');
+  }
+  if (agendaFilter === 'nao_realizado') {
+    return list.filter(a => {
+      const st = _statusAg(a);
+      return st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
+    });
   }
 
-switch (agendaFilter) {
-    case 'hoje':
-  const dataHoje = state.agendaDataAtual || hojeStr;
-  return state.agendamentos.filter(a => a.data === dataHoje && a.status !== 'cancelado');
+  switch (agendaFilter) {
+    case 'hoje': {
+      const dataHoje = state.agendaDataAtual || hojeStr;
+      return list.filter(a => a.data === dataHoje && _statusAg(a) !== 'cancelado');
+    }
     case 'semana': {
+      // Segunda → domingo (igual ao dashboard / mercado AO)
       const d = new Date(hojeStr + 'T00:00:00');
-      const diaSemana = d.getDay(); // 0=domingo
+      const diaSemana = (d.getDay() + 6) % 7;
       const inicioSemana = new Date(d);
       inicioSemana.setDate(d.getDate() - diaSemana);
       const fimSemana = new Date(inicioSemana);
       fimSemana.setDate(inicioSemana.getDate() + 6);
       const inicio = formatarDataISO(inicioSemana);
       const fim = formatarDataISO(fimSemana);
-      return state.agendamentos.filter(a => a.data >= inicio && a.data <= fim && a.status !== 'cancelado');
+      return list.filter(a => a.data >= inicio && a.data <= fim && _statusAg(a) !== 'cancelado');
     }
     case 'mes': {
       const d = new Date(hojeStr + 'T00:00:00');
@@ -559,6 +669,8 @@ if (label) {
     label.textContent = 'Realizados';
   } else if (agendaFilter === 'cancelados') {
     label.textContent = 'Cancelados';
+  } else if (agendaFilter === 'nao_realizado') {
+    label.textContent = 'Não realizados';
   } else {
     label.textContent = 'Todos';
   }
@@ -582,7 +694,7 @@ if (label) {
     const datas = Object.keys(grupos).sort();
     datas.forEach(data => {
       const dataLabel = data === hoje() ? 'Hoje' : new Date(data + 'T00:00:00').toLocaleDateString('pt-AO', { day: '2-digit', month: 'short' });
-      html += `<div style="font-weight:600;font-size:.8rem;color:var(--text-secondary);padding:8px 0 4px;">${dataLabel}</div>`;
+      html += `<div class="bp-ag-date-label">${dataLabel}</div>`;
       html += grupos[data].map(a => renderAgendaItem(a)).join('');
     });
   } else {
@@ -600,20 +712,16 @@ if (label) {
 }
 
 function renderAgendaItem(a) {
-  const isRealizado = a.status === 'realizado';
-  const isCancelado = a.status === 'cancelado';
-  const isExpirado = a.status === 'nao_realizado';
-  const podeFinalizar = a.status === 'agendado' && !agendamentoExpirado(a);
-  const podeCancelar = a.status === 'agendado';
+  // Leitura apenas — expiração é responsabilidade de atualizarAgendamentosExpirados
+  const st = _statusAg(a);
+  const isRealizado = st === 'realizado';
+  const isCancelado = st === 'cancelado';
+  const isExpirado = st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
+  const isAgendado = st === 'agendado';
+  const podeFinalizar = isAgendado && !agendamentoExpirado(a);
+  const podeCancelar = isAgendado;
   const nomeProf = getProfissionalNome(a.profissional_id);
 
-  // Verificar novamente se expirou (por segurança)
-  if (a.status === 'agendado' && agendamentoExpirado(a)) {
-    a.status = 'nao_realizado';
-    dbPut('agendamentos', a);
-  }
-
-  // Texto sem emojis, mais profissional
   let statusLabel = '';
   let statusClass = '';
 
@@ -631,21 +739,29 @@ function renderAgendaItem(a) {
     statusClass = 'pill-warning';
   }
 
+  // Fallback se polish não estiver activo — mesma hierarquia de acções
+  if (window.BPAgendaUI && typeof BPAgendaUI.renderAgendaItemPro === 'function') {
+    return BPAgendaUI.renderAgendaItemPro(a);
+  }
+  const hora = String(a.hora || '').slice(0, 5);
   return `
-    <div class="timeline-item">
-      <div class="time">${a.hora}</div>
-      <div class="event">
-        <div class="service">${escHtml(a.servico)}</div>
-        <div class="client">${escHtml(a.cliente)}</div>
-        <div class="meta">
-          <span>${escHtml(nomeProf)}</span>
-          <span class="pill" style="font-weight:700;">${fmtKz(a.preco)}</span>
-          <span class="pill ${statusClass}" style="font-size:.75rem;padding:4px 12px;border-radius:4px;">${statusLabel}</span>
+    <div class="list-item bp-ag-card" data-agenda-id="${a.id}">
+      <div class="avatar bp-ag-avatar">${escHtml((a.cliente || '?').charAt(0).toUpperCase())}</div>
+      <div class="info bp-ag-info">
+        <div class="bp-ag-top">
+          <span class="bp-ag-time">${escHtml(hora)}</span>
+          <span class="bp-ag-status ${statusClass === 'pill-success' ? 'bp-ag-st-ok' : statusClass === 'pill-danger' ? 'bp-ag-st-no' : statusClass === 'pill-gray' ? 'bp-ag-st-off' : 'bp-ag-st-agendado'}">${statusLabel}</span>
+        </div>
+        <div class="title">${escHtml(a.servico || 'Serviço')}</div>
+        <div class="sub">${escHtml(a.cliente || 'Cliente')}</div>
+        <div class="bp-ag-meta">
+          <span class="bp-ag-prof">${escHtml(nomeProf)}</span>
+          <span class="bp-ag-price">${fmtKz(a.preco)}</span>
         </div>
         ${(podeFinalizar || podeCancelar) ? `
-        <div class="timeline-actions">
-          ${podeFinalizar ? `<button class="btn btn-sm btn-success" data-id="${a.id}" data-action="finalizar">Finalizar atendimento</button>` : ''}
-          ${podeCancelar ? `<button class="btn btn-sm btn-secondary btn-icon-only" data-id="${a.id}" data-action="cancelar-agenda" data-role="admin,gerente" aria-label="Cancelar agendamento" title="Cancelar agendamento">✕</button>` : ''}
+        <div class="bp-ag-actions" style="--bp-ag-cols:2">
+          ${podeFinalizar ? `<button type="button" class="btn btn-sm btn-primary bp-ag-btn" data-id="${a.id}" data-action="finalizar">Finalizar</button>` : ''}
+          ${podeCancelar ? `<button type="button" class="btn btn-sm btn-secondary bp-ag-btn bp-ag-btn-muted" data-id="${a.id}" data-action="cancelar-agenda" data-role="admin,gerente">Cancelar</button>` : ''}
         </div>` : ''}
       </div>
     </div>
@@ -689,15 +805,13 @@ function mudarAgenda(delta) {
 //  BADGE DA AGENDA (contar todos os disponíveis)
 // ====================================================================
 function renderBadges() {
-  // Primeiro, atualizar expirados
   atualizarAgendamentosExpirados();
-
-  // Contar agendamentos disponíveis (status "agendado" e data/hora >= agora)
   const agora = new Date();
-  const disponiveis = state.agendamentos.filter(a => {
-    if (a.status !== 'agendado') return false;
-    const agDate = new Date(a.data + 'T' + (a.hora || '00:00') + ':00');
-    return agDate >= agora;
+  const disponiveis = (state.agendamentos || []).filter(a => {
+    if (_statusAg(a) !== 'agendado') return false;
+    const hora = String(a.hora || '00:00').slice(0, 5);
+    const agDate = new Date(a.data + 'T' + hora + ':00');
+    return !isNaN(agDate.getTime()) && agDate >= agora;
   });
   const count = disponiveis.length;
 

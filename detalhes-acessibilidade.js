@@ -81,16 +81,18 @@ function abrirFechoCaixa() {
  const movs = state.movimentos.filter(m => m.data === hojeStr);
  const vendas = movs.filter(m => m.tipo === 'venda');
  const despesas = movs.filter(m => m.tipo === 'despesa');
- const totalVendas = vendas.reduce((s, v) => s + v.valor, 0);
- const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0);
- const saldoFinal = state.config.fundo + totalVendas - totalDespesas;
+ const totalVendas = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+ const totalDespesas = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
+ const saldoFinal = (Number(state.config.fundo) || 0) + totalVendas - totalDespesas;
  const byPag = {};
  vendas.forEach(v => { const k = v.metodoPagamento || 'Numerário';
-  byPag[k] = (byPag[k] || 0) + v.valor; });
+  byPag[k] = (byPag[k] || 0) + (Number(v.valor) || 0); });
  const pagHtml = Object.entries(byPag).map(([k, v]) =>
   `<div class="fecho-row"><span class="fr-label">${escHtml(k)}</span><span class="fr-val">${fmtKz(v)}</span></div>`
   ).join('');
- document.getElementById('fecho-conteudo').innerHTML = `
+ const fechoBox = document.getElementById('fecho-conteudo');
+ if (!fechoBox) return;
+ fechoBox.innerHTML = `
   <div style="font-size:.75rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">${new Date().toLocaleDateString('pt-AO', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
   <div class="fecho-row"><span class="fr-label">Fundo de abertura</span><span class="fr-val">${fmtKz(state.config.fundo)}</span></div>
   <div class="fecho-row"><span class="fr-label">Total de vendas (${vendas.length})</span><span class="fr-val" style="color:var(--green)">+${fmtKz(totalVendas)}</span></div>
@@ -211,8 +213,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   if (tab === 'dashboard') renderDashboard();
   if (tab === 'equipa') { renderProfissionais(); renderServicos(); }
   if (tab === 'ia') {
-   document.getElementById('ia-contador').textContent = parseInt(localStorage.getItem('ia_perguntas_' + hoje()) ||
-    '0');
+   if (typeof actualizarContadorIA === 'function') actualizarContadorIA();
    renderPlanoInfo();
    atualizarIAOffline();
    renderIAResumo();

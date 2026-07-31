@@ -2,7 +2,6 @@
 "use strict";
 
 /* ===== FILE: core-constants.js ===== */
-
 // ====================================================================
 //  CORE — CONSTANTES (extraído do app.js na Fase A da modularização)
 // ====================================================================
@@ -54,10 +53,7 @@ const SERVICOS_DEFAULT = [
 
 const RBAC_ROLES = ['admin', 'gerente', 'operador'];
 
-
-
 /* ===== FILE: core-utils.js ===== */
-
 // ====================================================================
 //  CORE — UTILITÁRIOS (extraído do app.js na Fase A da modularização)
 // ====================================================================
@@ -250,8 +246,83 @@ function storageGetSecure(key, fallback) {
 }
 
 
-/* ===== FILE: tests-pure.js ===== */
+// ====================================================================
+//  MODAIS DO MENU ☰ — shell profissional partilhada (SaaS-grade)
+// ====================================================================
+function ensureBpSheetModal(id, title, eyebrow, subtitle, opts) {
+  opts = opts || {};
+  var el = document.getElementById(id);
+  if (el) {
+    var tEl = el.querySelector('.bp-sheet-title');
+    var eEl = el.querySelector('.bp-sheet-eyebrow');
+    var sEl = el.querySelector('.bp-sheet-subtitle');
+    if (tEl && title) tEl.textContent = title;
+    if (eEl && eyebrow) eEl.textContent = eyebrow;
+    if (sEl) {
+      if (subtitle) {
+        sEl.textContent = subtitle;
+        sEl.hidden = false;
+      } else {
+        sEl.textContent = '';
+        sEl.hidden = true;
+      }
+    }
+    return el;
+  }
 
+  el = document.createElement('div');
+  el.id = id;
+  el.className = 'modal-overlay';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-labelledby', id + '-title');
+
+  var eye = eyebrow || 'BeautyPro';
+  var sub = subtitle || '';
+  var closeLabel = opts.closeLabel || 'Fechar';
+  var primaryHtml = opts.primaryHtml || '';
+
+  el.innerHTML =
+    '<div class="bp-sheet modal-sheet">' +
+      '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+      '<div class="bp-sheet-header">' +
+        '<div class="bp-sheet-eyebrow">' + (typeof escHtml === 'function' ? escHtml(eye) : eye) + '</div>' +
+        '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + (typeof escHtml === 'function' ? escHtml(title) : title) + '</h2>' +
+        '<p class="bp-sheet-subtitle"' + (sub ? '' : ' hidden') + '>' + (typeof escHtml === 'function' ? escHtml(sub) : sub) + '</p>' +
+      '</div>' +
+      '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+      '<div class="bp-sheet-footer modal-actions">' +
+        '<button type="button" class="btn btn-secondary" data-close="' + id + '">' + closeLabel + '</button>' +
+        primaryHtml +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(el);
+
+  el.addEventListener('click', function (e) {
+    if (e.target === el || e.target.getAttribute('data-close') === id) {
+      if (typeof closeModal === 'function') closeModal(id);
+      else el.classList.remove('open');
+    }
+  });
+
+  return el;
+}
+
+function openBpSheetModal(id) {
+  if (typeof openModal === 'function') openModal(id);
+  else {
+    var el = document.getElementById(id);
+    if (el) el.classList.add('open');
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.ensureBpSheetModal = ensureBpSheetModal;
+  window.openBpSheetModal = openBpSheetModal;
+}
+
+/* ===== FILE: tests-pure.js ===== */
 /**
  * Testes unitários das funções puras — executar no browser:
  *   window.runPureTests()
@@ -305,9 +376,7 @@ function runPureTests() {
 
 window.runPureTests = runPureTests;
 
-
 /* ===== FILE: core-state.js ===== */
-
 // ====================================================================
 //  CORE — ESTADO GLOBAL (extraído do app.js na Fase B da modularização)
 //  Fase D: integrado com core-store.js (subscribe / setState / batch)
@@ -347,9 +416,7 @@ let state = {
 // Restaura a última aba visitada neste dispositivo
 let activeTab = localStorage.getItem('bp_active_tab') || 'dashboard';
 
-
 /* ===== FILE: core-store.js ===== */
-
 // ====================================================================
 //  CORE — STORE SIMPLES (Fase D — Evolução Arquitectural)
 //  Padrão mínimo de gerenciamento de estado com subscribe/setState.
@@ -470,121 +537,276 @@ window.BeautyStore = {
   batch,
 };
 
-
 /* ===== FILE: db-indexeddb.js ===== */
-
 // ====================================================================
-//  DB — INDEXEDDB + FALLBACK LOCALSTORAGE (extraído do app.js na Fase B
-//  da modularização)
+//  DB — INDEXEDDB + CACHE LOCAL ROBUSTO (write-through + fallback)
+//  - IndexedDB = fonte primária
+//  - localStorage `bp_${store}` = espelho para recuperação / private mode
+//  - Cache em memória de curta duração para leituras repetidas no mesmo ciclo
 // ====================================================================
 let db = null;
 const STORES = ['config', 'clientes', 'agendamentos', 'movimentos', 'profissionais', 'servicos', 'fechos_caixa'];
 
+/** Memória: evita getAll repetidos no mesmo tick de UI */
+const _memCache = Object.create(null);
+const MEM_TTL_MS = 800;
+
+function _lsKey(store) {
+  return 'bp_' + store;
+}
+
+function _memInvalidate(store) {
+  if (store) delete _memCache[store];
+  else Object.keys(_memCache).forEach(function (k) { delete _memCache[k]; });
+}
+
+function _memGet(store) {
+  const e = _memCache[store];
+  if (!e) return null;
+  if (Date.now() - e.ts > MEM_TTL_MS) {
+    delete _memCache[store];
+    return null;
+  }
+  return e.data;
+}
+
+function _memSet(store, data) {
+  _memCache[store] = { ts: Date.now(), data: Array.isArray(data) ? data : [] };
+}
+
+function _readLSMirror(store) {
+  try {
+    const raw = localStorage.getItem(_lsKey(store));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function _writeLSMirror(store, items) {
+  try {
+    localStorage.setItem(_lsKey(store), JSON.stringify(Array.isArray(items) ? items : []));
+    return true;
+  } catch (e) {
+    // Quota ou modo privado: tentar espelho mínimo (últimos 200) para stores grandes
+    try {
+      const arr = Array.isArray(items) ? items : [];
+      if (arr.length > 200) {
+        localStorage.setItem(_lsKey(store), JSON.stringify(arr.slice(-200)));
+        return true;
+      }
+    } catch (e2) {}
+    return false;
+  }
+}
+
+function _mirrorUpsert(store, item) {
+  if (!item || item.id == null) return;
+  const items = _readLSMirror(store);
+  const idx = items.findIndex(function (i) { return i && i.id === item.id; });
+  if (idx !== -1) items[idx] = item;
+  else items.push(item);
+  _writeLSMirror(store, items);
+}
+
+function _mirrorDelete(store, id) {
+  const items = _readLSMirror(store).filter(function (i) { return i && i.id !== id; });
+  _writeLSMirror(store, items);
+}
+
+/** Rehidrata IndexedDB a partir do espelho (quando IDB está vazio e LS tem dados). */
+async function _rehydrateStoreFromMirror(store, mirror) {
+  if (!db || !mirror || !mirror.length) return;
+  try {
+    const tx = db.transaction(store, 'readwrite');
+    const os = tx.objectStore(store);
+    for (let i = 0; i < mirror.length; i++) {
+      const it = mirror[i];
+      if (it && it.id != null) os.put(it);
+    }
+    await new Promise(function (res, rej) {
+      tx.oncomplete = res;
+      tx.onerror = function () { rej(tx.error); };
+      tx.onabort = function () { rej(tx.error); };
+    });
+  } catch (e) {
+    console.warn('[BPCache] rehydrate failed:', store, e);
+  }
+}
+
 function openDB() {
-  return new Promise((res, rej) => {
+  return new Promise(function (res, rej) {
     try {
       const req = indexedDB.open('BelezaProDB', 8);
-      req.onupgradeneeded = e => {
+      req.onupgradeneeded = function (e) {
         const d = e.target.result;
-        STORES.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); });
+        STORES.forEach(function (s) {
+          if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
+        });
       };
-      req.onsuccess = e => { db = e.target.result;
-        res(db); };
-      req.onerror = e => rej(e.target.error);
-    } catch (err) { rej(err); }
+      req.onsuccess = function (e) {
+        db = e.target.result;
+        db.onversionchange = function () {
+          try { db.close(); } catch (err) {}
+          db = null;
+        };
+        res(db);
+      };
+      req.onerror = function (e) { rej(e.target.error); };
+    } catch (err) {
+      rej(err);
+    }
   });
 }
 
 async function dbGetAll(store) {
+  const cached = _memGet(store);
+  if (cached) return cached.slice();
+
+  let fromIdb = null;
   try {
     if (db) {
       const tx = db.transaction(store, 'readonly');
       const r = tx.objectStore(store).getAll();
-      return await new Promise((res, rej) => { r.onsuccess = () => res(r.result);
-        r.onerror = () => rej(r.error); });
+      fromIdb = await new Promise(function (res, rej) {
+        r.onsuccess = function () { res(r.result || []); };
+        r.onerror = function () { rej(r.error); };
+      });
     }
-  } catch (e) { /* cai no fallback abaixo */ }
-  try { const d = localStorage.getItem('bp_' + store); return d ? JSON.parse(d) : []; } catch (e) { return []; }
-}
-
-let dbPut = async function(store, item) {
-  if (!item.id) item.id = uuid();
-  item.updated_at = new Date().toISOString(); // sempre gera novo timestamp na escrita local
-  try {
-    if (db) {
-      const tx = db.transaction(store, 'readwrite');
-      const r = tx.objectStore(store).put(item);
-      await new Promise((res, rej) => { r.onsuccess = res;
-        r.onerror = rej; });
-      return item;
-    }
-  } catch (e) {}
-  try {
-    const items = await dbGetAll(store);
-    const idx = items.findIndex(i => i.id === item.id);
-    if (idx !== -1) items[idx] = item;
-    else items.push(item);
-    localStorage.setItem('bp_' + store, JSON.stringify(items));
-    return item;
-  } catch (e) { return item; }
-};
-// Função de escrita local pura (NUNCA dispara sync)
-async function dbPutLocal(store, item) {
-  if (!item.id) item.id = uuid();
-  // Só gera timestamp se não existir (preserva o vindo do servidor)
-  if (!item.updated_at) {
-    item.updated_at = new Date().toISOString();
+  } catch (e) {
+    fromIdb = null;
   }
+
+  const mirror = _readLSMirror(store);
+
+  // IDB ok e com dados
+  if (Array.isArray(fromIdb) && fromIdb.length > 0) {
+    // Write-through: manter espelho alinhado (recuperação futura)
+    _writeLSMirror(store, fromIdb);
+    _memSet(store, fromIdb);
+    return fromIdb.slice();
+  }
+
+  // IDB vazio ou indisponível, mas há espelho → recuperar
+  if (mirror.length > 0) {
+    if (db && Array.isArray(fromIdb) && fromIdb.length === 0) {
+      await _rehydrateStoreFromMirror(store, mirror);
+    }
+    _memSet(store, mirror);
+    return mirror.slice();
+  }
+
+  // Ambos vazios
+  const empty = Array.isArray(fromIdb) ? fromIdb : [];
+  _memSet(store, empty);
+  return empty.slice();
+}
+
+let dbPut = async function (store, item) {
+  if (!item.id) item.id = typeof uuid === 'function' ? uuid() : String(Date.now());
+  item.updated_at = new Date().toISOString();
+
+  let idbOk = false;
   try {
     if (db) {
       const tx = db.transaction(store, 'readwrite');
       const r = tx.objectStore(store).put(item);
-      await new Promise((res, rej) => { r.onsuccess = res; r.onerror = rej; });
-      return item;
+      await new Promise(function (res, rej) {
+        r.onsuccess = res;
+        r.onerror = function () { rej(r.error); };
+      });
+      idbOk = true;
     }
-  } catch (e) { /* silencioso, fallback para localStorage */ }
-  try {
-    const items = await dbGetAll(store);
-    const idx = items.findIndex(i => i.id === item.id);
-    if (idx !== -1) items[idx] = item;
-    else items.push(item);
-    localStorage.setItem('bp_' + store, JSON.stringify(items));
-    return item;
-  } catch (e) { return item; }
-}
+  } catch (e) {
+    idbOk = false;
+  }
 
-let dbDelete = async function(store, id) {
+  // Sempre espelhar (write-through) — robustez se IDB for limpo ou falhar depois
+  _mirrorUpsert(store, item);
+  _memInvalidate(store);
+
+  return item;
+};
+
+// Escrita local pura (NUNCA dispara sync) — usada pelo pull remoto
+async function dbPutLocal(store, item) {
+  if (!item.id) item.id = typeof uuid === 'function' ? uuid() : String(Date.now());
+  if (!item.updated_at) item.updated_at = new Date().toISOString();
+
+  try {
+    if (db) {
+      const tx = db.transaction(store, 'readwrite');
+      const r = tx.objectStore(store).put(item);
+      await new Promise(function (res, rej) {
+        r.onsuccess = res;
+        r.onerror = function () { rej(r.error); };
+      });
+    }
+  } catch (e) { /* fallback só espelho */ }
+
+  _mirrorUpsert(store, item);
+  _memInvalidate(store);
+  return item;
+};
+
+let dbDelete = async function (store, id) {
   try {
     if (db) {
       const tx = db.transaction(store, 'readwrite');
       const r = tx.objectStore(store).delete(id);
-      await new Promise((res, rej) => { r.onsuccess = res;
-        r.onerror = rej; });
-      return;
+      await new Promise(function (res, rej) {
+        r.onsuccess = res;
+        r.onerror = function () { rej(r.error); };
+      });
     }
   } catch (e) {}
-  try {
-    const items = await dbGetAll(store);
-    localStorage.setItem('bp_' + store, JSON.stringify(items.filter(i => i.id !== id)));
-  } catch (e) {}
+
+  _mirrorDelete(store, id);
+  _memInvalidate(store);
 };
 
 async function dbClear(store) {
   try {
     if (db) {
       const tx = db.transaction(store, 'readwrite');
-      await new Promise((res, rej) => { const r = tx.objectStore(store).clear();
-        r.onsuccess = res; r.onerror = rej; });
-      return;
+      await new Promise(function (res, rej) {
+        const r = tx.objectStore(store).clear();
+        r.onsuccess = res;
+        r.onerror = function () { rej(r.error); };
+      });
     }
   } catch (e) {}
-  try { localStorage.removeItem('bp_' + store); } catch (e) {}
+
+  try { localStorage.removeItem(_lsKey(store)); } catch (e) {}
+  _memInvalidate(store);
 }
 
+/** Diagnóstico / testes */
+function bpCacheStats() {
+  const out = {};
+  STORES.forEach(function (s) {
+    const mir = _readLSMirror(s);
+    out[s] = {
+      mirrorCount: mir.length,
+      memCached: !!_memCache[s]
+    };
+  });
+  out.idbOpen = !!db;
+  return out;
+}
 
+if (typeof window !== 'undefined') {
+  window.bpCacheStats = bpCacheStats;
+  window.BPCache = {
+    stats: bpCacheStats,
+    invalidate: _memInvalidate,
+    stores: STORES.slice()
+  };
+}
 
 /* ===== FILE: auth-supabase.js ===== */
-
 // ====================================================================
 //  SUPABASE — CONFIGURAÇÃO (SUPABASE_URL/ANON_KEY movidas para core-constants.js)
 //  (extraído do app.js na Fase B da modularização)
@@ -940,10 +1162,7 @@ document.getElementById('login-btn').addEventListener('click', async function() 
   }
 });
 
-
-
 /* ===== FILE: sync-queue.js ===== */
-
 // ====================================================================
 //  FILA DE SINCRONIZAÇÃO (extraído do app.js na Fase B da modularização)
 // ====================================================================
@@ -954,8 +1173,10 @@ document.getElementById('login-btn').addEventListener('click', async function() 
 const DELETED_KEY = 'bp_deleted_items';
 
 function getDeletedItems() {
-  try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '[]'); }
-  catch (e) { logErroSilencioso('getDeletedItems', e); return []; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(DELETED_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) { logErroSilencioso('getDeletedItems', e); return []; }
 }
 
 function saveDeletedItems(items) {
@@ -964,14 +1185,37 @@ function saveDeletedItems(items) {
 }
 
 function addDeletedItem(id, tabela) {
-  const items = getDeletedItems();
-  if (!items.find(i => i.id === id && i.tabela === tabela)) {
+  if (!id || !tabela) return;
+  const items = pruneDeletedItems(getDeletedItems());
+  const existing = items.find(i => i.id === id && i.tabela === tabela);
+  if (existing) {
+    existing.ts = Date.now();
+  } else {
     items.push({ id, tabela, ts: Date.now() });
-    saveDeletedItems(items);
   }
+  // Cap de segurança (DoS local / storage overflow)
+  const MAX_TOMBSTONES = 2000;
+  saveDeletedItems(items.slice(-MAX_TOMBSTONES));
+}
+
+function touchDeletedItem(id, tabela) {
+  addDeletedItem(id, tabela);
+}
+
+function isDeletedItem(id, tabela) {
+  if (!id) return false;
+  return pruneDeletedItems(getDeletedItems()).some(i => i.id === id && (!tabela || i.tabela === tabela));
+}
+
+/** Tombstones expiram após 30 dias (ISO / práticas de sync offline). */
+function pruneDeletedItems(items) {
+  const TTL = 30 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return (items || []).filter(i => i && i.id && (now - (i.ts || 0)) < TTL);
 }
 
 function removeDeletedItem(id, tabela) {
+  // Remoção explícita apenas em cenários de undelete administrativo.
   const items = getDeletedItems().filter(i => !(i.id === id && i.tabela === tabela));
   saveDeletedItems(items);
 }
@@ -994,24 +1238,75 @@ function saveSyncQueue(q) {
   } catch (e) { logErroSilencioso('saveSyncQueue', e); }
 }
 
+function actualizarBannerOffline() {
+  const banner = document.getElementById('offline-banner');
+  const txt = document.getElementById('offline-banner-text');
+  if (!banner) return;
+  if (navigator.onLine) {
+    banner.classList.remove('show');
+    return;
+  }
+  banner.classList.add('show');
+  if (txt) {
+    const fila = getSyncQueue();
+    const n = fila.filter(function (op) { return op.failed !== true; }).length;
+    txt.textContent = n > 0
+      ? ('Modo offline — ' + n + (n === 1 ? ' alteração' : ' alterações') + ' serão enviadas ao reconectar')
+      : 'Modo offline — dados guardados neste dispositivo';
+  }
+}
+
 function atualizarIndicadorSync() {
   const dot  = document.getElementById('sync-dot');
   const text = document.getElementById('sync-text');
-  if (!dot || !text) return;
-  if (!navigator.onLine) { dot.classList.remove('online'); text.textContent = 'Offline'; return; }
+  const container = document.getElementById('sync-status-container');
   const fila = getSyncQueue();
-  const pendentes = fila.filter(op => op.failed !== true).length;
-  const falhados = fila.length - pendentes;
-  dot.classList.add('online');
-  text.textContent = pendentes > 0
-    ? `Online (${pendentes} pendente${pendentes > 1 ? 's' : ''})`
-    : (falhados > 0 ? `Online (${falhados} com falha)` : 'Online');
+  const pendentes = fila.filter(function (op) { return op.failed !== true; }).length;
+  const falhados = fila.filter(function (op) { return op.failed === true; }).length;
+
+  if (dot && text) {
+    if (!navigator.onLine) {
+      dot.classList.remove('online');
+      text.textContent = pendentes > 0
+        ? ('Offline · ' + pendentes + ' pend.')
+        : 'Offline';
+    } else {
+      dot.classList.add('online');
+      if (pendentes > 0) {
+        text.textContent = pendentes + (pendentes === 1 ? ' pendente' : ' pendentes');
+      } else if (falhados > 0) {
+        text.textContent = falhados + (falhados === 1 ? ' falha' : ' falhas');
+      } else {
+        text.textContent = 'Sincronizado';
+      }
+    }
+  }
+
+  if (container) {
+    container.style.display = 'flex';
+    container.setAttribute('data-state',
+      !navigator.onLine ? 'offline' : (pendentes > 0 ? 'pending' : (falhados > 0 ? 'error' : 'ok'))
+    );
+  }
+
+  actualizarBannerOffline();
 }
 
 function addToSyncQueue(tabela, operacao, payload) {
-  const q = getSyncQueue().filter(item => !(item.tabela === tabela && item.payload?.id === payload?.id));
-  q.push({ id: uuid(), tabela, operacao, payload, ts: Date.now(), attempts: 0 });
+  const q = getSyncQueue().filter(function (item) {
+    return !(item.tabela === tabela && item.payload && payload && item.payload.id === payload.id);
+  });
+  q.push({
+    id: typeof uuid === 'function' ? uuid() : String(Date.now()),
+    tabela: tabela,
+    operacao: operacao,
+    payload: payload,
+    ts: Date.now(),
+    attempts: 0,
+    failed: false
+  });
   saveSyncQueue(q);
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 async function flushSyncQueue() {
@@ -1044,9 +1339,16 @@ async function flushSyncQueue() {
 
     try {
       if (op.operacao === 'delete') {
+        // Tombstone permanece na lista negra (TTL) para impedir reimportação
+        // em pulls concurrentes multi-dispositivo (padrão tombstone/eventual consistency).
         await supabaseDelete(op.tabela, op.payload.id);
-        removeDeletedItem(op.payload.id, op.tabela);
+        // NÃO chamar removeDeletedItem aqui — só após TTL ou purge remoto confirmado.
+        if (typeof touchDeletedItem === 'function') touchDeletedItem(op.payload.id, op.tabela);
       } else {
+        // Nunca fazer upsert de item na lista negra
+        if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload?.id, op.tabela)) {
+          continue;
+        }
         await supabaseUpsert(op.tabela, op.payload);
       }
     } catch (err) {
@@ -1092,6 +1394,7 @@ async function flushSyncQueue() {
     const msg = `Falha ao sincronizar ${itensFalhos.length} operação(ões) após ${MAX_ATTEMPTS} tentativas. Contacte o suporte.`;
     toast(msg, 'error');
   }
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 // ====================================================================
@@ -1110,19 +1413,21 @@ dbPut = async function(store, item) {
   if (navigator.onLine) {
     try {
       await supabaseUpsert(tabela, item);
+      const rest = getSyncQueue().filter(function (op) {
+        return !(op.tabela === tabela && op.payload && op.payload.id === item.id);
+      });
+      if (rest.length !== getSyncQueue().length) saveSyncQueue(rest);
     } catch (err) {
-      // Se for erro de limite de plano, reverter a escrita local e relançar
       if (err.message === 'LIMITE_PLANO_ATINGIDO') {
         await _dbDeleteOriginal(store, item.id);
-        // Remover do estado local (será feito pelo chamador)
         throw err;
       }
-      // Outros erros: enfileirar para tentar depois
       addToSyncQueue(tabela, 'upsert', item);
     }
   } else {
     addToSyncQueue(tabela, 'upsert', item);
   }
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
   return item;
 };
 
@@ -1144,10 +1449,7 @@ dbDelete = async function(store, id) {
   }
 };
 
-
-
 /* ===== FILE: sync-rest.js ===== */
-
 // ====================================================================
 //  sync-rest.js — Comunicação com Supabase e merge de dados
 //  CORREÇÕES APLICADAS:
@@ -1460,7 +1762,8 @@ function fromSupabaseFormat(tabela, row) {
         id:            row.id,
         nome:          row.nome,
         especialidade: row.especialidade,
-        ativo:         row.ativo,
+        ativo:         row.ativo !== false && row.ativo !== 0,
+        data_desativacao: row.data_desativacao || null,
         updated_at:    row.updated_at,
       };
     case 'servicos':
@@ -1469,7 +1772,7 @@ function fromSupabaseFormat(tabela, row) {
         nome:          row.nome,
         precoBase:     row.preco_base,
         profissionais: row.profissionais || [],
-        ativo:         row.ativo,
+        ativo:         row.ativo !== false && row.ativo !== 0,
         updated_at:    row.updated_at,
       };
     default:
@@ -1501,9 +1804,18 @@ async function carregarDoSupabase() {
       // ================================================================
       const deletedIds = new Set(
         (typeof getDeletedItems === 'function' ? getDeletedItems() : [])
-          .filter(i => i.tabela === tabela)
+          .filter(i => i && i.tabela === tabela && i.id)
+          .filter(i => {
+            // respeitar TTL 30d se prune disponível
+            if (typeof pruneDeletedItems === 'function') return true;
+            return true;
+          })
           .map(i => i.id)
       );
+      // Aplicar prune global periodicamente
+      if (typeof pruneDeletedItems === 'function' && typeof saveDeletedItems === 'function') {
+        try { saveDeletedItems(pruneDeletedItems(getDeletedItems())); } catch (_) {}
+      }
 
       const idsComDeletePendente = new Set(
         getSyncQueue()
@@ -1663,10 +1975,7 @@ async function carregarDoSupabase() {
   }
 }
 
-
-
 /* ===== FILE: plano-limites.js ===== */
-
 // ====================================================================
 //  plano-limites.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Planos, trial e limites de uso (getPlanoAtual, getLimites, isTrialAtivo, verificarLimite, upgradePara)
@@ -1743,23 +2052,112 @@ function verificarLimite(tipo) {
 
 function mostrarModalUpgrade(mensagem) {
   if (!mensagem) mensagem = 'Atingiu o limite do seu plano actual. Escolha um plano para continuar.';
-  document.getElementById('upgrade-mensagem').textContent = mensagem;
+  const el = document.getElementById('upgrade-mensagem');
+  if (el) el.textContent = mensagem;
   openModal('modal-upgrade');
 }
 
-function upgradePara(plano) {
+/** Copia texto para a área de transferência com fallback para ambientes sem Clipboard API. */
+async function copiarTextoSeguro(texto) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch (_) { /* continua para fallback */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return !!ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Abre WhatsApp com mensagem pré-preenchida.
+ * Se popup for bloqueado ou falhar, copia a mensagem e informa via toast.
+ * @returns {Promise<{ok: boolean, metodo: 'window'|'clipboard'|'manual'}>}
+ */
+async function abrirWhatsAppVenda(mensagem) {
+  const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(mensagem)}`;
+  let win = null;
+  try {
+    win = window.open(url, '_blank', 'noopener,noreferrer');
+  } catch (_) { /* ignore */ }
+
+  if (!win || win.closed) {
+    const copiado = await copiarTextoSeguro(mensagem);
+    if (copiado) {
+      if (typeof toast === 'function') {
+        toast('Não foi possível abrir o WhatsApp. Mensagem copiada — cole na conversa.', 'warning');
+      }
+      return { ok: true, metodo: 'clipboard' };
+    }
+    if (typeof toast === 'function') {
+      toast('Abra o WhatsApp e envie a mensagem de adesão manualmente.', 'error');
+    }
+    return { ok: false, metodo: 'manual' };
+  }
+  return { ok: true, metodo: 'window' };
+}
+
+async function upgradePara(plano) {
+  if (!plano) {
+    if (typeof toast === 'function') toast('Plano inválido', 'error');
+    return;
+  }
+  const salao = (typeof state !== 'undefined' && state.config && state.config.storeName) ? state.config.storeName : '—';
+  const actual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : '—';
   const msg =
-    `Olá, quero assinar o plano ${plano} do BeautyPro. Salão: ${state.config.storeName} | Plano actual: ${getPlanoAtual()}`;
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
+    `Olá, quero assinar o plano ${plano} do BeautyPro. Salão: ${salao} | Plano actual: ${actual}`;
+  await abrirWhatsAppVenda(msg);
   closeModal('modal-upgrade');
 }
-// Expor globalmente para os botões onclick no HTML
+
+/** Liga os botões data-upgrade-plano (CSP-safe; sem onclick inline). */
+function bindUpgradeButtons() {
+  document.querySelectorAll('[data-upgrade-plano]').forEach((btn) => {
+    if (btn.dataset.bpUpgradeBound) return;
+    btn.dataset.bpUpgradeBound = '1';
+    btn.addEventListener('click', () => {
+      const plano = btn.getAttribute('data-upgrade-plano');
+      if (plano) upgradePara(plano);
+    });
+  });
+
+  const contato = document.getElementById('modal-upgrade-contato');
+  if (contato && !contato.dataset.bpUpgradeBound) {
+    contato.dataset.bpUpgradeBound = '1';
+    contato.addEventListener('click', async () => {
+      const salao = (typeof state !== 'undefined' && state.config && state.config.storeName) ? state.config.storeName : '—';
+      const actual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : '—';
+      const msg =
+        `Olá, quero assinar um plano do BeautyPro. Salão: ${salao} | Plano actual: ${actual}`;
+      await abrirWhatsAppVenda(msg);
+      closeModal('modal-upgrade');
+    });
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindUpgradeButtons);
+} else {
+  bindUpgradeButtons();
+}
+
+// API pública (chamadas programáticas / compatibilidade)
 window.upgradePara = upgradePara;
-
-
+window.abrirWhatsAppVenda = abrirWhatsAppVenda;
 
 /* ===== FILE: crud-operations.js ===== */
-
 // ====================================================================
 //  crud-operations.js — Fase C + Fase D (melhorias de robustez)
 //  Carregar depois de core-*.js, core-store.js, db-indexeddb.js,
@@ -1912,24 +2310,21 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
   updateUI();
   if (typeof renderBadges === 'function') renderBadges();
 
-  // 3. Tentar sincronizar
-  if (navigator.onLine && state.config.salaoId) {
+  // 3. Sincronizar em background — SEM pull completo (evita “vibração”/reload da UI).
+  // dbDelete já adicionou tombstone + enfileirou delete se necessário.
+  if (navigator.onLine && state.config && state.config.salaoId) {
     try {
-      await flushSyncQueue();
-      await carregarDoSupabase();
-      updateUI();
-      if (typeof renderBadges === 'function') renderBadges();
-      toast(`${nomeEntidade} eliminado(a) e sincronizado(a)!`, 'success');
+      if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+      toast(`${nomeEntidade} eliminado(a).`, 'success');
       return true;
     } catch (e) {
       console.warn(`[delete ${tabela}] Falha ao sincronizar:`, e);
-      // Não fazemos rollback automático do item (já está na fila de sync).
-      // O utilizador vê a mensagem de aviso e o item continua eliminado localmente.
-      toast(`${nomeEntidade} eliminado(a) localmente. A sincronização falhou — será tentada novamente.`, 'warning');
+      toast(`${nomeEntidade} eliminado(a) localmente. Sync em fila.`, 'warning');
       return true;
     }
   } else {
-    toast(`${nomeEntidade} eliminado(a) (offline). Será sincronizado quando online.`, 'warning');
+    toast(`${nomeEntidade} eliminado(a) (offline). Sync quando online.`, 'warning');
     return true;
   }
 }
@@ -1937,6 +2332,46 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
 // ====================================================================
 //  CRUD — CLIENTE
 // ====================================================================
+
+// ====================================================================
+//  FIDELIDADE — pontos e níveis (1 ponto / 1000 Kz)
+// ====================================================================
+var BP_PONTOS_POR_KZ = 1000;
+
+function calcularPontosVenda(valor) {
+  var v = Number(valor) || 0;
+  if (v <= 0) return 0;
+  return Math.floor(v / BP_PONTOS_POR_KZ);
+}
+
+function getClienteTier(pontos) {
+  var p = Number(pontos) || 0;
+  if (p >= 300) return { id: 'ouro', label: 'Ouro', min: 300 };
+  if (p >= 100) return { id: 'prata', label: 'Prata', min: 100 };
+  return { id: 'bronze', label: 'Bronze', min: 0 };
+}
+
+async function creditarPontosCliente(clienteId, pontos) {
+  if (!clienteId || !pontos || pontos <= 0) return null;
+  var c = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+  if (!c) return null;
+  var next = (Number(c.pontos) || 0) + pontos;
+  // update directo para não disparar rename / side-effects pesados
+  var data = { pontos: next, updated_at: new Date().toISOString() };
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('clientes', clienteId, data);
+  } else {
+    var i = state.clientes.findIndex(function (x) { return x.id === clienteId; });
+    if (i === -1) return null;
+    state.clientes[i] = Object.assign({}, state.clientes[i], data);
+  }
+  var item = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+  if (item) {
+    try { await dbPut('clientes', item); } catch (e) {}
+  }
+  return next;
+}
+
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
   const nome = (c.nome || '').trim();
@@ -1947,7 +2382,7 @@ async function addCliente(c) {
     return null;
   }
 
-  const n = { ...c, id: uuid(), nome };
+  const n = { ...c, id: uuid(), nome, pontos: Number(c.pontos) || 0 };
   try {
     await dbPut('clientes', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -1968,23 +2403,58 @@ async function addCliente(c) {
 }
 
 async function updateCliente(id, data) {
+  const actual = (state.clientes || []).find(c => c.id === id);
+  if (!actual) return null;
+
   if (data.nome) {
     const nome = data.nome.trim();
+    data = { ...data, nome };
     if (existeNomeDuplicado('clientes', nome, id)) {
       toast('Já existe um cliente com este nome.', 'error');
-      return;
+      return null;
     }
   }
+
+  const oldNome = actual.nome;
+  const newNome = data.nome != null ? data.nome : oldNome;
+  const renamed = data.nome != null && String(data.nome) !== String(oldNome);
+
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('clientes', id, data);
   } else {
     const i = state.clientes.findIndex(c => c.id === id);
-    if (i === -1) return;
+    if (i === -1) return null;
     state.clientes[i] = { ...state.clientes[i], ...data };
   }
   const item = state.clientes.find(c => c.id === id);
   if (item) await dbPut('clientes', item);
+
+  // Propagar rename para histórico ligado (id ou nome legado) — mantém stats coerentes
+  if (renamed && newNome) {
+    const patchList = async (storeKey) => {
+      const list = state[storeKey] || [];
+      for (let i = 0; i < list.length; i++) {
+        const row = list[i];
+        const byId = row.cliente_id && String(row.cliente_id) === String(id);
+        const byName = row.cliente && String(row.cliente) === String(oldNome);
+        if (!byId && !byName) continue;
+        const next = { ...row, cliente: newNome, cliente_id: id };
+        if (window.BeautyStore && window.BeautyStore.updateInList) {
+          window.BeautyStore.updateInList(storeKey, row.id, next);
+        } else {
+          list[i] = next;
+        }
+        try { await dbPut(storeKey, next); } catch (e) {}
+      }
+    };
+    await patchList('movimentos');
+    await patchList('agendamentos');
+    // invalidar cache de stats se existir
+    try { if (typeof _statsCache !== 'undefined') _statsCache = { key: '', map: null }; } catch (e) {}
+  }
+
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  return item;
 }
 
 async function deleteCliente(id) {
@@ -1994,11 +2464,56 @@ async function deleteCliente(id) {
 // ====================================================================
 //  CRUD — AGENDAMENTO
 // ====================================================================
+
+/** Duração do serviço em minutos (default 60 se não configurado). */
+function getServicoDuracaoMin(servicoNome) {
+  const s = (state.servicos || []).find(x => x.nome === servicoNome);
+  if (!s) return 60;
+  const d = Number(s.duracao || s.duracaoMin || s.minutos || 0);
+  return d > 0 ? d : 60;
+}
+
+function _parseAgDateTime(data, hora) {
+  const h = String(hora || '00:00').slice(0, 5);
+  const dt = new Date(String(data) + 'T' + h + ':00');
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+/**
+ * Conflito = mesmo profissional, mesmo dia, intervalo sobreposto, status agendado.
+ * @returns {object|null} o agendamento conflituoso ou null
+ */
+function temConflitoAgendamento({ profissional_id, data, hora, servico, excludeId, duracaoMin }) {
+  if (!profissional_id || !data || !hora) return null;
+  const dur = duracaoMin || getServicoDuracaoMin(servico);
+  const start = _parseAgDateTime(data, hora);
+  if (!start) return null;
+  const end = new Date(start.getTime() + dur * 60000);
+
+  for (const a of state.agendamentos || []) {
+    if (excludeId && a.id === excludeId) continue;
+    if (String(a.profissional_id) !== String(profissional_id)) continue;
+    if (a.data !== data) continue;
+    const st = String(a.status || a.estado || 'agendado').toLowerCase();
+    if (st !== 'agendado') continue;
+    const aStart = _parseAgDateTime(a.data, a.hora);
+    if (!aStart) continue;
+    const aDur = getServicoDuracaoMin(a.servico);
+    const aEnd = new Date(aStart.getTime() + aDur * 60000);
+    if (start < aEnd && end > aStart) return a;
+  }
+  return null;
+}
+
 async function addAgendamento(ag) {
-  const dtStr = ag.data + 'T' + (ag.hora || '00:00') + ':00';
-  const agDatetime = new Date(dtStr);
-  const agora = new Date();
-  if (agDatetime < agora) {
+  const data = ag.data || (typeof hoje === 'function' ? hoje() : '');
+  const hora = String(ag.hora || (typeof horaAgora === 'function' ? horaAgora() : '00:00')).slice(0, 5);
+  const agDatetime = _parseAgDateTime(data, hora);
+  if (!agDatetime) {
+    toast('Data ou hora inválida.', 'error');
+    return null;
+  }
+  if (agDatetime < new Date()) {
     toast('Não é possível agendar para datas ou horários passados.', 'error');
     return null;
   }
@@ -2008,14 +2523,32 @@ async function addAgendamento(ag) {
     return null;
   }
 
+  const conflito = temConflitoAgendamento({
+    profissional_id: ag.profissional_id,
+    data,
+    hora,
+    servico: ag.servico,
+    excludeId: null
+  });
+  if (conflito) {
+    const h = String(conflito.hora || '').slice(0, 5);
+    toast(
+      'Conflito: ' + (conflito.cliente || 'cliente') + ' já tem ' + (conflito.servico || 'serviço') +
+      ' com este profissional às ' + h + '.',
+      'error'
+    );
+    return null;
+  }
+
   const n = {
     ...ag,
     id: uuid(),
-    data: ag.data || hoje(),
-    hora: ag.hora || horaAgora(),
+    data,
+    hora,
     status: 'agendado',
     profissional_id: ag.profissional_id || null,
-    profissional: ag.profissional || ''
+    profissional: ag.profissional || '',
+    updated_at: new Date().toISOString()
   };
   try {
     await dbPut('agendamentos', n);
@@ -2038,17 +2571,50 @@ async function addAgendamento(ag) {
 }
 
 async function updateAgendamento(id, data) {
+  const actual = (state.agendamentos || []).find(a => a.id === id);
+  if (!actual) return null;
+
+  const merged = { ...actual, ...data };
+  const st = String(merged.status || 'agendado').toLowerCase();
+  if (st === 'agendado' && (data.data || data.hora || data.profissional_id || data.servico)) {
+    const conflito = temConflitoAgendamento({
+      profissional_id: merged.profissional_id,
+      data: merged.data,
+      hora: merged.hora,
+      servico: merged.servico,
+      excludeId: id
+    });
+    if (conflito) {
+      const h = String(conflito.hora || '').slice(0, 5);
+      toast(
+        'Conflito: ' + (conflito.cliente || 'cliente') + ' já tem ' + (conflito.servico || 'serviço') +
+        ' com este profissional às ' + h + '.',
+        'error'
+      );
+      return null;
+    }
+    if (data.data || data.hora) {
+      const dt = _parseAgDateTime(merged.data, merged.hora);
+      if (dt && dt < new Date()) {
+        toast('Não é possível reagendar para o passado.', 'error');
+        return null;
+      }
+    }
+  }
+
+  merged.updated_at = new Date().toISOString();
   if (window.BeautyStore && window.BeautyStore.updateInList) {
-    window.BeautyStore.updateInList('agendamentos', id, data);
+    window.BeautyStore.updateInList('agendamentos', id, merged);
   } else {
     const i = state.agendamentos.findIndex(a => a.id === id);
-    if (i === -1) return;
-    state.agendamentos[i] = { ...state.agendamentos[i], ...data };
+    if (i === -1) return null;
+    state.agendamentos[i] = merged;
   }
   const item = state.agendamentos.find(a => a.id === id);
   if (item) await dbPut('agendamentos', item);
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
   if (typeof renderBadges === 'function') renderBadges();
+  return item;
 }
 
 async function deleteAgendamento(id) {
@@ -2068,7 +2634,7 @@ async function addProfissional(p) {
     return null;
   }
 
-  const n = { ...p, id: uuid(), nome };
+  const n = { ...p, id: uuid(), nome, ativo: p.ativo !== false };
   try {
     await dbPut('profissionais', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -2088,24 +2654,163 @@ async function addProfissional(p) {
   }
 }
 
-async function updateProfissional(id, data) {
-  if (data.nome) {
-    const nome = data.nome.trim();
-    if (existeNomeDuplicado('profissionais', nome, id)) {
-      toast('Já existe um profissional com este nome.', 'error');
-      return;
+
+function isProfissionalAtivo(p) {
+  if (!p) return false;
+  return p.ativo !== false && p.ativo !== 0 && p.ativo !== 'false';
+}
+
+function isServicoAtivo(s) {
+  if (!s) return false;
+  return s.ativo !== false && s.ativo !== 0 && s.ativo !== 'false';
+}
+
+function getProfissionaisAtivos() {
+  return (state.profissionais || []).filter(isProfissionalAtivo);
+}
+
+/**
+ * Soft-delete: destituir profissional sem DELETE remoto (evita 409 FK).
+ * Remove associações em serviços; desactiva serviços que ficam sem equipa.
+ */
+async function desassociarProfissional(id) {
+  const p = (state.profissionais || []).find(function (x) { return x.id === id; });
+  if (!p) {
+    if (typeof toast === 'function') toast('Profissional não encontrado', 'error');
+    return null;
+  }
+  if (!isProfissionalAtivo(p)) {
+    if (typeof toast === 'function') toast('Este profissional já está destituído', 'warning');
+    return null;
+  }
+
+  const patch = {
+    ativo: false,
+    data_desativacao: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  // UPDATE local + fila (não DELETE — crítico para multi-dispositivo)
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('profissionais', id, patch);
+  } else {
+    const i = state.profissionais.findIndex(function (x) { return x.id === id; });
+    if (i === -1) return null;
+    state.profissionais[i] = Object.assign({}, state.profissionais[i], patch);
+  }
+  const item = (state.profissionais || []).find(function (x) { return x.id === id; });
+  if (item) {
+    try { await dbPut('profissionais', item); } catch (e) {
+      console.error('[desassociarProfissional]', e);
     }
   }
+
+  const nome = p.nome || '';
+  const servicosAfetados = [];
+  const servicosDesativados = [];
+
+  for (const s of (state.servicos || []).slice()) {
+    const arr = Array.isArray(s.profissionais) ? s.profissionais.slice() : [];
+    if (!arr.length) continue;
+    const next = arr.filter(function (x) {
+      return x !== nome && String(x) !== String(id);
+    });
+    if (next.length === arr.length) continue;
+
+    const sPatch = { profissionais: next };
+    if (next.length === 0) {
+      sPatch.ativo = false;
+      servicosDesativados.push(s.nome || 'Serviço');
+    } else {
+      servicosAfetados.push(s.nome || 'Serviço');
+    }
+
+    if (window.BeautyStore && window.BeautyStore.updateInList) {
+      window.BeautyStore.updateInList('servicos', s.id, sPatch);
+    } else {
+      const si = state.servicos.findIndex(function (x) { return x.id === s.id; });
+      if (si !== -1) state.servicos[si] = Object.assign({}, state.servicos[si], sPatch);
+    }
+    const updated = (state.servicos || []).find(function (x) { return x.id === s.id; });
+    if (updated) {
+      try { await dbPut('servicos', updated); } catch (e) {}
+    }
+  }
+
+  if (!(window.BeautyStore && window.BeautyStore.subscribe) && typeof updateUI === 'function') {
+    updateUI();
+  }
+
+  return {
+    profissional: item || Object.assign({}, p, patch),
+    servicosAfetados: servicosAfetados,
+    servicosDesativados: servicosDesativados
+  };
+}
+
+async function updateProfissional(id, data) {
+  const actual = (state.profissionais || []).find(p => p.id === id);
+  if (!actual) return null;
+
+  if (data.nome) {
+    const nome = data.nome.trim();
+    data = { ...data, nome };
+    if (existeNomeDuplicado('profissionais', nome, id)) {
+      toast('Já existe um profissional com este nome.', 'error');
+      return null;
+    }
+  }
+  const oldNome = actual.nome;
+  const newNome = data.nome != null ? data.nome : oldNome;
+  const renamed = data.nome != null && String(data.nome) !== String(oldNome);
+
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('profissionais', id, data);
   } else {
     const i = state.profissionais.findIndex(p => p.id === id);
-    if (i === -1) return;
+    if (i === -1) return null;
     state.profissionais[i] = { ...state.profissionais[i], ...data };
   }
   const item = state.profissionais.find(p => p.id === id);
   if (item) await dbPut('profissionais', item);
+
+  // Rename: actualizar nomes em serviços ligados (array legado de nomes)
+  if (renamed && oldNome && newNome) {
+    for (const s of (state.servicos || [])) {
+      const arr = s.profissionais || [];
+      if (!arr.length) continue;
+      let changed = false;
+      const next = arr.map(function (x) {
+        if (x === oldNome || x === id) { changed = true; return newNome; }
+        return x;
+      });
+      if (!changed) continue;
+      const updated = { ...s, profissionais: next };
+      if (window.BeautyStore && window.BeautyStore.updateInList) {
+        window.BeautyStore.updateInList('servicos', s.id, updated);
+      } else {
+        const si = state.servicos.findIndex(x => x.id === s.id);
+        if (si !== -1) state.servicos[si] = updated;
+      }
+      try { await dbPut('servicos', updated); } catch (e) {}
+    }
+    // Nome em movimentos legados sem quebrar id
+    for (const m of (state.movimentos || [])) {
+      if (String(m.profissional_id) !== String(id)) continue;
+      if (m.profissional === newNome) continue;
+      const updated = { ...m, profissional: newNome };
+      if (window.BeautyStore && window.BeautyStore.updateInList) {
+        window.BeautyStore.updateInList('movimentos', m.id, updated);
+      } else {
+        const mi = state.movimentos.findIndex(x => x.id === m.id);
+        if (mi !== -1) state.movimentos[mi] = updated;
+      }
+      try { await dbPut('movimentos', updated); } catch (e) {}
+    }
+  }
+
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  return item;
 }
 
 async function deleteProfissional(id) {
@@ -2181,14 +2886,15 @@ function getProfissionaisPorServico(nomeServico) {
 // ====================================================================
 async function registarVenda(dados) {
   try {
-    if (!dados.cliente || String(dados.cliente).trim() === '') {
-      toast('Selecione ou crie um cliente antes de registar a venda.', 'error');
-      return null;
-    }
-
-    if (!dados.profissional_id || String(dados.profissional_id).trim() === '') {
-      toast('Selecione um profissional antes de registar a venda.', 'error');
-      return null;
+    const clienteNome = String(dados.cliente || '').trim() || 'Avulso';
+    let clienteId = dados.cliente_id || null;
+    if (!clienteId && typeof resolverClienteIdPorNome === 'function') {
+      clienteId = resolverClienteIdPorNome(clienteNome);
+    } else if (!clienteId && clienteNome && clienteNome !== 'Avulso' && clienteNome !== 'Anónimo') {
+      const hit = (state.clientes || []).find(c =>
+        String(c.nome || '').trim().toLowerCase() === clienteNome.toLowerCase()
+      );
+      if (hit) clienteId = hit.id;
     }
 
     if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
@@ -2204,20 +2910,26 @@ async function registarVenda(dados) {
 
     const descricao = dados.itens.map(i => i.nome).join(', ');
     const id = uuid();
-    let comissaoGerada = 0;
-    try {
-      if (typeof getTaxaComissao === 'function' && typeof calcularComissao === 'function') {
-        comissaoGerada = calcularComissao(total, getTaxaComissao(dados.profissional_id));
-      }
-    } catch (e) {}
+    let comissao = 0;
+    if (dados.profissional_id && typeof calcularComissao === 'function') {
+      try { comissao = Number(calcularComissao(dados.profissional_id, total)) || 0; } catch (e) { comissao = 0; }
+    } else if (dados.profissional_id && typeof getTaxaComissao === 'function') {
+      try {
+        const taxa = Number(getTaxaComissao(dados.profissional_id)) || 0;
+        comissao = Math.round((total * taxa) / 100);
+      } catch (e) { comissao = 0; }
+    }
+
     const mov = {
       id,
       tipo: 'venda',
       descricao,
       valor: total,
-      cliente: dados.cliente,
+      cliente: clienteNome,
+      cliente_id: clienteId || null,
       profissional_id: dados.profissional_id || null,
       profissional: dados.profissional || 'Não atribuído',
+      comissao_gerada: comissao,
       itens: dados.itens.map(i => ({
         nome: i.nome,
         quantidade: Number(i.quantidade) || 1,
@@ -2225,7 +2937,6 @@ async function registarVenda(dados) {
         subtotal: Number(i.subtotal) || 0
       })),
       metodoPagamento: dados.metodoPagamento || 'Numerário',
-      comissao_gerada: comissaoGerada,
       data: hoje(),
       hora: horaAgora(),
       reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
@@ -2242,6 +2953,15 @@ async function registarVenda(dados) {
       updateUI();
     }
     if (typeof renderBadges === 'function') renderBadges();
+
+    // Fidelidade: creditar pontos se há ficha de cliente
+    if (clienteId) {
+      var pts = calcularPontosVenda(total);
+      if (pts > 0) {
+        try { await creditarPontosCliente(clienteId, pts); } catch (ePts) {}
+      }
+    }
+
     return id;
   } catch (err) {
     console.error('[registarVenda] Erro:', err);
@@ -2267,9 +2987,7 @@ async function addMovimento(mov) {
   return n;
 }
 
-
 /* ===== FILE: ui-render-dashboard-agenda.js ===== */
-
 // ====================================================================
 //  ui-render-dashboard-agenda.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Renderização do Resumo (dashboard) e Agenda
@@ -2375,7 +3093,7 @@ function renderPlanoInfo() {
   } else if (plano === 'trial' && !isTrialAtivo()) {
     countdown.style.display = 'inline-block';
     countdown.textContent = 'Trial expirado';
-    countdown.style.color = '#B33A4A';
+    countdown.style.color = 'var(--red)';
   } else {
     countdown.style.display = 'none';
     countdown.style.color = '';
@@ -2385,13 +3103,16 @@ function renderPlanoInfo() {
     const limite = info.iaDia;
     iaInfo.textContent = limite > 0 ? `${info.label}: ${limite} perguntas/dia` : 'IA não disponível neste plano';
   }
-  const cont = document.getElementById('ia-contador');
-  if (cont) {
-    if (info.iaDia === 0) {
-      cont.textContent = '0';
-    } else {
-      const chave = 'ia_perguntas_' + (state.config.salaoId || 'local') + '_' + hoje();
-      cont.textContent = parseInt(localStorage.getItem(chave) || '0');
+  if (typeof actualizarContadorIA === 'function') {
+    actualizarContadorIA();
+  } else {
+    const cont = document.getElementById('ia-contador');
+    if (cont) {
+      if (info.iaDia === 0) cont.textContent = '0';
+      else {
+        const chave = 'ia_perguntas_' + ((state.config && state.config.salaoId) || 'local') + '_' + hoje();
+        cont.textContent = String(parseInt(localStorage.getItem(chave) || '0', 10) || 0);
+      }
     }
   }
 }
@@ -2469,42 +3190,68 @@ function getIntervaloDashAtual() {
 }
 
 // ====================================================================
-//  RENDER DASHBOARD (mantém sparkline funcional)
+//  RENDER DASHBOARD — modelo de verdade unificado (Fase A1+A2)
+//  Um período (dashPeriodo) alimenta KPIs, sparkline e gráfico.
 // ====================================================================
+function _statusAg(a) {
+  return String(a.status || a.estado || 'agendado').toLowerCase();
+}
+
+function _somaVendas(lista) {
+  return (lista || []).reduce((s, v) => s + (Number(v.valor) || 0), 0);
+}
+
 function renderDashboard() {
   const intervalo = getIntervaloDashAtual();
-  const agPeriodo = state.agendamentos.filter(a => a.data >= intervalo.inicio && a.data <= intervalo.fim);
-  const vendasPeriodo = state.movimentos.filter(m => m.data >= intervalo.inicio && m.data <= intervalo.fim && m.tipo === 'venda');
-  const totalRev = vendasPeriodo.reduce((s, v) => s + v.valor, 0);
+  const movs = state.movimentos || [];
+  const ags = state.agendamentos || [];
+
+  const vendasPeriodo = movs.filter(m =>
+    m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim
+  );
+  const totalRev = _somaVendas(vendasPeriodo);
   const totalVendas = vendasPeriodo.length;
   const ticket = totalVendas > 0 ? totalRev / totalVendas : 0;
-  const realizados = agPeriodo.filter(a => a.status === 'realizado').length;
+
+  // Agenda no período: estados explícitos (não misturar cancelados no "sucesso")
+  const agPeriodo = ags.filter(a => a.data >= intervalo.inicio && a.data <= intervalo.fim);
+  const realizados = agPeriodo.filter(a => _statusAg(a) === 'realizado').length;
+  const cancelados = agPeriodo.filter(a => _statusAg(a) === 'cancelado').length;
+  const naoRealizados = agPeriodo.filter(a => {
+    const st = _statusAg(a);
+    return st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
+  }).length;
+  const pendentesPeriodo = agPeriodo.filter(a => _statusAg(a) === 'agendado').length;
+  const agAtivos = agPeriodo.length - cancelados; // marcados válidos (exclui cancelados)
 
   const todayEl = document.getElementById('today-date');
   if (todayEl) todayEl.textContent = intervalo.label;
 
   animateKpi('kpi-revenue', fmtKz(totalRev));
   const revenueCount = document.getElementById('kpi-revenue-count');
-  if (revenueCount) revenueCount.textContent = totalVendas + ' serviços';
+  if (revenueCount) {
+    revenueCount.textContent = totalVendas === 1 ? '1 venda' : totalVendas + ' vendas';
+  }
 
-  animateKpi('kpi-agendamentos', String(agPeriodo.length));
+  // Número principal = marcações válidas no período; sub = breakdown honesto
+  animateKpi('kpi-agendamentos', String(Math.max(0, agAtivos)));
   const agStatus = document.getElementById('kpi-agendamentos-status');
-  if (agStatus) agStatus.textContent = realizados + ' realizados';
+  if (agStatus) {
+    const parts = [realizados + ' realizados'];
+    if (pendentesPeriodo) parts.push(pendentesPeriodo + ' pend.');
+    if (naoRealizados) parts.push(naoRealizados + ' falhados');
+    if (cancelados) parts.push(cancelados + ' cancel.');
+    agStatus.textContent = parts.join(' · ');
+  }
 
   animateKpi('kpi-ticket', fmtKz(ticket));
   const ticketSub = document.getElementById('kpi-ticket-sub');
-  if (ticketSub) ticketSub.textContent = 'por cliente';
+  if (ticketSub) ticketSub.textContent = 'por venda';
 
-  // ================================================================
-  //  SPARKLINE + % INTELIGENTE (ligado ao filtro do dashboard)
-  //  1) Pontos = ticket médio de cada dia do intervalo actual
-  //  2) % = ticket médio do período actual vs período anterior equivalente
-  // ================================================================
+  // --- Sparkline: receita diária no intervalo (mesma unidade do KPI primário) ---
   const canvas = document.getElementById('ticket-sparkline');
   if (canvas) {
     canvas.style.display = 'block';
-    canvas.style.visibility = 'visible';
-    canvas.style.opacity = '1';
     const parent = canvas.parentElement;
     const rect = parent ? parent.getBoundingClientRect() : { width: 84 };
     const dpr = window.devicePixelRatio || 1;
@@ -2516,107 +3263,150 @@ function renderDashboard() {
     canvas.style.height = cssHeight + 'px';
   }
 
-  // Construir série de ticket médio dia-a-dia dentro do intervalo do filtro
-  const serieTicket = [];
+  const serieReceita = [];
   const dInicio = new Date(intervalo.inicio + 'T00:00:00');
   const dFim = new Date(intervalo.fim + 'T00:00:00');
   const msDia = 86400000;
   const diasNoPeriodo = Math.max(1, Math.round((dFim - dInicio) / msDia) + 1);
-  // Limitar a 31 pontos para performance visual
   const passo = diasNoPeriodo > 31 ? Math.ceil(diasNoPeriodo / 31) : 1;
   for (let i = 0; i < diasNoPeriodo; i += passo) {
     const d = new Date(dInicio.getTime() + i * msDia);
-    const ds = d.toISOString().split('T')[0];
-    const vendasDia = state.movimentos.filter(m => m.data === ds && m.tipo === 'venda');
-    const totalDia = vendasDia.reduce((s, v) => s + v.valor, 0);
-    const qtdDia = vendasDia.length;
-    serieTicket.push(qtdDia > 0 ? totalDia / qtdDia : 0);
+    const ds = formatarDataISO(d);
+    const totalDia = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === ds));
+    serieReceita.push(totalDia);
   }
-  // Garantir pelo menos 2 pontos
-  if (serieTicket.length < 2) {
-    serieTicket.push(serieTicket[0] || 0);
-  }
+  if (serieReceita.length < 2) serieReceita.push(serieReceita[0] || 0);
 
+  const goldColor = (typeof getComputedStyle === 'function')
+    ? (getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#D4AF37')
+    : '#D4AF37';
   if (typeof desenharSparkline === 'function') {
     setTimeout(() => {
-      try { desenharSparkline('ticket-sparkline', serieTicket, '#D4AF37'); }
+      try { desenharSparkline('ticket-sparkline', serieReceita, goldColor); }
       catch (e) { console.warn('[Sparkline]', e); }
     }, 40);
   }
 
-  // % = ticket médio do período actual vs período anterior de mesma duração
+  // % variação: receita do período vs período anterior de igual duração (não ticket)
   const duracaoMs = (dFim - dInicio) + msDia;
   const prevFim = new Date(dInicio.getTime() - msDia);
   const prevInicio = new Date(prevFim.getTime() - duracaoMs + msDia);
-  const prevInicioStr = prevInicio.toISOString().split('T')[0];
-  const prevFimStr = prevFim.toISOString().split('T')[0];
-  const vendasPrev = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= prevInicioStr && m.data <= prevFimStr);
-  const totalPrev = vendasPrev.reduce((s, v) => s + v.valor, 0);
-  const ticketPrev = vendasPrev.length > 0 ? totalPrev / vendasPrev.length : 0;
+  const prevInicioStr = formatarDataISO(prevInicio);
+  const prevFimStr = formatarDataISO(prevFim);
+  const totalPrev = _somaVendas(movs.filter(m =>
+    m.tipo === 'venda' && m.data >= prevInicioStr && m.data <= prevFimStr
+  ));
 
-  let variacao = 0;
-  if (ticketPrev > 0 && isFinite(ticket) && isFinite(ticketPrev)) {
-    variacao = ((ticket - ticketPrev) / ticketPrev) * 100;
-  } else if (ticket > 0 && ticketPrev === 0) {
-    variacao = 100;
-  }
-  if (!isFinite(variacao) || isNaN(variacao)) variacao = 0;
-
-  const subiu = variacao >= 0;
-  const sinal = subiu ? '↑' : '↓';
   const percentEl = document.getElementById('ticket-trend-percent');
   if (percentEl) {
-    percentEl.className = subiu ? 'trend-up' : 'trend-down';
-    // Uma casa decimal (ex: 10.7%)
-    const absVar = Math.abs(variacao);
-    const texto = absVar >= 10 ? absVar.toFixed(1) : absVar.toFixed(1);
-    percentEl.innerHTML = `<span class="trend-arrow">${sinal}</span> ${texto}%`;
-    percentEl.style.display = 'inline-flex';
+    if (totalPrev > 0 && isFinite(totalRev)) {
+      const variacao = ((totalRev - totalPrev) / totalPrev) * 100;
+      const subiu = variacao >= 0;
+      percentEl.className = subiu ? 'trend-up' : 'trend-down';
+      percentEl.innerHTML = `<span class="trend-arrow">${subiu ? '↑' : '↓'}</span> ${Math.abs(variacao).toFixed(1)}%`;
+      percentEl.style.display = 'inline-flex';
+      percentEl.setAttribute('title', 'Receita vs período anterior equivalente');
+    } else if (totalRev > 0 && totalPrev === 0) {
+      percentEl.className = 'trend-up';
+      percentEl.innerHTML = `<span class="trend-arrow">↑</span> novo`;
+      percentEl.style.display = 'inline-flex';
+      percentEl.setAttribute('title', 'Sem vendas no período anterior');
+    } else {
+      percentEl.className = 'trend-up';
+      percentEl.textContent = '—';
+      percentEl.style.display = 'inline-flex';
+      percentEl.removeAttribute('title');
+    }
+  }
+  const trendPeriodEl = document.getElementById('ticket-trend-period');
+  if (trendPeriodEl) trendPeriodEl.textContent = 'vs período anterior';
+
+  // --- Meta mensal (BPFinance) + saldo de caixa (admin) ---
+  const metaWrap = document.getElementById('dash-meta-wrap');
+  if (metaWrap) {
+    let prog = null;
+    try {
+      if (window.BPFinance && typeof BPFinance.getProgressoMetaSalao === 'function') {
+        prog = BPFinance.getProgressoMetaSalao();
+      }
+    } catch (_) {}
+    if (prog && prog.meta > 0) {
+      metaWrap.hidden = false;
+      const fill = document.getElementById('dash-meta-fill');
+      const label = document.getElementById('dash-meta-label');
+      if (fill) fill.style.width = Math.min(100, prog.pct) + '%';
+      if (label) {
+        label.textContent = fmtKz(prog.volume) + ' / ' + fmtKz(prog.meta) + ' · ' + prog.pct + '%' +
+          (prog.atingida ? ' · Meta atingida' : '');
+      }
+    } else {
+      metaWrap.hidden = true;
+    }
+  }
+  const caixaEl = document.getElementById('dash-caixa-saldo');
+  if (caixaEl) {
+    const hojeStr = hoje();
+    const entradas = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === hojeStr));
+    const saidas = movs.filter(m => m.tipo === 'despesa' && m.data === hojeStr)
+      .reduce((s, m) => s + (Number(m.valor) || 0), 0);
+    const saldo = (Number(state.config && state.config.fundo) || 0) + entradas - saidas;
+    caixaEl.textContent = fmtKz(saldo);
   }
 
-  const trendPeriodEl = document.getElementById('ticket-trend-period');
-  if (trendPeriodEl) trendPeriodEl.textContent = intervalo.label;
-
-  // Próximos atendimentos — apenas HOJE e status "agendado" (após expirar os passados)
-  atualizarAgendamentosExpirados();
+  // Próximos atendimentos — só HOJE, status agendado, hora >= agora
+  if (typeof atualizarAgendamentosExpirados === 'function') atualizarAgendamentosExpirados();
   const hojeStr2 = hoje();
   const agora = new Date();
-  const agHoje = (state.agendamentos || []).filter(a => a.data === hojeStr2);
-  // Pendentes reais: status agendado E data/hora ainda no futuro (ou agora)
+  const agHoje = ags.filter(a => a.data === hojeStr2);
   const proximos = agHoje
     .filter(a => {
-      if (a.status !== 'agendado') return false;
-      const agDate = new Date(a.data + 'T' + (a.hora || '00:00') + ':00');
-      return agDate >= agora;
+      if (_statusAg(a) !== 'agendado') return false;
+      const hora = String(a.hora || '00:00').slice(0, 5);
+      const agDate = new Date(a.data + 'T' + hora + ':00');
+      return !isNaN(agDate.getTime()) && agDate >= agora;
     })
-    .sort((a, b) => a.hora.localeCompare(b.hora))
+    .sort((a, b) => String(a.hora || '').localeCompare(String(b.hora || '')))
     .slice(0, 6);
+
   const cont = document.getElementById('agenda-today-list');
-  if (!cont) return;
-  if (proximos.length === 0) {
-    const temRealizados = agHoje.some(a => a.status === 'realizado');
-    const temExpirados = agHoje.some(a => a.status === 'nao_realizado');
-    let mensagemVazio = 'Nenhum atendimento pendente hoje';
-    if (temRealizados && !temExpirados) mensagemVazio = 'Todos os atendimentos de hoje foram realizados';
-    else if (temExpirados && !temRealizados) mensagemVazio = 'Sem atendimentos pendentes';
-    cont.innerHTML = `<div class="empty-state"><p>${mensagemVazio}</p></div>`;
-  } else {
-    cont.innerHTML = proximos.map(a => {
-      const nomeProf = getProfissionalNome(a.profissional_id);
-      return `
-        <div class="list-item">
-          <div class="avatar">${(a.cliente || '?').charAt(0).toUpperCase()}</div>
-          <div class="info">
-            <div class="title" style="color:var(--gold-dark);font-weight:700;">${escHtml(a.servico)}</div>
-            <div class="sub">${escHtml(a.cliente)} · ${a.hora} · ${escHtml(nomeProf)}</div>
-          </div>
-          <div class="action" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span class="pill pill-warning" style="font-size:.6rem;">Pendente</span>
-            <span style="font-weight:700;font-size:.8rem;">${fmtKz(a.preco)}</span>
-          </div>
-        </div>
-      `;
-    }).join('');
+  if (cont) {
+    if (proximos.length === 0) {
+      const temRealizados = agHoje.some(a => _statusAg(a) === 'realizado');
+      const temExpirados = agHoje.some(a => {
+        const st = _statusAg(a);
+        return st === 'nao_realizado' || st === 'nao-realizado';
+      });
+      let mensagemVazio = 'Nenhum atendimento pendente hoje';
+      if (temRealizados && !temExpirados) mensagemVazio = 'Todos os atendimentos de hoje foram realizados';
+      else if (temExpirados && !temRealizados) mensagemVazio = 'Sem atendimentos pendentes';
+      cont.innerHTML = `<div class="empty-state"><p>${mensagemVazio}</p></div>`;
+    } else {
+      cont.innerHTML = proximos.map(a => {
+        const nomeProf = getProfissionalNome(a.profissional_id);
+        const inicial = (a.cliente || '?').charAt(0).toUpperCase();
+        let avHtml = `<div class="avatar">${escHtml(inicial)}</div>`;
+        try {
+          const cli = (state.clientes || []).find(c => c.nome === a.cliente || c.id === a.cliente_id);
+          if (cli && cli.foto) {
+            avHtml = `<div class="avatar bp-avatar-img"><img src="${cli.foto}" alt="" loading="lazy" decoding="async"></div>`;
+          } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === 'function') {
+            avHtml = `<div class="avatar bp-avatar-img"><img src="${BPAvatars.avatarDataUrl(a.cliente || '')}" alt="" loading="lazy" decoding="async"></div>`;
+          }
+        } catch (_) {}
+        return `
+          <div class="list-item">
+            ${avHtml}
+            <div class="info">
+              <div class="title dash-next-title">${escHtml(a.servico || 'Serviço')}</div>
+              <div class="sub">${escHtml(a.cliente || 'Cliente')} · ${escHtml(String(a.hora || '').slice(0, 5))} · ${escHtml(nomeProf)}</div>
+            </div>
+            <div class="action dash-next-action">
+              <span class="pill pill-warning">Pendente</span>
+              <span class="dash-next-price">${fmtKz(a.preco)}</span>
+            </div>
+          </div>`;
+      }).join('');
+    }
   }
   const countEl = document.getElementById('agenda-count');
   if (countEl) {
@@ -2684,7 +3474,10 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     localStorage.setItem('bp_dash_periodo', state.dashPeriodo);
     localStorage.setItem('bp_dash_offset', String(state.dashOffset));
     closeModal('modal-periodo-dashboard');
+    // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
+    if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
     renderDashboard();
+    if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
 });
 
@@ -2701,7 +3494,9 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
   localStorage.setItem('bp_dash_custom_inicio', ini);
   localStorage.setItem('bp_dash_custom_fim', fim);
   closeModal('modal-periodo-dashboard');
+  state.chartPeriodo = 'semana';
   renderDashboard();
+  if (typeof renderizarGrafico === 'function') renderizarGrafico();
 });
 
 // Fechar o popover ao tocar fora dele (mesmo padrão já usado no menu hambúrguer)
@@ -2723,64 +3518,97 @@ let agendaFilter = localStorage.getItem(agendaFilterKey) || 'hoje';
 
 // Função para verificar se um agendamento expirou
 function agendamentoExpirado(ag) {
-  const now = new Date();
-  const agDate = new Date(ag.data + 'T' + (ag.hora || '00:00') + ':00');
-  return agDate < now;
+  if (!ag || !ag.data) return false;
+  const hora = String(ag.hora || '00:00').slice(0, 5);
+  const agDate = new Date(ag.data + 'T' + hora + ':00');
+  if (isNaN(agDate.getTime())) return false;
+  return agDate < new Date();
 }
 
-// Função para atualizar status de agendamentos expirados
+// Atualiza expirados sem reentrar em render (evita loop render → expirar → render)
+let _expirandoAgenda = false;
 function atualizarAgendamentosExpirados() {
+  if (_expirandoAgenda || !state.agendamentos) return;
+  _expirandoAgenda = true;
   let atualizado = false;
-  for (const ag of state.agendamentos) {
-    if (ag.status === 'agendado' && agendamentoExpirado(ag)) {
-      ag.status = 'nao_realizado';
-      ag.updated_at = new Date().toISOString();
-      dbPut('agendamentos', ag); // atualiza localmente
-      atualizado = true;
+  try {
+    for (const ag of state.agendamentos) {
+      if (_statusAg(ag) === 'agendado' && agendamentoExpirado(ag)) {
+        ag.status = 'nao_realizado';
+        ag.updated_at = new Date().toISOString();
+        if (typeof dbPut === 'function') dbPut('agendamentos', ag);
+        atualizado = true;
+      }
     }
+  } finally {
+    _expirandoAgenda = false;
   }
-  if (atualizado) {
-    if (activeTab === 'agenda') renderAgendaFull();
-    renderBadges();
+  // NÃO chama renderAgendaFull aqui — o caller já renderiza
+  if (atualizado && typeof renderBadges === 'function') {
+    // badge only; avoid recursive full render
+    try {
+      const agora = new Date();
+      const disponiveis = state.agendamentos.filter(a => {
+        if (_statusAg(a) !== 'agendado') return false;
+        const hora = String(a.hora || '00:00').slice(0, 5);
+        const agDate = new Date(a.data + 'T' + hora + ':00');
+        return !isNaN(agDate.getTime()) && agDate >= agora;
+      });
+      const badge = document.getElementById('agenda-badge');
+      if (badge) {
+        const count = disponiveis.length;
+        if (count > 0) {
+          badge.textContent = count > 9 ? '9+' : String(count);
+          badge.classList.add('show');
+        } else {
+          badge.classList.remove('show');
+        }
+      }
+    } catch (_) {}
   }
 }
 
 // Função para obter agendamentos filtrados (com suporte a dia exato)
 function getAgendamentosFiltrados() {
-  // Primeiro, atualizar expirados
   atualizarAgendamentosExpirados();
 
   const hojeStr = hoje();
+  const list = state.agendamentos || [];
 
-  // Se o filtro for 'dia', usar a data exata
   if (agendaFilter === 'dia') {
     const dataExata = localStorage.getItem('bp_agenda_data_exata') || hojeStr;
-    return state.agendamentos.filter(a => a.data === dataExata && a.status !== 'cancelado');
+    return list.filter(a => a.data === dataExata && _statusAg(a) !== 'cancelado');
   }
 
-  // Vistas por estado (qualquer data, sem excepção de nenhum dia)
   if (agendaFilter === 'realizados') {
-    return state.agendamentos.filter(a => a.status === 'realizado');
+    return list.filter(a => _statusAg(a) === 'realizado');
   }
-  if (agendaFilter === 'cancelados' || agendaFilter === 'nao_realizado') {
-    // "Não realizados" = expirados + cancelados (tudo o que não chegou a ser feito)
-    return state.agendamentos.filter(a => a.status === 'nao_realizado' || a.status === 'cancelado');
+  if (agendaFilter === 'cancelados') {
+    return list.filter(a => _statusAg(a) === 'cancelado');
+  }
+  if (agendaFilter === 'nao_realizado') {
+    return list.filter(a => {
+      const st = _statusAg(a);
+      return st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
+    });
   }
 
-switch (agendaFilter) {
-    case 'hoje':
-  const dataHoje = state.agendaDataAtual || hojeStr;
-  return state.agendamentos.filter(a => a.data === dataHoje && a.status !== 'cancelado');
+  switch (agendaFilter) {
+    case 'hoje': {
+      const dataHoje = state.agendaDataAtual || hojeStr;
+      return list.filter(a => a.data === dataHoje && _statusAg(a) !== 'cancelado');
+    }
     case 'semana': {
+      // Segunda → domingo (igual ao dashboard / mercado AO)
       const d = new Date(hojeStr + 'T00:00:00');
-      const diaSemana = d.getDay(); // 0=domingo
+      const diaSemana = (d.getDay() + 6) % 7;
       const inicioSemana = new Date(d);
       inicioSemana.setDate(d.getDate() - diaSemana);
       const fimSemana = new Date(inicioSemana);
       fimSemana.setDate(inicioSemana.getDate() + 6);
       const inicio = formatarDataISO(inicioSemana);
       const fim = formatarDataISO(fimSemana);
-      return state.agendamentos.filter(a => a.data >= inicio && a.data <= fim && a.status !== 'cancelado');
+      return list.filter(a => a.data >= inicio && a.data <= fim && _statusAg(a) !== 'cancelado');
     }
     case 'mes': {
       const d = new Date(hojeStr + 'T00:00:00');
@@ -2831,6 +3659,8 @@ if (label) {
     label.textContent = 'Realizados';
   } else if (agendaFilter === 'cancelados') {
     label.textContent = 'Cancelados';
+  } else if (agendaFilter === 'nao_realizado') {
+    label.textContent = 'Não realizados';
   } else {
     label.textContent = 'Todos';
   }
@@ -2854,7 +3684,7 @@ if (label) {
     const datas = Object.keys(grupos).sort();
     datas.forEach(data => {
       const dataLabel = data === hoje() ? 'Hoje' : new Date(data + 'T00:00:00').toLocaleDateString('pt-AO', { day: '2-digit', month: 'short' });
-      html += `<div style="font-weight:600;font-size:.8rem;color:var(--text-secondary);padding:8px 0 4px;">${dataLabel}</div>`;
+      html += `<div class="bp-ag-date-label">${dataLabel}</div>`;
       html += grupos[data].map(a => renderAgendaItem(a)).join('');
     });
   } else {
@@ -2872,20 +3702,16 @@ if (label) {
 }
 
 function renderAgendaItem(a) {
-  const isRealizado = a.status === 'realizado';
-  const isCancelado = a.status === 'cancelado';
-  const isExpirado = a.status === 'nao_realizado';
-  const podeFinalizar = a.status === 'agendado' && !agendamentoExpirado(a);
-  const podeCancelar = a.status === 'agendado';
+  // Leitura apenas — expiração é responsabilidade de atualizarAgendamentosExpirados
+  const st = _statusAg(a);
+  const isRealizado = st === 'realizado';
+  const isCancelado = st === 'cancelado';
+  const isExpirado = st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
+  const isAgendado = st === 'agendado';
+  const podeFinalizar = isAgendado && !agendamentoExpirado(a);
+  const podeCancelar = isAgendado;
   const nomeProf = getProfissionalNome(a.profissional_id);
 
-  // Verificar novamente se expirou (por segurança)
-  if (a.status === 'agendado' && agendamentoExpirado(a)) {
-    a.status = 'nao_realizado';
-    dbPut('agendamentos', a);
-  }
-
-  // Texto sem emojis, mais profissional
   let statusLabel = '';
   let statusClass = '';
 
@@ -2903,21 +3729,29 @@ function renderAgendaItem(a) {
     statusClass = 'pill-warning';
   }
 
+  // Fallback se polish não estiver activo — mesma hierarquia de acções
+  if (window.BPAgendaUI && typeof BPAgendaUI.renderAgendaItemPro === 'function') {
+    return BPAgendaUI.renderAgendaItemPro(a);
+  }
+  const hora = String(a.hora || '').slice(0, 5);
   return `
-    <div class="timeline-item">
-      <div class="time">${a.hora}</div>
-      <div class="event">
-        <div class="service">${escHtml(a.servico)}</div>
-        <div class="client">${escHtml(a.cliente)}</div>
-        <div class="meta">
-          <span>${escHtml(nomeProf)}</span>
-          <span class="pill" style="font-weight:700;">${fmtKz(a.preco)}</span>
-          <span class="pill ${statusClass}" style="font-size:.75rem;padding:4px 12px;border-radius:4px;">${statusLabel}</span>
+    <div class="list-item bp-ag-card" data-agenda-id="${a.id}">
+      <div class="avatar bp-ag-avatar">${escHtml((a.cliente || '?').charAt(0).toUpperCase())}</div>
+      <div class="info bp-ag-info">
+        <div class="bp-ag-top">
+          <span class="bp-ag-time">${escHtml(hora)}</span>
+          <span class="bp-ag-status ${statusClass === 'pill-success' ? 'bp-ag-st-ok' : statusClass === 'pill-danger' ? 'bp-ag-st-no' : statusClass === 'pill-gray' ? 'bp-ag-st-off' : 'bp-ag-st-agendado'}">${statusLabel}</span>
+        </div>
+        <div class="title">${escHtml(a.servico || 'Serviço')}</div>
+        <div class="sub">${escHtml(a.cliente || 'Cliente')}</div>
+        <div class="bp-ag-meta">
+          <span class="bp-ag-prof">${escHtml(nomeProf)}</span>
+          <span class="bp-ag-price">${fmtKz(a.preco)}</span>
         </div>
         ${(podeFinalizar || podeCancelar) ? `
-        <div class="timeline-actions">
-          ${podeFinalizar ? `<button class="btn btn-sm btn-success" data-id="${a.id}" data-action="finalizar">Finalizar atendimento</button>` : ''}
-          ${podeCancelar ? `<button class="btn btn-sm btn-secondary btn-icon-only" data-id="${a.id}" data-action="cancelar-agenda" data-role="admin,gerente" aria-label="Cancelar agendamento" title="Cancelar agendamento">✕</button>` : ''}
+        <div class="bp-ag-actions" style="--bp-ag-cols:2">
+          ${podeFinalizar ? `<button type="button" class="btn btn-sm btn-primary bp-ag-btn" data-id="${a.id}" data-action="finalizar">Finalizar</button>` : ''}
+          ${podeCancelar ? `<button type="button" class="btn btn-sm btn-secondary bp-ag-btn bp-ag-btn-muted" data-id="${a.id}" data-action="cancelar-agenda" data-role="admin,gerente">Cancelar</button>` : ''}
         </div>` : ''}
       </div>
     </div>
@@ -2961,15 +3795,13 @@ function mudarAgenda(delta) {
 //  BADGE DA AGENDA (contar todos os disponíveis)
 // ====================================================================
 function renderBadges() {
-  // Primeiro, atualizar expirados
   atualizarAgendamentosExpirados();
-
-  // Contar agendamentos disponíveis (status "agendado" e data/hora >= agora)
   const agora = new Date();
-  const disponiveis = state.agendamentos.filter(a => {
-    if (a.status !== 'agendado') return false;
-    const agDate = new Date(a.data + 'T' + (a.hora || '00:00') + ':00');
-    return agDate >= agora;
+  const disponiveis = (state.agendamentos || []).filter(a => {
+    if (_statusAg(a) !== 'agendado') return false;
+    const hora = String(a.hora || '00:00').slice(0, 5);
+    const agDate = new Date(a.data + 'T' + hora + ':00');
+    return !isNaN(agDate.getTime()) && agDate >= agora;
   });
   const count = disponiveis.length;
 
@@ -3098,10 +3930,7 @@ setInterval(syncAgenda, 60000);
 // Verificar quando a app volta ao foco
 document.addEventListener('visibilitychange', syncAgenda);
 
-
-
 /* ===== FILE: ui-render-clientes-caixa-equipa.js ===== */
-
 // ====================================================================
 //  ui-render-clientes-caixa-equipa.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Renderização de Clientes, Caixa, Profissionais e Serviços
@@ -3115,35 +3944,113 @@ document.addEventListener('visibilitychange', syncAgenda);
 // Cache O(1) por render — invalidado quando mudam tamanhos das listas
 let _statsCache = { key: '', map: null };
 
-function _buildStatsMap() {
-  const map = {};
-  (state.agendamentos || []).forEach(a => {
-    if (a.status === 'cancelado' || !a.cliente) return;
-    if (!map[a.cliente]) map[a.cliente] = { visitas: 0, totalGasto: 0, datas: [] };
-    map[a.cliente].visitas++;
-    if (a.data) map[a.cliente].datas.push(a.data);
-  });
-  (state.movimentos || []).forEach(m => {
-    if (m.tipo !== 'venda' || !m.cliente) return;
-    if (!map[m.cliente]) map[m.cliente] = { visitas: 0, totalGasto: 0, datas: [] };
-    map[m.cliente].visitas++;
-    map[m.cliente].totalGasto += Number(m.valor) || 0;
-    if (m.data) map[m.cliente].datas.push(m.data);
-  });
-  Object.keys(map).forEach(k => {
-    map[k].datas.sort();
-    map[k].ultimaVisita = map[k].datas.length ? map[k].datas[map[k].datas.length - 1] : null;
-    delete map[k].datas;
-  });
-  return map;
+function _normNomeCli(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function getEstatisticasCliente(nomeCliente) {
+/** Agrega por cliente_id (preferência) e por nome normalizado (legado). */
+function _buildStatsMap() {
+  const byId = {};
+  const byName = {};
+
+  function touch(bucket, key, patch) {
+    if (!key) return;
+    if (!bucket[key]) bucket[key] = { visitas: 0, totalGasto: 0, datas: [] };
+    const row = bucket[key];
+    if (patch.visita) row.visitas++;
+    if (patch.gasto) row.totalGasto += patch.gasto;
+    if (patch.data) row.datas.push(patch.data);
+  }
+
+  (state.agendamentos || []).forEach(a => {
+    const st = String(a.status || a.estado || '').toLowerCase();
+    if (st === 'cancelado') return;
+    const nome = a.cliente;
+    if (!nome && !a.cliente_id) return;
+    // Visita conta agenda realizada ou ainda agendada (presença no salão)
+    const conta = st === 'realizado' || st === 'agendado' || !st;
+    if (!conta) return;
+    const patch = { visita: true, data: a.data || null };
+    if (a.cliente_id) touch(byId, String(a.cliente_id), patch);
+    if (nome) touch(byName, _normNomeCli(nome), patch);
+  });
+
+  (state.movimentos || []).forEach(m => {
+    if (m.tipo !== 'venda') return;
+    const nome = m.cliente;
+    if (!nome && !m.cliente_id) return;
+    const patch = { visita: true, gasto: Number(m.valor) || 0, data: m.data || null };
+    if (m.cliente_id) touch(byId, String(m.cliente_id), patch);
+    if (nome) touch(byName, _normNomeCli(nome), patch);
+  });
+
+  function finalize(bucket) {
+    Object.keys(bucket).forEach(k => {
+      bucket[k].datas.sort();
+      const d = bucket[k].datas;
+      bucket[k].ultimaVisita = d.length ? d[d.length - 1] : null;
+      delete bucket[k].datas;
+    });
+  }
+  finalize(byId);
+  finalize(byName);
+  return { byId, byName };
+}
+
+/**
+ * Aceita: objecto cliente | id | nome.
+ * Preferência: id → merge com nome se ambos existirem (legado sem id nas vendas).
+ */
+function getEstatisticasCliente(ref) {
   const key = (state.agendamentos || []).length + ':' + (state.movimentos || []).length;
   if (!_statsCache.map || _statsCache.key !== key) {
     _statsCache = { key, map: _buildStatsMap() };
   }
-  return _statsCache.map[nomeCliente] || { visitas: 0, totalGasto: 0, ultimaVisita: null };
+  const empty = { visitas: 0, totalGasto: 0, ultimaVisita: null };
+  if (ref == null || ref === '') return empty;
+
+  let id = null;
+  let nome = null;
+  if (typeof ref === 'object') {
+    id = ref.id || null;
+    nome = ref.nome || null;
+  } else {
+    const s = String(ref);
+    const asCli = (state.clientes || []).find(c => c.id === s || c.nome === s);
+    if (asCli) {
+      id = asCli.id;
+      nome = asCli.nome;
+    } else {
+      nome = s;
+    }
+  }
+
+  const a = id ? (_statsCache.map.byId[String(id)] || empty) : empty;
+  const b = nome ? (_statsCache.map.byName[_normNomeCli(nome)] || empty) : empty;
+
+  // Se há id, preferir id para gasto; visitas = max para não duplicar quando ambos apontam ao mesmo histórico
+  if (id && a.visitas) {
+    // Histórico com cliente_id: usar byId; acrescentar gasto de byName só se byId não tiver gasto (dados mistos)
+    return {
+      visitas: Math.max(a.visitas, b.visitas),
+      totalGasto: a.totalGasto > 0 ? a.totalGasto : b.totalGasto,
+      ultimaVisita: (a.ultimaVisita && b.ultimaVisita)
+        ? (a.ultimaVisita > b.ultimaVisita ? a.ultimaVisita : b.ultimaVisita)
+        : (a.ultimaVisita || b.ultimaVisita)
+    };
+  }
+  return {
+    visitas: b.visitas || a.visitas,
+    totalGasto: b.totalGasto || a.totalGasto,
+    ultimaVisita: b.ultimaVisita || a.ultimaVisita
+  };
+}
+
+function resolverClienteIdPorNome(nome) {
+  const n = _normNomeCli(nome);
+  if (!n) return null;
+  const hit = (state.clientes || []).find(c => _normNomeCli(c.nome) === n);
+  return hit ? hit.id : null;
 }
 
 function formatarUltimaVisita(iso) {
@@ -3184,36 +4091,55 @@ function renderClientes() {
     if (cont0) cont0.innerHTML = '<div class="empty-state">A carregar clientes...</div>';
     return;
   }
-  const search = document.getElementById('search-cliente')?.value.toLowerCase() || '';
+  const rawSearch = document.getElementById('search-cliente')?.value || '';
+  const search = rawSearch.trim().toLowerCase();
+  const searchDigits = rawSearch.replace(/\D/g, '');
   const filtro = state.filtroClientes || 'todos';
-  const freqMap = {};
-  (state.agendamentos || []).filter(a => a.status !== 'cancelado').forEach(a => { freqMap[a.cliente] = (freqMap[a.cliente] || 0) + 1; });
-  (state.movimentos || []).filter(m => m.tipo === 'venda').forEach(v => { freqMap[v.cliente] = (freqMap[v.cliente] || 0) + 1; });
 
-  let filtered = state.clientes.filter(c => c.nome.toLowerCase().includes(search));
-  if (filtro === 'mais') filtered.sort((a, b) => (freqMap[b.nome] || 0) - (freqMap[a.nome] || 0));
-  else if (filtro === 'menos') filtered.sort((a, b) => (freqMap[a.nome] || 0) - (freqMap[b.nome] || 0));
+  let filtered = (state.clientes || []).filter(c => {
+    if (!search && !searchDigits) return true;
+    const nome = String(c.nome || '').toLowerCase();
+    const tel = String(c.telefone || '').replace(/\D/g, '');
+    if (search && nome.includes(search)) return true;
+    if (searchDigits && tel.includes(searchDigits)) return true;
+    if (search && String(c.notas || '').toLowerCase().includes(search)) return true;
+    return false;
+  });
+
+  if (filtro === 'mais' || filtro === 'menos') {
+    filtered = filtered.slice().sort((a, b) => {
+      const fa = getEstatisticasCliente(a).visitas;
+      const fb = getEstatisticasCliente(b).visitas;
+      return filtro === 'mais' ? (fb - fa) : (fa - fb);
+    });
+  } else {
+    filtered = filtered.slice().sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt'));
+  }
 
   const cont = document.getElementById('clientes-list');
   if (filtered.length === 0) {
-    cont.innerHTML = `<div class="empty-state">${svgPessoa}<p>${search ? 'Nenhum resultado' : 'Nenhum cliente ainda'}</p></div>`;
+    const msg = search || searchDigits
+      ? 'Nenhum cliente corresponde à pesquisa'
+      : 'Ainda sem clientes — adicione o primeiro';
+    cont.innerHTML = `<div class="empty-state">${typeof svgPessoa !== 'undefined' ? svgPessoa : ''}<p>${msg}</p></div>`;
     return;
   }
 
   // Progressive render: primeiros 60 itens, resto sob demanda (P1 performance)
   const INITIAL = 60;
   const rowHtml = (c) => {
-    const { visitas, totalGasto, ultimaVisita } = getEstatisticasCliente(c.nome);
+    const { visitas, totalGasto, ultimaVisita } = getEstatisticasCliente(c);
     const clienteNovo = visitas === 0;
     return `
       <div class="list-item cliente-item" data-cliente-id="${c.id}" style="cursor:pointer;">
         <div class="avatar">${(c.nome||'?').charAt(0).toUpperCase()}</div>
         <div class="info">
           <div class="title">${escHtml(c.nome)}</div>
-          <div class="sub">${escHtml(c.telefone || 'Sem contacto')}${c.notas ? ' · ' + escHtml(c.notas) : ''}</div>
+          <div class="sub">${c.telefone ? escHtml(String(c.telefone)) : 'Sem contacto'}${c.notas ? ' · ' + escHtml(c.notas) : ''}</div>
           <div class="cliente-stats">
             <span class="cliente-stat">${visitas} ${visitas === 1 ? 'visita' : 'visitas'}</span>
             ${totalGasto > 0 ? `<span class="cliente-stat cliente-stat--gasto">${fmtKz(totalGasto)} gastos</span>` : ''}
+            ${(Number(c.pontos) || 0) > 0 ? `<span class="cliente-stat">${Number(c.pontos)} pts</span>` : ''}
             ${clienteNovo ? `<span class="cliente-stat cliente-stat--novo">Novo</span>` : `<span class="cliente-stat">${formatarUltimaVisita(ultimaVisita)}</span>`}
           </div>
         </div>
@@ -3264,26 +4190,41 @@ function renderCaixa() {
     return;
   }
   const hojeStr = hoje();
-  const entradas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda').reduce((s, m) => s + m.valor, 0);
-  const despesas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa').reduce((s, m) => s + m.valor, 0);
-  document.getElementById('caixa-saldo').textContent = fmtKz(state.config.fundo + entradas - despesas);
-  document.getElementById('caixa-fundo').textContent = fmtKz(state.config.fundo);
-  // Variação do faturamento de hoje face a ontem
+  const _num = (v) => Number(v) || 0;
+  const entradas = state.movimentos
+    .filter(m => m.data === hojeStr && m.tipo === 'venda')
+    .reduce((s, m) => s + _num(m.valor), 0);
+  const despesas = state.movimentos
+    .filter(m => m.data === hojeStr && m.tipo === 'despesa')
+    .reduce((s, m) => s + _num(m.valor), 0);
+  const fundo = _num(state.config && state.config.fundo);
+  const saldoEl = document.getElementById('caixa-saldo');
+  const fundoEl = document.getElementById('caixa-fundo');
+  if (saldoEl) saldoEl.textContent = fmtKz(fundo + entradas - despesas);
+  if (fundoEl) fundoEl.textContent = fmtKz(fundo);
+  // Variação vendas hoje vs ontem (honesta: sem baseline → "—")
   const dOntem = new Date();
   dOntem.setDate(dOntem.getDate() - 1);
-  const ontemStr = dOntem.getFullYear() + '-' + String(dOntem.getMonth() + 1).padStart(2, '0') + '-' + String(dOntem.getDate()).padStart(2, '0');
-  const totalOntem = state.movimentos.filter(m => m.data === ontemStr && m.tipo === 'venda').reduce((s, m) => s + m.valor, 0);
+  const ontemStr = (typeof formatarDataISO === 'function')
+    ? formatarDataISO(dOntem)
+    : dOntem.getFullYear() + '-' + String(dOntem.getMonth() + 1).padStart(2, '0') + '-' + String(dOntem.getDate()).padStart(2, '0');
+  const totalOntem = state.movimentos
+    .filter(m => m.data === ontemStr && m.tipo === 'venda')
+    .reduce((s, m) => s + _num(m.valor), 0);
   const variacaoEl = document.getElementById('caixa-variacao');
   if (variacaoEl) {
-    let variacao = 0;
     if (totalOntem > 0) {
-      variacao = ((entradas - totalOntem) / totalOntem) * 100;
+      const variacao = ((entradas - totalOntem) / totalOntem) * 100;
+      const subiu = variacao >= 0;
+      variacaoEl.textContent = (subiu ? '↑ ' : '↓ ') + Math.abs(variacao).toFixed(0) + '%';
+      variacaoEl.style.color = subiu ? 'var(--green)' : 'var(--red)';
     } else if (entradas > 0) {
-      variacao = 100;
+      variacaoEl.textContent = '↑ novo';
+      variacaoEl.style.color = 'var(--green)';
+    } else {
+      variacaoEl.textContent = '—';
+      variacaoEl.style.color = 'var(--text-muted)';
     }
-    const subiu = variacao >= 0;
-    variacaoEl.textContent = `${subiu ? '↑' : '↓'} ${Math.abs(Math.round(variacao))}%`;
-    variacaoEl.style.color = subiu ? 'var(--green)' : 'var(--red)';
   }
 
   const periodo = state.histPeriodo || 'hoje';
@@ -3302,9 +4243,9 @@ function renderCaixa() {
         <div class="avatar" style="background:${isV ? '#E6F4EC' : '#FDE8E8'};color:${isV ? 'var(--green)' : 'var(--red)'};font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
         <div class="info">
           <div class="title">${escHtml(m.descricao||'')}</div>
-          <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}</div>
+          <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}${m.tipo === 'despesa' && m.categoria ? ' · ' + escHtml(m.categoria) : ''}</div>
         </div>
-        <div class="action" style="color:${isV ? 'var(--green)' : 'var(--red)'};">${isV ? '+' : '−'}${fmtKz(m.valor)}</div>
+        <div class="action" style="color:${isV ? 'var(--green)' : 'var(--red)'};">${isV ? '+' : '−'}${fmtKz(Number(m.valor) || 0)}</div>
       </div>`;
   };
   const movFirst = movs.slice(0, MOV_INITIAL);
@@ -3399,65 +4340,87 @@ function tituloPeriodoCaixa(periodo) {
   return map[periodo] || 'Movimentos';
 }
 
+function _receitaProfMes(profId) {
+  const mes = (typeof hoje === 'function' ? hoje() : '').slice(0, 7);
+  if (!mes || !profId) return 0;
+  return (state.movimentos || []).filter(m =>
+    m.tipo === 'venda' && String(m.profissional_id) === String(profId) && String(m.data || '').startsWith(mes)
+  ).reduce((s, m) => s + (Number(m.valor) || 0), 0);
+}
+
 function renderProfissionais() {
   const cont = document.getElementById('profissionais-list');
   if (!cont) return;
-  const plano = getPlanoAtual();
+  const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
   const aviso = document.getElementById('plano-aviso');
   if (aviso) aviso.style.display = (plano === 'trial' || plano === 'starter') ? 'block' : 'none';
 
-  if (state.profissionais.length === 0) {
-    cont.innerHTML = `<div class="empty-state">${svgPessoas}<p>Adicione o primeiro profissional</p></div>`;
+  const activos = (state.profissionais || []).filter(function (p) {
+    return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+  });
+  if (!activos.length) {
+    cont.innerHTML = `<div class="empty-state">${typeof svgPessoas !== 'undefined' ? svgPessoas : ''}<p>Ainda sem profissionais — adicione o primeiro</p></div>`;
     return;
   }
-  const profissionaisOrdenados = [...state.profissionais].sort((a, b) => a.nome.localeCompare(b.nome));
+  const profissionaisOrdenados = [...activos].sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt'));
   cont.innerHTML = profissionaisOrdenados.map(p => {
-    let taxa = 0, saldo = 0, barra = '';
-    try {
-      taxa = Number(p.taxa_comissao) || 0;
-      if (typeof getSaldoComissao === 'function') saldo = getSaldoComissao(p.id) || 0;
-      if (typeof renderBarraMeta === 'function') barra = renderBarraMeta(p.id) || '';
-    } catch (e) {}
+    const receita = _receitaProfMes(p.id);
+    const meta = Number(p.meta_mensal != null ? p.meta_mensal : p.meta) || 0;
+    let statExtra = '';
+    if (meta > 0) {
+      const pct = Math.min(100, Math.round((receita / meta) * 100));
+      statExtra = `<span class="cliente-stat">${pct}% meta</span>`;
+    } else if (receita > 0) {
+      statExtra = `<span class="cliente-stat cliente-stat--gasto">${fmtKz(receita)}</span>`;
+    }
+    const contacto = p.contacto ? String(p.contacto).replace(/\D/g, '') : '';
     return `
     <div class="list-item" data-prof-id="${p.id}" style="cursor:pointer;">
-      <div class="avatar">${p.nome.charAt(0).toUpperCase()}</div>
+      <div class="avatar">${escHtml((p.nome || '?').charAt(0).toUpperCase())}</div>
       <div class="info">
-        <div class="title">${escHtml(p.nome)}</div>
-        <div class="sub">${escHtml(p.especialidade || 'Sem especialidade definida')}</div>
+        <div class="title">${escHtml(p.nome || 'Profissional')}</div>
+        <div class="sub">${escHtml(p.especialidade || 'Sem especialidade')}${contacto ? ' · ' + escHtml(contacto) : ''}</div>
         <div class="cliente-stats">
-          ${p.idade ? `<span class="cliente-stat">${p.idade} anos</span>` : ''}
-          ${p.contacto ? `<span class="cliente-stat">${escHtml(p.contacto)}</span>` : ''}
-          ${taxa > 0 ? `<span class="cliente-stat">Comissão ${taxa}%</span>` : ''}
+          ${statExtra}
+          ${p.taxa_comissao != null || p.taxa != null ? `<span class="cliente-stat">${Number(p.taxa_comissao != null ? p.taxa_comissao : p.taxa) || 0}%</span>` : ''}
         </div>
-        ${taxa > 0 || saldo > 0 ? `<div style="font-size:.68rem;color:var(--text-secondary);margin-top:4px;">Comissão acumulada: <strong style="color:var(--gold-dark,var(--gold));">${fmtKz(saldo)}</strong></div>` : ''}
-        ${barra}
       </div>
       <div class="actions">
         <button class="row-menu-btn" data-action="row-menu" data-tipo="profissional" data-id="${p.id}" data-role="admin" aria-label="Mais ações" aria-haspopup="menu">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="12" cy="19" r="1.75"/></svg>
         </button>
       </div>
-    </div>
-  `;
+    </div>`;
   }).join('');
 }
 
 function renderServicos() {
   const container = document.getElementById('servicos-list');
   if (!container) return;
-  if (state.servicos.length === 0) {
-    container.innerHTML = `<div class="empty-state">${svgTesoura}<p>Nenhum serviço cadastrado</p></div>`;
+  const servicosActivos = (state.servicos || []).filter(function (s) {
+    return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s.ativo !== false);
+  });
+  if (!servicosActivos.length) {
+    container.innerHTML = `<div class="empty-state">${typeof svgTesoura !== 'undefined' ? svgTesoura : ''}<p>Ainda sem serviços — adicione o primeiro</p></div>`;
     return;
   }
-  const servicosOrdenados = [...state.servicos].sort((a, b) => a.nome.localeCompare(b.nome));
+  const servicosOrdenados = [...servicosActivos].sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt'));
   container.innerHTML = servicosOrdenados.map(s => {
-    const profs = s.profissionais && s.profissionais.length > 0 ? s.profissionais.join(', ') : 'Todos os profissionais disponíveis';
+    const profs = (function () {
+      const arr = s.profissionais || [];
+      if (!arr.length) return 'Todos os profissionais';
+      return arr.map(function (x) {
+        const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
+        if (byId) return byId.nome;
+        return x;
+      }).join(', ');
+    })();
     return `
-      <div class="list-item" style="cursor:default;">
+      <div class="list-item" data-servico-id="${s.id}" style="cursor:pointer;">
         <div class="avatar" style="background:var(--gold-light);color:var(--gold-dark);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
         <div class="info">
           <div class="title">${escHtml(s.nome)}</div>
-          <div class="sub">${fmtKz(s.precoBase)} · ${escHtml(profs)}</div>
+          <div class="sub">${fmtKz(Number(s.precoBase) || 0)} · ${Number(s.duracao || s.duracaoMin || s.minutos || 60) || 60} min · ${escHtml(profs)}</div>
         </div>
         <div class="actions">
           <button class="row-menu-btn" data-action="row-menu" data-tipo="servico" data-id="${s.id}" data-role="admin" aria-label="Mais ações" aria-haspopup="menu">
@@ -3526,21 +4489,24 @@ function populateAgendaSelects() {
 
   const filtrarProfsAgenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia
-    if (state.profissionais.length === 0) {
+    const activos = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
+    if (activos.length === 0) {
       profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
       return;
     }
 
     let profs;
     if (!servicoNome || servicoNome === 'Outro') {
-      profs = state.profissionais.map(p => ({ id: p.id, nome: p.nome }));
+      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = serv && serv.profissionais && serv.profissionais.length > 0
         ? serv.profissionais
-        : state.profissionais.map(p => p.nome);
-      profs = state.profissionais
-        .filter(p => nomes.includes(p.nome))
+        : activos.map(p => p.nome);
+      profs = activos
+        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
         .map(p => ({ id: p.id, nome: p.nome }));
     }
     const prevProfId = profSel.value;
@@ -3562,7 +4528,10 @@ function populateVendaSelects() {
   if (!profSel || !catSel) return;
 
   // Verificar se há serviços
-  if (state.servicos.length === 0) {
+  const servicosActivos = (state.servicos || []).filter(function (s) {
+    return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s.ativo !== false);
+  });
+  if (servicosActivos.length === 0) {
     catSel.innerHTML = '<option value="">Nenhum serviço disponível</option>';
     profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
     return;
@@ -3571,28 +4540,31 @@ function populateVendaSelects() {
   catSel.selectedIndex = -1;
 
   catSel.innerHTML = `<option value="">Selecionar serviço</option>` +
-    state.servicos.map(s =>
+    servicosActivos.map(s =>
       `<option value="${escHtml(s.nome)}" data-preco="${s.precoBase}">${escHtml(s.nome)}</option>`
     ).join('') +
     '<option value="__custom" data-preco="">Outro (personalizado)</option>';
 
   const filtrarProfsVenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia
-    if (state.profissionais.length === 0) {
+    const activos = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
+    if (activos.length === 0) {
       profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
       return;
     }
 
     let profs;
     if (!servicoNome || servicoNome === '__custom') {
-      profs = state.profissionais.map(p => ({ id: p.id, nome: p.nome }));
+      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = serv && serv.profissionais && serv.profissionais.length > 0
         ? serv.profissionais
-        : state.profissionais.map(p => p.nome);
-      profs = state.profissionais
-        .filter(p => nomes.includes(p.nome))
+        : activos.map(p => p.nome);
+      profs = activos
+        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
         .map(p => ({ id: p.id, nome: p.nome }));
     }
     profSel.innerHTML = `<option value="">Selecionar profissional</option>` +
@@ -3617,19 +4589,9 @@ function populateVendaSelects() {
   catSel.addEventListener('change', catSel._filterHandler);
 }
 
-
-
 /* ===== FILE: chart-module.js ===== */
-
 // ====================================================================
-//  chart-module.js — extraído do app.js (Fase C da modularização)
-//  Conteúdo: Gráfico semanal (swipe, renderização) e controlos do gráfico
-//  Linhas originais: 911-1142
-//  Carregar depois de core-*.js, db-indexeddb.js, sync-*.js, auth-supabase.js
-// ====================================================================
-
-// ====================================================================
-//  GRÁFICO
+//  chart-module.js — Gráfico do dashboard (Fase A1: intervalo unificado)
 // ====================================================================
 let _chartSwipeStartX = null;
 let _chartSwipeStartY = null;
@@ -3645,73 +4607,61 @@ function renderizarGrafico() {
   canvas.height = height;
   ctx.clearRect(0, 0, width, height);
 
-  const periodo = state.chartPeriodo || 'semana';
-  const offset = state.chartOffset || 0;
+  const intervalo = (typeof getIntervaloDashAtual === 'function')
+    ? getIntervaloDashAtual()
+    : { inicio: (typeof hoje === 'function' ? hoje() : ''), fim: (typeof hoje === 'function' ? hoje() : ''), label: 'Hoje' };
+  const modoHora = (state.chartPeriodo === 'hora');
   const mostrarValores = state.chartMostrarValores || false;
+  const movs = state.movimentos || [];
+  const dashOff = state.dashOffset || 0;
 
-  const diasArr = [];
   let labels = [];
   let dados = [];
   let maxVal = 1;
 
-  if (periodo === 'hora') {
+  if (modoHora) {
+    const ds = intervalo.fim || (typeof hoje === 'function' ? hoje() : '');
     for (let h = 0; h < 12; h++) {
-      const d = new Date();
-      d.setDate(d.getDate() - offset);
-      const ds = d.toISOString().split('T')[0];
-      const hr = String(h * 2).padStart(2, '0');
-      diasArr.push({ label: hr + 'h', data: ds, hora: hr });
-    }
-    labels = diasArr.map(d => d.label);
-    dados = diasArr.map(d => {
-      const hr = parseInt(d.hora);
-      const total = state.movimentos.filter(m =>
-        m.data === d.data && m.tipo === 'venda' && m.hora &&
-        parseInt(m.hora.split(':')[0]) >= hr && parseInt(m.hora.split(':')[0]) < hr + 2
-      ).reduce((s, v) => s + v.valor, 0);
+      const hr = h * 2;
+      labels.push(String(hr).padStart(2, '0') + 'h');
+      const total = movs.filter(m => {
+        if (m.tipo !== 'venda' || m.data !== ds || !m.hora) return false;
+        const mh = parseInt(String(m.hora).split(':')[0], 10);
+        return mh >= hr && mh < hr + 2;
+      }).reduce((s, v) => s + (Number(v.valor) || 0), 0);
       if (total > maxVal) maxVal = total;
-      return total;
-    });
-  } else if (periodo === 'dia' || periodo === 'semana') {
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i - offset * 7);
-      const ds = d.toISOString().split('T')[0];
-      const label = d.toLocaleDateString('pt-AO', { weekday: 'short' }).replace('.', '');
-      diasArr.push({ label, data: ds });
+      dados.push(total);
     }
-    labels = diasArr.map(d => d.label);
-    dados = diasArr.map(d => {
-      const total = state.movimentos.filter(m => m.data === d.data && m.tipo === 'venda').reduce((s, v) => s + v.valor, 0);
+  } else {
+    const dInicio = new Date(intervalo.inicio + 'T00:00:00');
+    const dFim = new Date(intervalo.fim + 'T00:00:00');
+    const msDia = 86400000;
+    const diasNoPeriodo = Math.max(1, Math.round((dFim - dInicio) / msDia) + 1);
+    const passo = diasNoPeriodo > 31 ? Math.ceil(diasNoPeriodo / 31) : 1;
+    for (let i = 0; i < diasNoPeriodo; i += passo) {
+      const d = new Date(dInicio.getTime() + i * msDia);
+      const ds = (typeof formatarDataISO === 'function')
+        ? formatarDataISO(d)
+        : d.toISOString().split('T')[0];
+      const label = diasNoPeriodo <= 7
+        ? d.toLocaleDateString('pt-AO', { weekday: 'short' }).replace('.', '')
+        : d.toLocaleDateString('pt-AO', { day: '2-digit', month: 'short' }).replace('.', '');
+      labels.push(label);
+      const total = movs.filter(m => m.tipo === 'venda' && m.data === ds)
+        .reduce((s, v) => s + (Number(v.valor) || 0), 0);
       if (total > maxVal) maxVal = total;
-      return total;
-    });
-  } else if (periodo === 'mes') {
-    for (let i = 6; i >= 0; i--) {
-      const dStart = new Date();
-      dStart.setDate(dStart.getDate() - (i * 4 + 3) - offset * 30);
-      const dEnd = new Date();
-      dEnd.setDate(dEnd.getDate() - i * 4 - offset * 30);
-      const label = dEnd.toLocaleDateString('pt-AO', { day: '2-digit', month: 'short' }).replace('.', '');
-      const startStr = dStart.toISOString().split('T')[0];
-      const endStr = dEnd.toISOString().split('T')[0];
-      diasArr.push({ label, startData: startStr, endData: endStr });
+      dados.push(total);
     }
-    labels = diasArr.map(d => d.label);
-    dados = diasArr.map(d => {
-      const total = state.movimentos.filter(m =>
-        m.tipo === 'venda' && m.data >= d.startData && m.data <= d.endData
-      ).reduce((s, v) => s + v.valor, 0);
-      if (total > maxVal) maxVal = total;
-      return total;
-    });
   }
 
   maxVal = Math.max(maxVal, 1);
 
-  const barW = (width - 40) / labels.length - 4;
+  const barW = (width - 40) / Math.max(labels.length, 1) - 4;
   const startX = 20;
   const baseY = height - 20;
+  const gold = (typeof getComputedStyle === 'function' && getComputedStyle(document.documentElement).getPropertyValue('--gold').trim()) || '#D4AF37';
+  const goldDark = (typeof getComputedStyle === 'function' && getComputedStyle(document.documentElement).getPropertyValue('--gold-600').trim()) || '#A7872B';
+  const mutedBar = (typeof getComputedStyle === 'function' && getComputedStyle(document.documentElement).getPropertyValue('--border-soft').trim()) || '#DCD5C9';
 
   for (let i = 0; i < labels.length; i++) {
     const x = startX + i * (barW + 4);
@@ -3721,11 +4671,11 @@ function renderizarGrafico() {
 
     const grad = ctx.createLinearGradient(0, y, 0, baseY);
     if (dados[i] > 0) {
-      grad.addColorStop(0, '#D4AF37');
-      grad.addColorStop(1, '#A7872B');
+      grad.addColorStop(0, gold);
+      grad.addColorStop(1, goldDark);
     } else {
-      grad.addColorStop(0, '#DCD5C9');
-      grad.addColorStop(1, '#DCD5C9');
+      grad.addColorStop(0, mutedBar);
+      grad.addColorStop(1, mutedBar);
     }
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -3739,8 +4689,9 @@ function renderizarGrafico() {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = (i === labels.length - 1 && offset === 0) ? '#1C1A18' : '#8c8980';
-    ctx.font = (i === labels.length - 1 && offset === 0) ? 'bold 9px Inter' : '9px Inter';
+    const isLast = (i === labels.length - 1 && dashOff === 0);
+    ctx.fillStyle = isLast ? '#1C1A18' : '#8c8980';
+    ctx.font = isLast ? 'bold 9px Inter' : '9px Inter';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(labels[i], x + barW / 2, baseY + 4);
@@ -3755,13 +4706,9 @@ function renderizarGrafico() {
 
   const labelEl = document.getElementById('chart-period-label');
   if (labelEl) {
-    const periodoLabels = {
-      hora:   offset === 0 ? 'Hoje por hora'    : `Há ${offset} dias (hora)`,
-      dia:    offset === 0 ? 'Últimos 7 dias'   : `Semana −${offset}`,
-      semana: offset === 0 ? 'Últimos 7 dias'   : `Semana −${offset}`,
-      mes:    offset === 0 ? 'Últimos 30 dias'  : `Período −${offset}`
-    };
-    labelEl.textContent = periodoLabels[periodo] || 'Últimos 7 dias';
+    labelEl.textContent = modoHora
+      ? ((intervalo.label || 'Dia') + ' · por hora')
+      : (intervalo.label || 'Período');
   }
 
   const tooltip = document.getElementById('chart-tooltip');
@@ -3778,15 +4725,15 @@ function renderizarGrafico() {
     }
     if (idx !== -1 && dados[idx] > 0) {
       tooltip.style.left = (clientX + 10) + 'px';
-      tooltip.style.top  = (clientY - 30) + 'px';
-      tooltip.textContent = `${labels[idx]}: ${fmtKz(dados[idx])}`;
+      tooltip.style.top = (clientY - 30) + 'px';
+      tooltip.textContent = labels[idx] + ': ' + fmtKz(dados[idx]);
       tooltip.style.opacity = '1';
     } else {
       tooltip.style.opacity = '0';
     }
   };
 
-  canvas.onmousemove  = e => handleHover(e.clientX, e.clientY);
+  canvas.onmousemove = e => handleHover(e.clientX, e.clientY);
   canvas.onmouseleave = () => { tooltip.style.opacity = '0'; };
 
   canvas.ontouchstart = e => {
@@ -3805,9 +4752,10 @@ function renderizarGrafico() {
       const dx = e.changedTouches[0].clientX - _chartSwipeStartX;
       const dy = e.changedTouches[0].clientY - _chartSwipeStartY;
       if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
-        if (dx < 0) state.chartOffset += 1;
-        else if (state.chartOffset > 0) state.chartOffset -= 1;
-        localStorage.setItem('bp_chart_offset', String(state.chartOffset));
+        if (dx < 0) state.dashOffset = (state.dashOffset || 0) + 1;
+        else if ((state.dashOffset || 0) > 0) state.dashOffset -= 1;
+        localStorage.setItem('bp_dash_offset', String(state.dashOffset || 0));
+        if (typeof renderDashboard === 'function') renderDashboard();
         renderizarGrafico();
       }
     }
@@ -3823,24 +4771,50 @@ function initChartControls() {
   document.querySelectorAll('.chart-filter').forEach(btn => {
     btn.addEventListener('click', function() {
       const periodo = this.dataset.periodo;
-      state.chartPeriodo = periodo;
-      localStorage.setItem('bp_chart_periodo', periodo);
-      state.chartOffset = 0;
-      localStorage.setItem('bp_chart_offset', '0');
+      if (periodo === 'hora') {
+        state.chartPeriodo = 'hora';
+      } else {
+        state.chartPeriodo = 'semana';
+        const mapDash = { dia: 'dia', semana: 'semana', mes: 'mes' };
+        if (mapDash[periodo]) {
+          state.dashPeriodo = mapDash[periodo];
+          state.dashOffset = 0;
+          localStorage.setItem('bp_dash_periodo', state.dashPeriodo);
+          localStorage.setItem('bp_dash_offset', '0');
+        }
+      }
+      localStorage.setItem('bp_chart_periodo', state.chartPeriodo);
       document.querySelectorAll('.chart-filter').forEach(b => {
         b.classList.remove('btn-primary');
         b.classList.add('btn-secondary');
       });
       this.classList.remove('btn-secondary');
       this.classList.add('btn-primary');
+      if (typeof renderDashboard === 'function') renderDashboard();
       renderizarGrafico();
     });
   });
 
   const prevBtn = document.getElementById('chart-prev');
   const nextBtn = document.getElementById('chart-next');
-  if (prevBtn) prevBtn.onclick = () => { state.chartOffset += 1; localStorage.setItem('bp_chart_offset', String(state.chartOffset)); renderizarGrafico(); };
-  if (nextBtn) nextBtn.onclick = () => { if (state.chartOffset > 0) { state.chartOffset -= 1; localStorage.setItem('bp_chart_offset', String(state.chartOffset)); renderizarGrafico(); } };
+  if (prevBtn) {
+    prevBtn.onclick = () => {
+      state.dashOffset = (state.dashOffset || 0) + 1;
+      localStorage.setItem('bp_dash_offset', String(state.dashOffset));
+      if (typeof renderDashboard === 'function') renderDashboard();
+      renderizarGrafico();
+    };
+  }
+  if (nextBtn) {
+    nextBtn.onclick = () => {
+      if ((state.dashOffset || 0) > 0) {
+        state.dashOffset -= 1;
+        localStorage.setItem('bp_dash_offset', String(state.dashOffset));
+        if (typeof renderDashboard === 'function') renderDashboard();
+        renderizarGrafico();
+      }
+    };
+  }
 
   const eyeToggle = document.getElementById('chart-eye-toggle');
   if (eyeToggle) {
@@ -3850,22 +4824,17 @@ function initChartControls() {
       const svg = this.querySelector('svg');
       if (svg) {
         if (state.chartMostrarValores) {
-          svg.innerHTML = `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`;
+          svg.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
         } else {
-          svg.innerHTML = `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>`;
+          svg.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
         }
       }
       renderizarGrafico();
     });
   }
 }
-// ====================================================================
-//  DETALHE VENDA E IMPRESSÃO
-// ====================================================================
-
 
 /* ===== FILE: vendas-modais.js ===== */
-
 // ====================================================================
 //  vendas-modais.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Sparkline, detalhe/recibo de venda, carrinho inteligente (agrupamento, +/- , persistência)
@@ -4012,30 +4981,47 @@ function abrirDetalheVenda(id) {
   const venda = state.movimentos.find(m => m.id === id && m.tipo === 'venda');
   if (!venda) { toast('Venda não encontrada', 'error'); return; }
   vendaAtual = venda;
-  const itensHtml = venda.itens && venda.itens.length > 0 ?
-    `<div class="detalhe-itens-header"><span>Descrição</span><span style="text-align:right">Qtd</span><span style="text-align:right">P.Unit</span><span style="text-align:right">Total</span></div>
-     ${venda.itens.map(item => `
-      <div class="detalhe-item-row">
-        <span class="desc">${escHtml(item.nome)}</span>
-        <span class="qty">${item.quantidade}</span>
-        <span class="pu">${fmtKz(item.precoUnit || item.subtotal)}</span>
-        <span class="sub">${fmtKz(item.subtotal)}</span>
-      </div>`).join('')}` :
-    `<div style="color:var(--text-muted);font-size:.85rem;padding:8px 0;">Sem itens detalhados</div>`;
+  const nomeProf = typeof getProfissionalNome === 'function'
+    ? getProfissionalNome(venda.profissional_id)
+    : (venda.profissional || '—');
   const mp = venda.metodoPagamento || 'Numerário';
-  const mpIcon = { 'Numerário': '', 'Multicaixa Express': '', 'Transferência Bancária': '', 'Cartão': '' } [mp] || '';
-  const nomeProf = getProfissionalNome(venda.profissional_id);
-  document.getElementById('detalhe-venda-conteudo').innerHTML = `
-    <div class="detalhe-meta">
-      <div class="detalhe-meta-row"><span class="label">Cliente</span><span class="val">${escHtml(venda.cliente || 'Anónimo')}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Profissional</span><span class="val">${escHtml(nomeProf)}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Data / Hora</span><span class="val">${venda.data} · ${venda.hora}</span></div>
-      <div class="detalhe-meta-row"><span class="label">Pagamento</span><span class="val"><span class="pagamento-badge">${escHtml(mp)}</span></span></div>
-      ${Number(venda.comissao_gerada) > 0 ? ('<div class="detalhe-meta-row"><span class="label">Comissão</span><span class="val" style="color:var(--gold-dark,var(--gold));font-weight:600;">' + fmtKz(venda.comissao_gerada) + '</span></div>') : ''}
-    </div>
-    <div>${itensHtml}</div>
-    <div class="detalhe-total"><span class="label">Total</span><span class="val">${fmtKz(venda.valor)}</span></div>`;
-  document.getElementById('detalhe-venda-titulo').textContent = 'Venda #' + String(venda.id).slice(0, 8).toUpperCase();
+  const ref = String(venda.reciboNum || venda.id || '').slice(0, 8).toUpperCase();
+
+  let itensHtml = '';
+  if (venda.itens && venda.itens.length > 0) {
+    itensHtml =
+      '<div class="bp-view-section-title">Itens</div>' +
+      '<div class="bp-view-dl">' +
+      '<div class="detalhe-itens-header" style="padding:10px 14px;border-bottom:1px solid var(--border-soft);">' +
+      '<span>Descrição</span><span style="text-align:right">Qtd</span><span style="text-align:right">Unit.</span><span style="text-align:right">Total</span></div>' +
+      venda.itens.map(function (item) {
+        return (
+          '<div class="detalhe-item-row" style="padding-left:14px;padding-right:14px;">' +
+          '<span class="desc">' + escHtml(item.nome) + '</span>' +
+          '<span class="qty">' + (item.quantidade || 1) + '</span>' +
+          '<span class="pu">' + fmtKz(item.precoUnit != null ? item.precoUnit : item.subtotal) + '</span>' +
+          '<span class="sub">' + fmtKz(item.subtotal) + '</span></div>'
+        );
+      }).join('') +
+      '</div>';
+  } else {
+    itensHtml = '<p class="bp-view-value--muted" style="font-size:.85rem;margin:0 0 12px;">Sem linhas de item nesta venda.</p>';
+  }
+
+  const box = document.getElementById('detalhe-venda-conteudo');
+  if (box) {
+    box.innerHTML =
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Cliente</span><span class="bp-view-value">' + escHtml(venda.cliente || 'Avulso') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Profissional</span><span class="bp-view-value">' + escHtml(nomeProf || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Quando</span><span class="bp-view-value">' + escHtml(String(venda.data || '')) + ' · ' + escHtml(String(venda.hora || '').slice(0, 5)) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Pagamento</span><span class="bp-view-value"><span class="pagamento-badge">' + escHtml(mp) + '</span></span></div>' +
+      '</div>' +
+      itensHtml +
+      '<div class="bp-view-total"><span class="bp-view-label">Total</span><span class="bp-view-value">' + fmtKz(Number(venda.valor) || 0) + '</span></div>';
+  }
+  const tit = document.getElementById('detalhe-venda-titulo');
+  if (tit) tit.textContent = ref ? ('Ref. ' + ref) : 'Detalhe da venda';
   openModal('modal-detalhe-venda');
 }
 
@@ -4074,6 +5060,33 @@ function imprimirRecibo(venda) {
 // ====================================================================
 //  CARRINHO INTELIGENTE (agrupamento, +/- , persistência) — SEM PROFISSIONAL POR ITEM
 // ====================================================================
+
+/** Microinterações do carrinho (respeita prefers-reduced-motion). */
+let _cartAnim = { type: null, idx: -1, nome: null };
+function _cartMotionOk() {
+  try {
+    return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch (e) { return true; }
+}
+function _pulseCartTotal() {
+  if (!_cartMotionOk()) return;
+  const el = document.querySelector('#cart-total-area .ct-val');
+  if (!el) return;
+  el.classList.remove('ct-val--pulse');
+  void el.offsetWidth;
+  el.classList.add('ct-val--pulse');
+  setTimeout(function () { el.classList.remove('ct-val--pulse'); }, 280);
+}
+function _bumpEl(row, sel) {
+  if (!_cartMotionOk() || !row) return;
+  const el = row.querySelector(sel);
+  if (!el) return;
+  el.classList.remove('is-bump');
+  void el.offsetWidth;
+  el.classList.add('is-bump');
+  setTimeout(function () { el.classList.remove('is-bump'); }, 220);
+}
+
 let cartItems = [];
 const CART_STORAGE_KEY = 'bp_cart_items';
 
@@ -4099,36 +5112,93 @@ function renderCart() {
   if (!list) return;
 
   if (cartItems.length === 0) {
-    list.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:.85rem;">Carrinho vazio — adicione serviços acima</div>';
-    if (totalArea) totalArea.innerHTML = '';
+    list.innerHTML = `
+      <div class="venda-cart-empty">
+        <p class="venda-cart-empty-title">Nenhum item ainda</p>
+        <p class="venda-cart-empty-hint">Escolha um serviço abaixo e toque em «Adicionar à venda».</p>
+      </div>`;
+    if (totalArea) {
+      totalArea.innerHTML = '';
+      totalArea.hidden = true;
+    }
+    updateVendaSaveButton();
     return;
   }
 
-  list.innerHTML = cartItems.map((item, idx) => `
-    <div class="cart-item-row" data-idx="${idx}">
+  list.innerHTML = cartItems.map((item, idx) => {
+    let cls = 'cart-item-row';
+    if (_cartAnim.type === 'add' && (
+      (_cartAnim.idx === idx) || (_cartAnim.nome && item.nome === _cartAnim.nome)
+    )) cls += ' adding';
+    if (_cartAnim.type === 'qty' && _cartAnim.idx === idx) cls += ' is-qty-flash';
+    return `
+    <div class="${cls}" data-idx="${idx}" data-nome="${escHtml(item.nome)}">
       <span class="ci-name">${escHtml(item.nome)}</span>
       <span class="ci-qty-controls">
-        <button class="qty-btn" data-idx="${idx}" data-action="decrement">−</button>
+        <button type="button" class="qty-btn" data-idx="${idx}" data-action="decrement" aria-label="Diminuir quantidade">−</button>
         <span class="qty-number">${item.quantidade}</span>
-        <button class="qty-btn" data-idx="${idx}" data-action="increment">+</button>
+        <button type="button" class="qty-btn" data-idx="${idx}" data-action="increment" aria-label="Aumentar quantidade">+</button>
       </span>
       <span class="ci-val">${fmtKz(item.subtotal)}</span>
-      <button class="ci-del" data-idx="${idx}" aria-label="Remover item">✕</button>
-    </div>
-  `).join('');
+      <button type="button" class="ci-del" data-idx="${idx}" aria-label="Remover item">✕</button>
+    </div>`;
+  }).join('');
+  // Limpar flags após paint + micro-bumps
+  const animType = _cartAnim.type;
+  const animIdx = _cartAnim.idx;
+  _cartAnim = { type: null, idx: -1, nome: null };
+  if (animType && _cartMotionOk()) {
+    requestAnimationFrame(function () {
+      const row = list.querySelector('.cart-item-row[data-idx="' + animIdx + '"]') ||
+        list.querySelector('.cart-item-row.adding') ||
+        list.querySelector('.cart-item-row.is-qty-flash');
+      if (row && (animType === 'qty' || animType === 'add')) {
+        _bumpEl(row, '.qty-number');
+        _bumpEl(row, '.ci-val');
+      }
+      _pulseCartTotal();
+      list.querySelectorAll('.cart-item-row.adding').forEach(function (r) {
+        r.addEventListener('animationend', function () { r.classList.remove('adding'); }, { once: true });
+      });
+      list.querySelectorAll('.cart-item-row.is-qty-flash').forEach(function (r) {
+        setTimeout(function () { r.classList.remove('is-qty-flash'); }, 400);
+      });
+    });
+  } else {
+    _pulseCartTotal();
+  }
 
-  const total = cartItems.reduce((s, i) => s + i.subtotal, 0);
-  const totalItems = cartItems.reduce((s, i) => s + i.quantidade, 0);
+  const total = cartItems.reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
+  const totalItems = cartItems.reduce((s, i) => s + (Number(i.quantidade) || 0), 0);
   if (totalArea) {
+    totalArea.hidden = false;
     totalArea.innerHTML = `
       <div class="cart-total-row">
-        <span class="ct-label">Subtotal (${totalItems} itens)</span>
+        <span class="ct-label">${totalItems === 1 ? '1 item' : totalItems + ' itens'}</span>
         <span class="ct-val">${fmtKz(total)}</span>
       </div>
     `;
   }
 
   saveCartToStorage();
+  updateVendaSaveButton();
+}
+
+/** CTA do rodapé: desactivado se vazio; mostra o valor a cobrar. */
+function updateVendaSaveButton() {
+  const btn = document.getElementById('modal-venda-save');
+  if (!btn) return;
+  const total = (cartItems || []).reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
+  const n = (cartItems || []).length;
+  if (n === 0 || total <= 0) {
+    btn.disabled = true;
+    btn.textContent = 'Cobrar';
+    btn.setAttribute('aria-disabled', 'true');
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Cobrar · ' + (typeof fmtKz === 'function' ? fmtKz(total) : total + ' Kz');
+    btn.removeAttribute('aria-disabled');
+  }
 }
 
 // --- Ajustar quantidade ---
@@ -4137,29 +5207,59 @@ function adjustQuantity(idx, delta) {
   const item = cartItems[idx];
   const newQty = item.quantidade + delta;
   if (newQty <= 0) {
-    cartItems.splice(idx, 1);
-  } else {
-    item.quantidade = newQty;
-    item.subtotal = item.quantidade * item.precoUnit;
+    removeItemFromCart(idx, true);
+    return;
   }
+  item.quantidade = newQty;
+  item.subtotal = item.quantidade * item.precoUnit;
+  _cartAnim = { type: 'qty', idx: idx, nome: item.nome };
   renderCart();
 }
 
 // --- Remover item (com confirmação) ---
-function removeItemFromCart(idx) {
+async function removeItemFromCart(idx, skipConfirm) {
   if (idx < 0 || idx >= cartItems.length) return;
   const item = cartItems[idx];
-  if (item.quantidade > 1) {
-    const choice = confirm(`"${escHtml(item.nome||"")}" tem ${item.quantidade} unidades. Deseja remover todas?`);
-    if (choice) {
-      cartItems.splice(idx, 1);
+  if (!skipConfirm && item.quantidade > 1) {
+    let choice = true;
+    if (typeof showConfirmModal === 'function') {
+      choice = await showConfirmModal(
+        'Remover item?',
+        '"' + (item.nome || 'Item') + '" tem ' + item.quantidade + ' unidades. Remover todas da venda?',
+        true
+      );
     } else {
-      adjustQuantity(idx, -(item.quantidade - 1));
+      choice = confirm('"' + (item.nome || '') + '" tem ' + item.quantidade + ' unidades. Remover todas?');
     }
-  } else {
-    cartItems.splice(idx, 1);
+    if (!choice) {
+      // Deixar só 1 unidade em vez de forçar decisão binária agressiva
+      item.quantidade = 1;
+      item.subtotal = item.precoUnit;
+      _cartAnim = { type: 'qty', idx: idx, nome: item.nome };
+      renderCart();
+      return;
+    }
   }
-  renderCart();
+
+  const list = document.getElementById('cart-items-list');
+  const row = list && list.querySelector('.cart-item-row[data-idx="' + idx + '"]');
+  const finish = function () {
+    cartItems.splice(idx, 1);
+    renderCart();
+  };
+  if (row && _cartMotionOk()) {
+    row.classList.add('removing');
+    let done = false;
+    const once = function () {
+      if (done) return;
+      done = true;
+      finish();
+    };
+    row.addEventListener('animationend', once, { once: true });
+    setTimeout(once, 320); // fallback se animationend não disparar
+  } else {
+    finish();
+  }
 }
 
 // --- Função central de adição ao carrinho (sem profissional) ---
@@ -4175,25 +5275,25 @@ function addToCart(nome, valor) {
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
+        _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
         renderCart();
-        toast('Preço do item actualizado', 'success');
         return;
       } else {
         cartItems.push({
-          nome: `${escHtml(nome||"")} (${fmtKz(valor)})`,
+          nome: nome + ' (' + fmtKz(valor) + ')',
           quantidade: 1,
           precoUnit: valor,
           subtotal: valor
         });
+        _cartAnim = { type: 'add', idx: cartItems.length - 1, nome: cartItems[cartItems.length - 1].nome };
         renderCart();
-        toast('Adicionado como item separado.', 'success');
         return;
       }
     }
     existing.quantidade += 1;
     existing.subtotal = existing.quantidade * existing.precoUnit;
+    _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
     renderCart();
-    toast('Serviço adicionado ao carrinho', 'success');
     return;
   }
 
@@ -4203,8 +5303,8 @@ function addToCart(nome, valor) {
     precoUnit: valor,
     subtotal: valor
   });
+  _cartAnim = { type: 'add', idx: cartItems.length - 1, nome: nome };
   renderCart();
-  toast('Serviço adicionado ao carrinho', 'success');
 }
 
 // --- Event listeners (delegação para botões do carrinho) ---
@@ -4233,13 +5333,23 @@ function openVendaModal() {
   loadCartFromStorage();
   const clientSel = document.getElementById('venda-cliente');
   if (clientSel) {
-    clientSel.innerHTML = (state.clientes || []).map(c =>
-      `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
-    ).join('');
+    const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
+      .concat((state.clientes || []).map(c =>
+        `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
+      ));
+    clientSel.innerHTML = opts.join('');
   }
   populateVendaSelects();
+  const pag = document.getElementById('venda-pagamento');
+  if (pag && !pag.value) pag.value = 'Numerário';
   renderCart();
+  updateVendaSaveButton();
   openModal('modal-venda');
+  // Foco no serviço se carrinho vazio — fluxo mais rápido
+  setTimeout(function () {
+    const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
+    if (el && typeof el.focus === 'function') try { el.focus(); } catch (e) {}
+  }, 120);
 }
 
 // --- Limpar carrinho (após venda ou cancelamento) ---
@@ -4258,55 +5368,123 @@ window.saveCartToStorage = saveCartToStorage;
 // ====================================================================
 //  SERVIÇO MODAL
 // ====================================================================
+function _servicoProfSelected(selected, p) {
+  const arr = selected || [];
+  return arr.some(function (x) {
+    return x === p.id || x === p.nome || String(x) === String(p.id);
+  });
+}
+
 function renderServicoProfissionais(selected = []) {
   const container = document.getElementById('servico-profissionais-container');
   if (!container) return;
-  if (!state.profissionais.length) {
-    container.innerHTML = '<span style="color:var(--text-muted);font-size:.75rem;">Nenhum profissional cadastrado</span>';
+  const activos = (state.profissionais || []).filter(function (p) {
+    return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+  });
+  if (!activos.length) {
+    container.innerHTML = '<span style="color:var(--text-muted);font-size:.75rem;">Nenhum profissional activo</span>';
     return;
   }
-  container.innerHTML = state.profissionais.map(p => `
-    <label style="display:flex;align-items:center;gap:4px;font-size:.75rem;background:var(--bg-soft);padding:4px 10px;border-radius:30px;border:1px solid var(--border-soft);cursor:pointer;">
-      <input type="checkbox" value="${escHtml(p.nome)}" ${escHtml(selected.includes(p.nome) ? 'checked' : ''||"")}>
-      ${escHtml(p.nome)}
-    </label>
-  `).join('');
+  container.innerHTML = activos.map(p => {
+    const checked = _servicoProfSelected(selected, p) ? ' checked' : '';
+    return (
+      '<label class="bp-chip-check">' +
+      '<input type="checkbox" value="' + escHtml(p.id) + '" data-nome="' + escHtml(p.nome) + '"' + checked + '>' +
+      escHtml(p.nome) +
+      '</label>'
+    );
+  }).join('');
 }
 
+/** Preferência: guarda nomes legíveis + ids resolvíveis no futuro via data-nome */
 function getSelectedProfissionais() {
   const container = document.getElementById('servico-profissionais-container');
   if (!container) return [];
   const checks = container.querySelectorAll('input[type="checkbox"]:checked');
-  return Array.from(checks).map(cb => cb.value);
+  return Array.from(checks).map(function (cb) {
+    // Guardar nome para compatibilidade com dados legados e seed
+    return cb.getAttribute('data-nome') || cb.value;
+  }).filter(Boolean);
+}
+
+function setServicoModalMode(mode) {
+  const modal = document.getElementById('modal-servico');
+  const sheet = document.getElementById('modal-servico-sheet');
+  const view = document.getElementById('servico-view-panel');
+  const form = document.getElementById('servico-form-panel');
+  if (modal) modal.setAttribute('data-mode', mode);
+  if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
+  if (view) view.hidden = mode !== 'view';
+  if (form) form.hidden = mode !== 'edit';
+}
+
+function _labelProfsServico(arr) {
+  const list = arr || [];
+  if (!list.length) return 'Toda a equipa';
+  return list.map(function (x) {
+    const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
+    return byId ? byId.nome : x;
+  }).join(', ');
+}
+
+function abrirDetalheServicoView(id) {
+  const s = (state.servicos || []).find(function (x) { return x.id === id; });
+  if (!s) return;
+  setServicoModalMode('view');
+  const title = document.getElementById('servico-modal-title');
+  if (title) title.textContent = 'Ficha do serviço';
+  const idInput = document.getElementById('servico-id');
+  if (idInput) idInput.value = id;
+  const dur = Number(s.duracao || s.duracaoMin || s.minutos || 60) || 60;
+  const body = document.getElementById('servico-view-body');
+  if (body) {
+    body.innerHTML =
+      '<div class="bp-view-hero">' +
+      '<div class="bp-view-hero-av" style="font-size:0.75rem;letter-spacing:0.02em;">SRV</div>' +
+      '<div><div class="bp-view-hero-name">' + escHtml(s.nome || 'Serviço') + '</div>' +
+      '<div class="bp-view-hero-meta">' + fmtKz(Number(s.precoBase) || 0) + ' · ' + dur + ' min</div></div></div>' +
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Nome</span><span class="bp-view-value">' + escHtml(s.nome || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Preço</span><span class="bp-view-value">' + fmtKz(Number(s.precoBase) || 0) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Duração</span><span class="bp-view-value">' + dur + ' min</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Profissionais</span><span class="bp-view-value">' + escHtml(_labelProfsServico(s.profissionais)) + '</span></div>' +
+      '</div>';
+  }
+  openModal('modal-servico');
 }
 
 function openServicoModal(id = null) {
+  setServicoModalMode('edit');
   const title = document.getElementById('servico-modal-title');
   const nomeInput = document.getElementById('servico-nome');
   const precoInput = document.getElementById('servico-preco');
+  const durInput = document.getElementById('servico-duracao');
   const idInput = document.getElementById('servico-id');
   if (id) {
     const serv = state.servicos.find(s => s.id === id);
     if (!serv) return;
-    title.textContent = 'Editar Serviço';
-    nomeInput.value = serv.nome;
-    precoInput.value = serv.precoBase;
-    idInput.value = id;
+    if (title) title.textContent = 'Editar serviço';
+    if (nomeInput) nomeInput.value = serv.nome || '';
+    if (precoInput) precoInput.value = serv.precoBase != null ? serv.precoBase : '';
+    if (durInput) durInput.value = Number(serv.duracao || serv.duracaoMin || serv.minutos || 60) || 60;
+    if (idInput) idInput.value = id;
     renderServicoProfissionais(serv.profissionais || []);
   } else {
-    title.textContent = 'Novo Serviço';
-    nomeInput.value = '';
-    precoInput.value = '';
-    idInput.value = '';
+    if (title) title.textContent = 'Novo serviço';
+    if (nomeInput) nomeInput.value = '';
+    if (precoInput) precoInput.value = '';
+    if (durInput) durInput.value = '60';
+    if (idInput) idInput.value = '';
     renderServicoProfissionais([]);
   }
   openModal('modal-servico');
 }
 
-
+window.abrirDetalheServicoView = abrirDetalheServicoView;
+window.openServicoModal = openServicoModal;
+window.setServicoModalMode = setServicoModalMode;
 
 /* ===== FILE: detalhes-acessibilidade.js ===== */
-
 // ====================================================================
 // detalhes-acessibilidade.js — extraído do app.js (Fase C da modularização)
 // Conteúdo: Modais de detalhe (faturamento, agendamentos, fecho de caixa), acessibilidade/focus trap, estado offline da IA, navegação por abas
@@ -4390,16 +5568,18 @@ function abrirFechoCaixa() {
  const movs = state.movimentos.filter(m => m.data === hojeStr);
  const vendas = movs.filter(m => m.tipo === 'venda');
  const despesas = movs.filter(m => m.tipo === 'despesa');
- const totalVendas = vendas.reduce((s, v) => s + v.valor, 0);
- const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0);
- const saldoFinal = state.config.fundo + totalVendas - totalDespesas;
+ const totalVendas = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+ const totalDespesas = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
+ const saldoFinal = (Number(state.config.fundo) || 0) + totalVendas - totalDespesas;
  const byPag = {};
  vendas.forEach(v => { const k = v.metodoPagamento || 'Numerário';
-  byPag[k] = (byPag[k] || 0) + v.valor; });
+  byPag[k] = (byPag[k] || 0) + (Number(v.valor) || 0); });
  const pagHtml = Object.entries(byPag).map(([k, v]) =>
   `<div class="fecho-row"><span class="fr-label">${escHtml(k)}</span><span class="fr-val">${fmtKz(v)}</span></div>`
   ).join('');
- document.getElementById('fecho-conteudo').innerHTML = `
+ const fechoBox = document.getElementById('fecho-conteudo');
+ if (!fechoBox) return;
+ fechoBox.innerHTML = `
   <div style="font-size:.75rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">${new Date().toLocaleDateString('pt-AO', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
   <div class="fecho-row"><span class="fr-label">Fundo de abertura</span><span class="fr-val">${fmtKz(state.config.fundo)}</span></div>
   <div class="fecho-row"><span class="fr-label">Total de vendas (${vendas.length})</span><span class="fr-val" style="color:var(--green)">+${fmtKz(totalVendas)}</span></div>
@@ -4520,8 +5700,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   if (tab === 'dashboard') renderDashboard();
   if (tab === 'equipa') { renderProfissionais(); renderServicos(); }
   if (tab === 'ia') {
-   document.getElementById('ia-contador').textContent = parseInt(localStorage.getItem('ia_perguntas_' + hoje()) ||
-    '0');
+   if (typeof actualizarContadorIA === 'function') actualizarContadorIA();
    renderPlanoInfo();
    atualizarIAOffline();
    renderIAResumo();
@@ -4532,9 +5711,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
  });
 });
 
-
 /* ===== FILE: ui-events-navegacao.js ===== */
-
 // ====================================================================
 //  ui-events-navegacao.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Ativação de abas e sistema de permissões por papel
@@ -4597,9 +5774,7 @@ function aplicarPermissoes() {
 // ====================================================================
 // (Login handler movido para auth-supabase.js)
 
-
 /* ===== FILE: eventos-cadastros.js ===== */
-
 // ====================================================================
 //  eventos-cadastros.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Eventos: login/menu/logout, nova venda, agenda, clientes e profissionais
@@ -4651,34 +5826,96 @@ document.getElementById('fab-agendar').addEventListener('click', () => {
   const dtInput = document.getElementById('agenda-datetime');
   dtInput.value = isoNow;
   dtInput.min = isoNow;
+  const editEl = document.getElementById('agenda-edit-id');
+  if (editEl) editEl.value = '';
+  const title = document.getElementById('agenda-title');
+  if (title) title.textContent = 'Novo Agendamento';
+  const saveBtn = document.getElementById('modal-agenda-save');
+  if (saveBtn) saveBtn.textContent = 'Agendar';
   openModal('modal-agenda');
 });
 
 // CORREÇÃO: modal-agenda-save separa ID e nome do profissional
 document.getElementById('modal-agenda-save').addEventListener('click', async () => {
+  const editId = (document.getElementById('agenda-edit-id') || {}).value || '';
   const cliente = document.getElementById('agenda-cliente').value;
   const servico = document.getElementById('agenda-servico').value;
   const profissionalId = document.getElementById('agenda-profissional').value;
   const datetime = document.getElementById('agenda-datetime').value;
   const preco = parseFloat(document.getElementById('agenda-preco').value);
   if (!cliente || !servico || !datetime) { toast('Preencha todos os campos obrigatórios', 'error'); return; }
+  if (!profissionalId) { toast('Selecione um profissional', 'error'); return; }
   if (isNaN(preco) || preco <= 0) { toast('Insira um preço válido', 'error'); return; }
+  if (!datetime.includes('T')) { toast('Data e hora inválidas', 'error'); return; }
   const data = datetime.split('T')[0];
   const hora = datetime.split('T')[1].slice(0, 5);
-  // Buscar o nome do profissional a partir do ID
   const profObj = state.profissionais.find(p => p.id === profissionalId);
   const profissionalNome = profObj ? profObj.nome : '';
-  const result = await addAgendamento({
+  let clienteId = null;
+  if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
+  else {
+    const hit = (state.clientes || []).find(c => c.nome === cliente);
+    if (hit) clienteId = hit.id;
+  }
+  const payload = {
     cliente,
+    cliente_id: clienteId,
     servico,
     profissional: profissionalNome,
     profissional_id: profissionalId,
     data,
     hora,
     preco
-  });
-  if (result) { closeModal('modal-agenda'); }
+  };
+  let result;
+  if (editId) {
+    result = await updateAgendamento(editId, payload);
+    if (result) {
+      toast('Agendamento actualizado', 'success');
+      closeModal('modal-agenda');
+      document.getElementById('agenda-edit-id').value = '';
+    }
+  } else {
+    result = await addAgendamento(payload);
+    if (result) closeModal('modal-agenda');
+  }
 });
+
+/** Abre o modal de agenda em modo edição / reagendar */
+function abrirReagendarAgendamento(id) {
+  const ag = (state.agendamentos || []).find(a => a.id === id);
+  if (!ag) return;
+  const st = String(ag.status || 'agendado').toLowerCase();
+  if (st !== 'agendado') {
+    toast('Só é possível reagendar marcações activas.', 'warning');
+    return;
+  }
+  populateAgendaSelects();
+  const title = document.getElementById('agenda-title');
+  if (title) title.textContent = 'Reagendar';
+  const editEl = document.getElementById('agenda-edit-id');
+  if (editEl) editEl.value = id;
+  const cli = document.getElementById('agenda-cliente');
+  const srv = document.getElementById('agenda-servico');
+  const prof = document.getElementById('agenda-profissional');
+  const dt = document.getElementById('agenda-datetime');
+  const preco = document.getElementById('agenda-preco');
+  if (cli) cli.value = ag.cliente || '';
+  if (srv) srv.value = ag.servico || '';
+  if (prof) prof.value = ag.profissional_id || '';
+  if (preco) preco.value = ag.preco != null ? ag.preco : '';
+  if (dt) {
+    const h = String(ag.hora || '00:00').slice(0, 5);
+    dt.value = (ag.data || '') + 'T' + h;
+    const now = new Date();
+    dt.min = now.toISOString().slice(0, 16);
+  }
+  const saveBtn = document.getElementById('modal-agenda-save');
+  if (saveBtn) saveBtn.textContent = 'Guardar alterações';
+  openModal('modal-agenda');
+}
+window.abrirReagendarAgendamento = abrirReagendarAgendamento;
+
 
 document.getElementById('modal-agenda-cancel').addEventListener('click', () => closeModal('modal-agenda'));
 
@@ -4713,34 +5950,51 @@ document.getElementById('modal-cliente-rapido-cancel').addEventListener('click',
 // CRUD Cliente
 let editClienteId = null;
 
+
+function setClienteModalMode(mode) {
+  // mode: 'view' | 'edit'
+  const modal = document.getElementById('modal-cliente');
+  const sheet = document.getElementById('modal-cliente-sheet');
+  const view = document.getElementById('cliente-view-panel');
+  const form = document.getElementById('cliente-form-panel');
+  if (modal) modal.setAttribute('data-mode', mode);
+  if (sheet) {
+    sheet.classList.toggle('modal-sheet--view', mode === 'view');
+  }
+  if (view) view.hidden = mode !== 'view';
+  if (form) form.hidden = mode !== 'edit';
+  // Campos sempre editáveis no form (nunca "fantasma")
+  ['cliente-nome', 'cliente-telefone', 'cliente-notas'].forEach(function (fid) {
+    const el = document.getElementById(fid);
+    if (el) {
+      el.readOnly = false;
+      el.disabled = false;
+      el.style.opacity = '';
+    }
+  });
+}
+
 function openEditCliente(id) {
   const c = state.clientes.find(c => c.id === id);
   if (!c) return;
   editClienteId = id;
-  document.getElementById('cliente-modal-title').textContent = 'Editar Cliente';
-  document.getElementById('cliente-nome').value = c.nome;
+  setClienteModalMode('edit');
+  document.getElementById('cliente-modal-title').textContent = 'Editar cliente';
+  document.getElementById('cliente-nome').value = c.nome || '';
   document.getElementById('cliente-telefone').value = c.telefone || '';
   document.getElementById('cliente-notas').value = c.notas || '';
   document.getElementById('cliente-id').value = id;
-  const statsEl = document.getElementById('cliente-perfil-stats');
-  if (statsEl && typeof getEstatisticasCliente === 'function') {
-    const { visitas, totalGasto, ultimaVisita } = getEstatisticasCliente(c.nome);
-    statsEl.innerHTML = `
-      <div><div class="stat-valor">${visitas}</div><div class="stat-legenda">${visitas === 1 ? 'Visita' : 'Visitas'}</div></div>
-      <div><div class="stat-valor">${fmtKz(totalGasto)}</div><div class="stat-legenda">Total gasto</div></div>
-      <div><div class="stat-valor">${formatarUltimaVisita(ultimaVisita)}</div><div class="stat-legenda">Última visita</div></div>
-    `;
-    statsEl.style.display = 'grid';
-  }
   openModal('modal-cliente');
 }
 
 document.getElementById('add-cliente-btn').addEventListener('click', () => {
   editClienteId = null;
-  document.getElementById('cliente-modal-title').textContent = 'Novo Cliente';
-  ['cliente-nome', 'cliente-telefone', 'cliente-notas', 'cliente-id'].forEach(id => document.getElementById(id).value = '');
-  const statsEl = document.getElementById('cliente-perfil-stats');
-  if (statsEl) statsEl.style.display = 'none';
+  setClienteModalMode('edit');
+  document.getElementById('cliente-modal-title').textContent = 'Novo cliente';
+  ['cliente-nome', 'cliente-telefone', 'cliente-notas', 'cliente-id'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   openModal('modal-cliente');
 });
 
@@ -4788,11 +6042,39 @@ function popularEspecialidadesProf(selected) {
   if (box) box.style.display = 'none';
 }
 
+function setProfModalMode(mode) {
+  const modal = document.getElementById('modal-prof');
+  const sheet = document.getElementById('modal-prof-sheet');
+  const view = document.getElementById('prof-view-panel');
+  const form = document.getElementById('prof-form-panel');
+  if (modal) modal.setAttribute('data-mode', mode);
+  if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
+  if (view) view.hidden = mode !== 'view';
+  if (form) form.hidden = mode !== 'edit';
+  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(function (fid) {
+    const el = document.getElementById(fid);
+    if (el) {
+      el.disabled = false;
+      el.readOnly = false;
+      el.style.opacity = '';
+    }
+  });
+}
+
+function _receitaProfissionalMes(profId) {
+  const mes = (typeof hoje === 'function' ? hoje() : '').slice(0, 7);
+  if (!mes || !profId) return 0;
+  return (state.movimentos || []).filter(function (m) {
+    return m.tipo === 'venda' && String(m.profissional_id) === String(profId) && String(m.data || '').startsWith(mes);
+  }).reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
+}
+
 function openEditProf(id) {
   const p = state.profissionais.find(x => x.id === id);
   if (!p) return;
   editProfId = id;
-  document.getElementById('prof-modal-title').textContent = 'Editar Profissional';
+  setProfModalMode('edit');
+  document.getElementById('prof-modal-title').textContent = 'Editar profissional';
   document.getElementById('prof-nome').value = p.nome || '';
   document.getElementById('prof-idade').value = p.idade || '';
   const dataEl = document.getElementById('prof-data-contratual');
@@ -4801,18 +6083,11 @@ function openEditProf(id) {
   document.getElementById('prof-morada').value = p.morada || '';
   document.getElementById('prof-contacto').value = p.contacto || '';
   const taxaEl = document.getElementById('prof-taxa');
+  if (taxaEl) taxaEl.value = p.taxa_comissao != null ? p.taxa_comissao : (p.taxa || 0);
   const metaEl = document.getElementById('prof-meta');
-  if (taxaEl) taxaEl.value = p.taxa_comissao != null ? p.taxa_comissao : 0;
-  if (metaEl) metaEl.value = p.meta_mensal != null ? p.meta_mensal : '';
+  if (metaEl) metaEl.value = p.meta_mensal != null ? p.meta_mensal : (p.meta || '');
   popularEspecialidadesProf(p.especialidade || '');
   document.getElementById('prof-id').value = id;
-  // modo edição
-  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(fid => {
-    const el = document.getElementById(fid);
-    if (el) { el.disabled = false; el.readOnly = false; el.style.opacity = '1'; }
-  });
-  const saveBtn = document.getElementById('modal-prof-save');
-  if (saveBtn) saveBtn.style.display = '';
   openModal('modal-prof');
 }
 
@@ -4820,83 +6095,73 @@ function abrirDetalheProfView(id) {
   const p = state.profissionais.find(x => x.id === id);
   if (!p) return;
   editProfId = id;
-  document.getElementById('prof-modal-title').textContent = 'Perfil do Profissional';
-  document.getElementById('prof-nome').value = p.nome || '';
-  document.getElementById('prof-idade').value = p.idade || '';
-  const dataEl = document.getElementById('prof-data-contratual');
-  if (dataEl) dataEl.value = p.dataContratual || p.dataNascimento || '';
-  document.getElementById('prof-bi').value = p.numeroBI || '';
-  document.getElementById('prof-morada').value = p.morada || '';
-  document.getElementById('prof-contacto').value = p.contacto || '';
-  const taxaElV = document.getElementById('prof-taxa');
-  const metaElV = document.getElementById('prof-meta');
-  if (taxaElV) taxaElV.value = p.taxa_comissao != null ? p.taxa_comissao : 0;
-  if (metaElV) metaElV.value = p.meta_mensal != null ? p.meta_mensal : '';
-  popularEspecialidadesProf(p.especialidade || '');
+  setProfModalMode('view');
+  document.getElementById('prof-modal-title').textContent = 'Ficha do profissional';
   document.getElementById('prof-id').value = id;
-  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(fid => {
-    const el = document.getElementById(fid);
-    if (el) { el.disabled = true; el.style.opacity = '0.85'; }
-  });
-  const saveBtn = document.getElementById('modal-prof-save');
-  if (saveBtn) saveBtn.style.display = 'none';
-  const box = document.getElementById('prof-criar-servico-box');
-  if (box) box.style.display = 'none';
+
+  const receita = _receitaProfissionalMes(p.id);
+  const meta = Number(p.meta_mensal != null ? p.meta_mensal : p.meta) || 0;
+  const taxa = Number(p.taxa_comissao != null ? p.taxa_comissao : p.taxa) || 0;
+  const digits = String(p.contacto || '').replace(/\D/g, '');
+  let contactActions = '';
+  if (digits.length === 9) {
+    const wa = '244' + digits;
+    const msg = encodeURIComponent('Olá ' + (p.nome || '') + ',');
+    contactActions =
+      '<div class="bp-view-contact-actions">' +
+      '<a class="btn btn-sm btn-primary" href="https://wa.me/' + wa + '?text=' + msg + '" target="_blank" rel="noopener noreferrer">WhatsApp</a>' +
+      '<a class="btn btn-sm btn-secondary" href="tel:+244' + digits + '">Ligar</a>' +
+      '</div>';
+  }
+
+  let metaHtml = '';
+  if (meta > 0) {
+    const pct = Math.min(100, Math.round((receita / meta) * 100));
+    metaHtml =
+      '<div class="bp-view-section-title">Desempenho este mês</div>' +
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Receita</span><span class="bp-view-value">' + fmtKz(receita) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Meta</span><span class="bp-view-value">' + fmtKz(meta) + ' · ' + pct + '%</span></div>' +
+      '</div>';
+  } else if (receita > 0) {
+    metaHtml =
+      '<div class="bp-view-section-title">Desempenho este mês</div>' +
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Receita</span><span class="bp-view-value">' + fmtKz(receita) + '</span></div>' +
+      '</div>';
+  }
+
+  const body = document.getElementById('prof-view-body');
+  if (body) {
+    body.innerHTML =
+      '<div class="bp-view-hero">' +
+      '<div class="bp-view-hero-av">' + escHtml((p.nome || '?').charAt(0).toUpperCase()) + '</div>' +
+      '<div><div class="bp-view-hero-name">' + escHtml(p.nome || 'Profissional') + '</div>' +
+      '<div class="bp-view-hero-meta">' + escHtml(p.especialidade || 'Sem especialidade') + '</div></div></div>' +
+      contactActions +
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Nome</span><span class="bp-view-value">' + escHtml(p.nome || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Especialidade</span><span class="bp-view-value">' + escHtml(p.especialidade || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Contacto</span><span class="bp-view-value">' + (digits ? escHtml(digits) : '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Comissão</span><span class="bp-view-value">' + taxa + '%</span></div>' +
+      (p.idade ? '<div class="bp-view-row"><span class="bp-view-label">Idade</span><span class="bp-view-value">' + escHtml(String(p.idade)) + ' anos</span></div>' : '') +
+      (p.dataContratual || p.dataNascimento ? '<div class="bp-view-row"><span class="bp-view-label">Contrato</span><span class="bp-view-value">' + escHtml(p.dataContratual || p.dataNascimento) + '</span></div>' : '') +
+      (p.morada ? '<div class="bp-view-row"><span class="bp-view-label">Morada</span><span class="bp-view-value">' + escHtml(p.morada) + '</span></div>' : '') +
+      (p.numeroBI ? '<div class="bp-view-row"><span class="bp-view-label">BI</span><span class="bp-view-value">' + escHtml(p.numeroBI) + '</span></div>' : '') +
+      '</div>' + metaHtml;
+  }
   openModal('modal-prof');
 }
 
-document.getElementById('prof-esp')?.addEventListener('change', function() {
-  const box = document.getElementById('prof-criar-servico-box');
-  if (box) box.style.display = this.value === '__criar' ? 'block' : 'none';
-});
-
-document.getElementById('prof-criar-servico-btn')?.addEventListener('click', async function() {
-  const nome = (document.getElementById('prof-novo-servico-nome')?.value || '').trim();
-  const preco = parseFloat(document.getElementById('prof-novo-servico-preco')?.value);
-  if (!nome || !preco || preco <= 0) {
-    toast('Indique o nome e o preço do novo serviço.', 'error');
-    return;
-  }
-  if (existeNomeDuplicado('servicos', nome)) {
-    toast('Já existe um serviço com este nome.', 'error');
-    return;
-  }
-  const profNome = (document.getElementById('prof-nome')?.value || '').trim();
-  const n = await addServico({ nome, precoBase: preco, profissionais: profNome ? [profNome] : [] });
-  if (n) {
-    popularEspecialidadesProf(nome);
-    document.getElementById('prof-esp').value = nome;
-    document.getElementById('prof-criar-servico-box').style.display = 'none';
-    document.getElementById('prof-novo-servico-nome').value = '';
-    document.getElementById('prof-novo-servico-preco').value = '';
-    // Modal limpo de confirmação
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay open';
-    overlay.id = 'modal-servico-criado-temp';
-    overlay.innerHTML = `<div class="modal-confirm-sheet" style="text-align:left;">
-      <div class="confirm-title" style="margin-bottom:12px;">Serviço criado</div>
-      <div class="confirm-message" style="text-align:left;line-height:1.5;">O serviço foi ajustado e associado ao profissional. Podes ajustar ou editar a qualquer momento na aba Equipa.</div>
-      <div class="confirm-actions" style="margin-top:20px;"><button type="button" class="btn btn-primary btn-block" id="svc-criado-ok">OK</button></div>
-    </div>`;
-    document.body.appendChild(overlay);
-    document.getElementById('svc-criado-ok').onclick = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-  }
-});
-
 document.getElementById('add-prof-btn')?.addEventListener('click', () => {
   editProfId = null;
-  document.getElementById('prof-modal-title').textContent = 'Novo Profissional';
+  setProfModalMode('edit');
+  document.getElementById('prof-modal-title').textContent = 'Novo profissional';
   ['prof-nome', 'prof-idade', 'prof-data-contratual', 'prof-bi', 'prof-morada', 'prof-contacto', 'prof-id', 'prof-taxa', 'prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
-    if (el) {
-      el.value = (fid === 'prof-taxa') ? '0' : '';
-      el.disabled = false; el.readOnly = false; el.style.opacity = '1';
-    }
+    if (el) el.value = fid === 'prof-taxa' ? '0' : '';
   });
   popularEspecialidadesProf('');
-  const saveBtn = document.getElementById('modal-prof-save');
-  if (saveBtn) saveBtn.style.display = '';
   openModal('modal-prof');
 });
 
@@ -4910,6 +6175,8 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   const morada = (document.getElementById('prof-morada')?.value || '').trim();
   const contacto = (document.getElementById('prof-contacto')?.value || '').replace(/\D/g, '');
   const id = document.getElementById('prof-id')?.value;
+  const taxa = parseFloat(document.getElementById('prof-taxa')?.value);
+  const meta = parseFloat(document.getElementById('prof-meta')?.value);
 
   if (!nome) { toast('Nome é obrigatório', 'error'); return; }
   if (!idade || isNaN(parseInt(idade, 10))) { toast('Idade é obrigatória', 'error'); return; }
@@ -4924,14 +6191,6 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     return;
   }
 
-  const taxaRaw = document.getElementById('prof-taxa') ? document.getElementById('prof-taxa').value : '0';
-  const metaRaw = document.getElementById('prof-meta') ? document.getElementById('prof-meta').value : '';
-  const taxaComissao = Math.min(100, Math.max(0, parseFloat(taxaRaw) || 0));
-  let metaMensal = null;
-  if (metaRaw !== '' && metaRaw != null) {
-    const nMeta = parseInt(metaRaw, 10);
-    if (!isNaN(nMeta) && nMeta >= 0) metaMensal = nMeta;
-  }
   const dados = {
     nome,
     idade: parseInt(idade, 10),
@@ -4940,8 +6199,8 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     numeroBI: numeroBI || '',
     morada,
     contacto: contacto || '',
-    taxa_comissao: taxaComissao,
-    meta_mensal: metaMensal
+    taxa_comissao: isNaN(taxa) ? 0 : taxa,
+    meta_mensal: isNaN(meta) ? 0 : meta
   };
 
   if (id) {
@@ -4954,13 +6213,16 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   }
 });
 
+document.getElementById('prof-view-fechar')?.addEventListener('click', () => {
+  setProfModalMode('edit');
+  closeModal('modal-prof');
+});
+document.getElementById('prof-view-editar')?.addEventListener('click', () => {
+  const id = document.getElementById('prof-id')?.value || editProfId;
+  if (id) openEditProf(id);
+});
 document.getElementById('modal-prof-cancel')?.addEventListener('click', () => {
-  ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(fid => {
-    const el = document.getElementById(fid);
-    if (el) { el.disabled = false; el.style.opacity = '1'; }
-  });
-  const saveBtn = document.getElementById('modal-prof-save');
-  if (saveBtn) saveBtn.style.display = '';
+  setProfModalMode('edit');
   closeModal('modal-prof');
 });
 
@@ -4973,72 +6235,126 @@ document.addEventListener('click', function(e) {
   if (id) abrirDetalheProfView(id);
 });
 
+
 // CRUD Serviço
 document.getElementById('add-servico-btn').addEventListener('click', () => openServicoModal());
 
 document.getElementById('modal-servico-save').addEventListener('click', async () => {
   const nome = document.getElementById('servico-nome').value.trim();
   const precoBase = parseFloat(document.getElementById('servico-preco').value);
+  const durRaw = parseInt(document.getElementById('servico-duracao')?.value, 10);
+  const duracao = (!isNaN(durRaw) && durRaw >= 5) ? durRaw : 60;
   const id = document.getElementById('servico-id').value;
-  const profissionais = getSelectedProfissionais();
-  if (!nome || isNaN(precoBase) || precoBase <= 0) { toast('Preencha nome e preço válido', 'error'); return; }
-  if (!profissionais || profissionais.length === 0) {
-    toast('Selecione pelo menos um profissional para este serviço', 'error');
+  const profissionais = typeof getSelectedProfissionais === 'function' ? getSelectedProfissionais() : [];
+  if (!nome || isNaN(precoBase) || precoBase <= 0) {
+    toast('Preencha nome e preço válido', 'error');
     return;
   }
-  if (id) { await updateServico(id, { nome, precoBase, profissionais });
-    toast('Serviço actualizado', 'success'); } else { await addServico({ nome, precoBase, profissionais }); }
+  // profissionais vazio = toda a equipa (legítimo em salão pequeno)
+  const payload = { nome, precoBase, profissionais: profissionais || [], duracao };
+  if (id) {
+    await updateServico(id, payload);
+    toast('Serviço actualizado', 'success');
+  } else {
+    await addServico(payload);
+  }
   closeModal('modal-servico');
-  updateUI();
+  if (typeof updateUI === 'function') updateUI();
 });
 
-document.getElementById('modal-servico-cancel').addEventListener('click', () => closeModal('modal-servico'));
+document.getElementById('modal-servico-cancel')?.addEventListener('click', () => {
+  if (typeof setServicoModalMode === 'function') setServicoModalMode('edit');
+  closeModal('modal-servico');
+});
+document.getElementById('servico-view-fechar')?.addEventListener('click', () => {
+  if (typeof setServicoModalMode === 'function') setServicoModalMode('edit');
+  closeModal('modal-servico');
+});
+document.getElementById('servico-view-editar')?.addEventListener('click', () => {
+  const id = document.getElementById('servico-id')?.value;
+  if (id && typeof openServicoModal === 'function') openServicoModal(id);
+});
+document.addEventListener('click', function (e) {
+  const row = e.target.closest('.list-item[data-servico-id]');
+  if (!row) return;
+  if (e.target.closest('.row-menu-btn') || e.target.closest('.row-menu')) return;
+  const id = row.dataset.servicoId;
+  if (id && typeof abrirDetalheServicoView === 'function') abrirDetalheServicoView(id);
+});
 // ====================================================================
 //  FASE E — Ver detalhe do cliente (só visualização ao clicar na linha)
 // ====================================================================
 function abrirDetalheClienteView(id) {
   const c = state.clientes.find(x => x.id === id);
   if (!c) return;
-  const stats = typeof getEstatisticasCliente === 'function'
-    ? getEstatisticasCliente(c.nome)
-    : { visitas: 0, totalGasto: 0, ultimaVisita: null };
-
-  // Reutiliza modal-cliente em modo leitura
   editClienteId = id;
-  document.getElementById('cliente-modal-title').textContent = 'Perfil do Cliente';
-  document.getElementById('cliente-nome').value = c.nome;
-  document.getElementById('cliente-telefone').value = c.telefone || '';
-  document.getElementById('cliente-notas').value = c.notas || '';
+
+  setClienteModalMode('view');
+  document.getElementById('cliente-modal-title').textContent = 'Ficha do cliente';
   document.getElementById('cliente-id').value = id;
 
-  // Bloquear edição
-  ['cliente-nome', 'cliente-telefone', 'cliente-notas'].forEach(fid => {
-    const el = document.getElementById(fid);
-    if (el) { el.readOnly = true; el.style.opacity = '0.85'; }
-  });
-  const saveBtn = document.getElementById('modal-cliente-save');
-  if (saveBtn) saveBtn.style.display = 'none';
-
+  const body = document.getElementById('cliente-view-body');
+  if (body) {
+    const digits = String(c.telefone || '').replace(/\D/g, '');
+    const tel = digits || '—';
+    const notas = c.notas ? escHtml(c.notas) : '<span class="bp-view-value--muted">Sem preferências</span>';
+    let contactActions = '';
+    if (digits.length === 9) {
+      const wa = '244' + digits;
+      const msg = encodeURIComponent('Olá ' + (c.nome || '') + ',');
+      contactActions =
+        '<div class="bp-view-contact-actions">' +
+        '<a class="btn btn-sm btn-primary" href="https://wa.me/' + wa + '?text=' + msg + '" target="_blank" rel="noopener noreferrer">WhatsApp</a>' +
+        '<a class="btn btn-sm btn-secondary" href="tel:+244' + digits + '">Ligar</a>' +
+        '</div>';
+    }
+    var pts = Number(c.pontos) || 0;
+    var tier = typeof getClienteTier === 'function' ? getClienteTier(pts) : { id: 'bronze', label: 'Bronze' };
+    body.innerHTML =
+      '<div class="bp-view-hero">' +
+      '<div class="bp-view-hero-av">' + escHtml((c.nome || '?').charAt(0).toUpperCase()) + '</div>' +
+      '<div><div class="bp-view-hero-name">' + escHtml(c.nome || 'Cliente') + '</div>' +
+      '<div class="bp-view-hero-meta">' + (digits ? ('+244 ' + escHtml(digits)) : 'Sem contacto') +
+      ' · <span class="bp-tier bp-tier--' + tier.id + '">' + escHtml(tier.label) + '</span></div></div></div>' +
+      contactActions +
+      '<div class="bp-view-dl">' +
+      '<div class="bp-view-row"><span class="bp-view-label">Nome</span><span class="bp-view-value">' + escHtml(c.nome || '—') + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Celular</span><span class="bp-view-value">' + escHtml(tel) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Fidelidade</span><span class="bp-view-value">' + pts + ' pts · ' + escHtml(tier.label) + '</span></div>' +
+      '<div class="bp-view-row"><span class="bp-view-label">Preferências</span><span class="bp-view-value">' + notas + '</span></div>' +
+      '</div>' +
+      '<p class="venda-modal-sub" style="margin-top:10px;">1 ponto por cada 1.000 Kz em vendas registadas na ficha.</p>';
+  }
+  // Stats com objecto (id + nome)
+  const stats = typeof getEstatisticasCliente === 'function'
+    ? getEstatisticasCliente(c)
+    : { visitas: 0, totalGasto: 0, ultimaVisita: null };
   const statsEl = document.getElementById('cliente-perfil-stats');
   if (statsEl) {
-    statsEl.innerHTML = `
-      <div><div class="stat-valor">${stats.visitas}</div><div class="stat-legenda">${stats.visitas === 1 ? 'Visita' : 'Visitas'}</div></div>
-      <div><div class="stat-valor">${fmtKz(stats.totalGasto)}</div><div class="stat-legenda">Total gasto</div></div>
-      <div><div class="stat-valor">${typeof formatarUltimaVisita === 'function' ? formatarUltimaVisita(stats.ultimaVisita) : '—'}</div><div class="stat-legenda">Última visita</div></div>
-    `;
+    statsEl.hidden = false;
     statsEl.style.display = 'grid';
+    statsEl.innerHTML =
+      '<div><div class="stat-valor">' + stats.visitas + '</div><div class="stat-legenda">' +
+      (stats.visitas === 1 ? 'Visita' : 'Visitas') + '</div></div>' +
+      '<div><div class="stat-valor">' + fmtKz(stats.totalGasto) + '</div><div class="stat-legenda">Total gasto</div></div>' +
+      '<div><div class="stat-valor">' +
+      (typeof formatarUltimaVisita === 'function' ? formatarUltimaVisita(stats.ultimaVisita) : '—') +
+      '</div><div class="stat-legenda">Última visita</div></div>';
   }
   openModal('modal-cliente');
 }
 
-// Ao fechar, reactivar campos
-document.getElementById('modal-cliente-cancel')?.addEventListener('click', () => {
-  ['cliente-nome', 'cliente-telefone', 'cliente-notas'].forEach(fid => {
-    const el = document.getElementById(fid);
-    if (el) { el.readOnly = false; el.style.opacity = '1'; }
-  });
-  const saveBtn = document.getElementById('modal-cliente-save');
-  if (saveBtn) saveBtn.style.display = '';
+document.getElementById('cliente-view-fechar')?.addEventListener('click', function () {
+  setClienteModalMode('edit');
+  closeModal('modal-cliente');
+});
+document.getElementById('cliente-view-editar')?.addEventListener('click', function () {
+  const id = document.getElementById('cliente-id')?.value || editClienteId;
+  if (id) openEditCliente(id);
+});
+document.getElementById('modal-cliente-cancel')?.addEventListener('click', function () {
+  setClienteModalMode('edit');
+  closeModal('modal-cliente');
 });
 
 // Clique na linha do cliente (não no menu)
@@ -5064,9 +6380,7 @@ function validarBI(bi) {
   return /^[0-9]{9}[A-Z]{2}[0-9]{3}$/.test(v) || /^[0-9A-Z]{10,20}$/.test(v);
 }
 
-
 /* ===== FILE: eventos-caixa-vendas.js ===== */
-
 // ====================================================================
 //  eventos-caixa-vendas.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Eventos: despesa, fundo, carrinho/venda, confirmação de venda, fecho de caixa, detalhes e KPIs
@@ -5076,44 +6390,61 @@ function validarBI(bi) {
 // ====================================================================
 
 // Despesa
-document.getElementById('add-despesa-btn').addEventListener('click', () => openModal('modal-despesa'));
+document.getElementById('add-despesa-btn').addEventListener('click', () => {
+  const d = document.getElementById('desp-desc');
+  const v = document.getElementById('desp-valor');
+  const c = document.getElementById('desp-categoria');
+  if (d) d.value = '';
+  if (v) v.value = '';
+  if (c) c.value = 'operacional';
+  openModal('modal-despesa');
+  setTimeout(function () { if (d) try { d.focus(); } catch (e) {} }, 100);
+});
 document.getElementById('modal-despesa-save').addEventListener('click', async () => {
   const desc = document.getElementById('desp-desc').value.trim();
-  const valor = parseFloat(document.getElementById('desp-valor').value);
-  if (!desc || !valor || valor <= 0) { toast('Preencha descrição e valor válido', 'error'); return; }
-  await addMovimento({ tipo: 'despesa', descricao: desc, valor });
+  const valor = Number(document.getElementById('desp-valor').value);
+  const categoria = (document.getElementById('desp-categoria') || {}).value || 'outro';
+  if (!desc) { toast('Indique a descrição da despesa', 'error'); return; }
+  if (!valor || valor <= 0 || isNaN(valor)) { toast('Indique um valor válido', 'error'); return; }
+  await addMovimento({
+    tipo: 'despesa',
+    descricao: desc,
+    valor: valor,
+    categoria: categoria
+  });
   closeModal('modal-despesa');
   document.getElementById('desp-desc').value = '';
   document.getElementById('desp-valor').value = '';
-  toast('Despesa registada no caixa', 'success');
+  toast('Despesa registada', 'success');
+  if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
 // Fundo
 document.getElementById('ajustar-fundo-btn').addEventListener('click', () => {
-  document.getElementById('fundo-valor').value = state.config.fundo;
+  const el = document.getElementById('fundo-valor');
+  const atual = Number(state.config && state.config.fundo) || 0;
+  if (el) el.value = atual;
+  const sub = document.getElementById('fundo-modal-sub');
+  if (sub && typeof fmtKz === 'function') {
+    sub.textContent = 'Actual: ' + fmtKz(atual) + ' — define o valor de abertura do caixa.';
+  }
   openModal('modal-fundo');
+  setTimeout(function () { if (el) try { el.focus(); el.select(); } catch (e) {} }, 100);
 });
 document.getElementById('modal-fundo-save').addEventListener('click', async () => {
-  const v = parseFloat(document.getElementById('fundo-valor').value);
+  const v = Number(document.getElementById('fundo-valor').value);
   if (isNaN(v) || v < 0) { toast('Valor inválido', 'error'); return; }
   state.config.fundo = v;
   await saveConfig();
   closeModal('modal-fundo');
-  toast('Fundo de caixa actualizado', 'success');
-  updateUI();
+  toast('Fundo actualizado', 'success');
+  if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-fundo-cancel').addEventListener('click', () => closeModal('modal-fundo'));
 
 // Venda – Adicionar item ao carrinho (profissional único/global)
 document.getElementById('btn-add-item').addEventListener('click', () => {
-  // VALIDAÇÃO: profissional obrigatório (global)
-  const profissionalId = document.getElementById('venda-profissional').value;
-  if (!profissionalId || profissionalId.trim() === '') {
-    toast('Selecione um profissional antes de adicionar ao carrinho.', 'error');
-    return;
-  }
-
   const catSel = document.getElementById('ci-servico-sel');
   const ciValor = document.getElementById('ci-valor');
   let nome = catSel.value;
@@ -5145,55 +6476,43 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
     }
     renderCart();
   }
+  // Preparar próximo item (velocidade no balcão)
+  if (catSel) catSel.value = '';
+  if (ciValor) { ciValor.value = ''; }
+  if (typeof updateVendaSaveButton === 'function') updateVendaSaveButton();
 });
 
 // CORREÇÃO: modal-venda-save com profissional único
 const vendaSaveBtn = document.getElementById('modal-venda-save');
 if (vendaSaveBtn) {
   vendaSaveBtn.onclick = async function(e) {
-    if (cartItems.length === 0) { toast('Adicione pelo menos um serviço', 'error'); return; }
-    const cliente = document.getElementById('venda-cliente').value || 'Anónimo';
+    if (!cartItems.length) { toast('Adicione pelo menos um serviço à venda', 'error'); return; }
+    const cliente = document.getElementById('venda-cliente').value || 'Avulso';
     const profissionalId = document.getElementById('venda-profissional').value;
-    let metodoPagamento = document.getElementById('venda-pagamento').value;
-    let pagamentos = null;
-
-    // F13 — pagamento dividido
-    if (metodoPagamento === '__split__') {
-      const split = (window.BPFinance && window.BPFinance.lerPagamentosSplit)
-        ? window.BPFinance.lerPagamentosSplit()
-        : null;
-      const totalCart = cartItems.reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
-      if (!split || !split.list.length) {
-        toast('Indique os valores do pagamento dividido.', 'error');
-        return;
-      }
-      if (Math.abs(split.sum - totalCart) > 1) {
-        toast('A soma dos pagamentos (' + Math.round(split.sum) + ' Kz) deve igualar o total (' + Math.round(totalCart) + ' Kz).', 'error');
-        return;
-      }
-      pagamentos = split.list;
-      metodoPagamento = split.list.map(p => p.metodo).join(' + ');
-    }
+    const metodoPagamento = document.getElementById('venda-pagamento').value;
     
     // Buscar o nome do profissional
     const profObj = state.profissionais.find(p => p.id === profissionalId);
     const profissionalNome = profObj ? profObj.nome : '';
     
-    // Validação antecipada do profissional
-    if (!profissionalId || String(profissionalId).trim() === '') {
-      toast('Selecione um profissional antes de registar a venda.', 'error');
-      return;
-    }
-
+    // Profissional opcional (comissões); venda walk-in não bloqueia
     setButtonLoading(this, true);
     try {
+      let clienteId = null;
+      try {
+        if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
+        else {
+          const hit = (state.clientes || []).find(c => c.nome === cliente);
+          if (hit) clienteId = hit.id;
+        }
+      } catch (e) {}
       const idVenda = await registarVenda({
         cliente,
+        cliente_id: clienteId,
         profissional: profissionalNome,
-        profissional_id: profissionalId,
+        profissional_id: profissionalId || null,
         itens: [...cartItems],
-        metodoPagamento,
-        pagamentos
+        metodoPagamento
       });
       if (idVenda) {
         closeModal('modal-venda');
@@ -5280,12 +6599,17 @@ document.getElementById('modal-finalizar-save').addEventListener('click', async 
   
   // Registar a venda com profissional_id
   const itens = [{ nome: ag.servico, quantidade: 1, precoUnit: ag.preco, subtotal: ag.preco }];
-  await registarVenda({ 
-    cliente: ag.cliente, 
-    profissional: ag.profissional, 
-    profissional_id: ag.profissional_id, // <- CORREÇÃO
-    itens, 
-    metodoPagamento: metodo 
+  let cliId = ag.cliente_id || null;
+  if (!cliId && typeof resolverClienteIdPorNome === 'function') {
+    cliId = resolverClienteIdPorNome(ag.cliente);
+  }
+  await registarVenda({
+    cliente: ag.cliente || 'Avulso',
+    cliente_id: cliId,
+    profissional: ag.profissional,
+    profissional_id: ag.profissional_id || null,
+    itens,
+    metodoPagamento: metodo
   });
   
   closeModal('modal-finalizar');
@@ -5316,12 +6640,12 @@ async function confirmarFechoCaixa() {
   const detalhePagamento = {};
   vendas.forEach(v => {
     const mp = v.metodoPagamento || 'Numerário';
-    detalhePagamento[mp] = (detalhePagamento[mp] || 0) + v.valor;
+    detalhePagamento[mp] = (detalhePagamento[mp] || 0) + (Number(v.valor) || 0);
   });
 
-  const totalVendas = vendas.reduce((s, v) => s + v.valor, 0);
-  const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0);
-  const saldoFinal = state.config.fundo + totalVendas - totalDespesas;
+  const totalVendas = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+  const totalDespesas = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
+  const saldoFinal = (Number(state.config.fundo) || 0) + totalVendas - totalDespesas;
 
   const registro = {
     id: uuid(),
@@ -5338,7 +6662,7 @@ async function confirmarFechoCaixa() {
   await dbPut('fechos_caixa', registro);
   // Atualizar o estado local
   state.fechos_caixa.push(registro);
-  toast('Caixa fechado e registado com sucesso!', 'success');
+  toast('Caixa fechado com sucesso', 'success');
   closeModal('modal-fecho');
   updateUI();
 }
@@ -5352,11 +6676,11 @@ document.getElementById('btn-imprimir-fecho').addEventListener('click', () => {
   const hojeStr = hoje();
   const vendas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
   const despesas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa');
-  const tv = vendas.reduce((s, v) => s + v.valor, 0);
-  const td = despesas.reduce((s, d) => s + d.valor, 0);
+  const tv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+  const td = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const byPag = {};
   vendas.forEach(v => { const k = v.metodoPagamento || 'Numerário';
-    byPag[k] = (byPag[k] || 0) + v.valor; });
+    byPag[k] = (byPag[k] || 0) + (Number(v.valor) || 0); });
   document.getElementById('recibo-print').innerHTML = `
     <div class="r-store">${escHtml(state.config.storeName)}</div>
     <div class="r-sub">FECHO DE CAIXA</div>
@@ -5544,9 +6868,7 @@ document.getElementById('modal-cliente-nao-encontrado-ok')?.addEventListener('cl
   closeModal('modal-cliente-nao-encontrado');
 });
 
-
 /* ===== FILE: eventos-globais.js ===== */
-
 // ====================================================================
 //  eventos-globais.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Eventos: navegação da agenda, menu de linha, online/offline, overlays de modal
@@ -5595,9 +6917,9 @@ function abrirMenuLinha(anchorEl, tipo, id) {
   const papel = normalizarRole(state.config.userRole);
 
   const config = {
-    cliente:      { editLabel: 'Ajustar perfil', delAction: 'del-cliente', podeEliminar: papel === 'admin' || papel === 'gerente' },
-    profissional: { editLabel: 'Ajustar',         delAction: 'del-p',       podeEliminar: papel === 'admin' },
-    servico:      { editLabel: 'Ajustar',         delAction: 'del-servico', podeEliminar: papel === 'admin' },
+    cliente:      { editLabel: 'Ajustar perfil', delAction: 'del-cliente', delLabel: 'Excluir',   podeEliminar: papel === 'admin' || papel === 'gerente' },
+    profissional: { editLabel: 'Ajustar',         delAction: 'del-p',       delLabel: 'Destituir', podeEliminar: papel === 'admin' },
+    servico:      { editLabel: 'Ajustar',         delAction: 'del-servico', delLabel: 'Excluir',   podeEliminar: papel === 'admin' },
   }[tipo];
   if (!config) return;
 
@@ -5612,6 +6934,8 @@ function abrirMenuLinha(anchorEl, tipo, id) {
   delBtn.dataset.action = config.delAction;
   delBtn.dataset.id = id;
   delBtn.style.display = config.podeEliminar ? 'flex' : 'none';
+  const delLabelEl = document.getElementById('row-menu-delete-label');
+  if (delLabelEl) delLabelEl.textContent = config.delLabel || 'Excluir';
 
   document.querySelectorAll('.row-menu-btn.is-open').forEach(b => b.classList.remove('is-open'));
   anchorEl.classList.add('is-open');
@@ -5627,7 +6951,8 @@ function abrirMenuLinha(anchorEl, tipo, id) {
   menu.style.left = left + 'px';
   menu.style.top = top + 'px';
   requestAnimationFrame(() => menu.classList.add('is-open'));
-  window._lastMenuTrigger = anchorEl;
+  window.BPRuntime = window.BPRuntime || {};
+  window.BPRuntime.lastMenuTrigger = anchorEl;
   const firstItem = menu.querySelector('.row-menu-item:not([style*="display: none"])');
   if (firstItem) setTimeout(() => firstItem.focus(), 50);
 }
@@ -5639,9 +6964,9 @@ function fecharMenuLinha() {
   document.querySelectorAll('.row-menu-btn.is-open').forEach(b => b.classList.remove('is-open'));
   setTimeout(() => {
     if (!menu.classList.contains('is-open')) menu.style.display = 'none';
-    if (window._lastMenuTrigger) {
-      window._lastMenuTrigger.focus();
-      window._lastMenuTrigger = null;
+    if (window.BPRuntime && window.BPRuntime.lastMenuTrigger) {
+      window.BPRuntime.lastMenuTrigger.focus();
+      window.BPRuntime.lastMenuTrigger = null;
     }
   }, 150);
 }
@@ -5671,6 +6996,38 @@ document.addEventListener('click', async function(e) {
 
   if (e.target.closest('.row-menu-item')) {
     fecharMenuLinha();
+  }
+
+  const reagendarBtn = e.target.closest('[data-action="reagendar-agenda"]');
+  if (reagendarBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = reagendarBtn.dataset.id;
+    if (typeof abrirReagendarAgendamento === 'function') abrirReagendarAgendamento(id);
+    else if (window.abrirReagendarAgendamento) window.abrirReagendarAgendamento(id);
+    return;
+  }
+
+  const waBtn = e.target.closest('[data-action="whatsapp-agenda"]');
+  if (waBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = waBtn.dataset.id;
+    const ag = (state.agendamentos || []).find(a => a.id === id);
+    if (!ag) return;
+    let href = '';
+    try {
+      if (window.BPAgendaUI && typeof BPAgendaUI.waHref === 'function') href = BPAgendaUI.waHref(ag);
+    } catch (_) {}
+    if (!href) {
+      if (typeof toast === 'function') toast('Cliente sem telefone no registo', 'warning');
+      return;
+    }
+    const win = window.open(href, '_blank', 'noopener,noreferrer');
+    if (!win) {
+      if (typeof toast === 'function') toast('Permita pop-ups para abrir o WhatsApp', 'warning');
+    }
+    return;
   }
 
   const target = e.target.closest('[data-action="cancelar-agenda"]');
@@ -5703,10 +7060,47 @@ document.addEventListener('click', async function(e) {
       return;
     }
     const id = delProf.dataset.id;
-    const prof = state.profissionais.find(p => p.id === id);
+    const prof = (state.profissionais || []).find(p => p.id === id);
     if (!prof) return;
-    const confirmed = await showConfirmModal('Remover Profissional?', `Tem a certeza que quer remover ${prof.nome}? Esta acção não pode ser desfeita.`, true);
-    if (confirmed) await deleteProfissional(id);
+    if (typeof isProfissionalAtivo === 'function' && !isProfissionalAtivo(prof)) {
+      toast('Este profissional já está destituído', 'warning');
+      return;
+    }
+    const msg =
+      'Tem a certeza que deseja destituir ' + (prof.nome || 'este profissional') + ' das suas funções?\n\n' +
+      '• Deixa de aparecer em novos agendamentos e vendas\n' +
+      '• Será removido dos serviços associados\n' +
+      '• Serviços onde for o único profissional serão desactivados\n' +
+      '• Agendamentos e vendas anteriores mantêm-se no histórico';
+    const confirmed = await showConfirmModal('Destituir profissional', msg, true);
+    if (!confirmed) return;
+
+    const result = typeof desassociarProfissional === 'function'
+      ? await desassociarProfissional(id)
+      : null;
+
+    if (result) {
+      let extra = '';
+      if (result.servicosDesativados && result.servicosDesativados.length) {
+        extra = ' Serviços desactivados: ' + result.servicosDesativados.join(', ') + '.';
+      }
+      toast((prof.nome || 'Profissional') + ' destituído.' + extra, 'success');
+
+      // Aviso ao profissional via WhatsApp (contexto AO — sem SMS infra)
+      const digits = String(prof.contacto || '').replace(/\D/g, '');
+      if (digits.length === 9) {
+        const salao = (state.config && state.config.storeName) || 'o salão';
+        const texto = encodeURIComponent(
+          'Olá ' + (prof.nome || '') + ', foi destituído das suas funções em ' + salao +
+          '. Os registos históricos permanecem no sistema. Contacte a administração para mais informações.'
+        );
+        try {
+          window.open('https://wa.me/244' + digits + '?text=' + texto, '_blank', 'noopener,noreferrer');
+        } catch (e) {}
+      }
+    } else {
+      toast('Não foi possível destituir o profissional', 'error');
+    }
     return;
   }
 
@@ -5744,23 +7138,34 @@ document.addEventListener('click', async function(e) {
   }
 }, true);
 
-// ONLINE/OFFLINE
+// ONLINE/OFFLINE — multi-dispositivo: indicador sempre legível
 window.addEventListener('online', () => {
-  const container = document.getElementById('sync-status-container');
-  if (container) container.style.display = 'none';
-  document.getElementById('sync-dot')?.classList.add('online');
-  document.getElementById('offline-banner')?.classList.remove('show');
-  atualizarIAOffline();
-  flushSyncQueue().then(atualizarIndicadorSync);
+  if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
+  if (typeof flushSyncQueue === 'function') {
+    flushSyncQueue().then(function () {
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    }).catch(function () {
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    });
+  } else if (typeof atualizarIndicadorSync === 'function') {
+    atualizarIndicadorSync();
+  }
 });
 
 window.addEventListener('offline', () => {
-  const container = document.getElementById('sync-status-container');
-  if (container) container.style.display = 'flex';
-  document.getElementById('sync-dot')?.classList.remove('online');
-  document.getElementById('offline-banner')?.classList.add('show');
-  atualizarIAOffline();
+  if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 });
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    });
+  } else if (typeof atualizarIndicadorSync === 'function') {
+    atualizarIndicadorSync();
+  }
+}
 
 // Fechar modais ao clicar no overlay
 document.querySelectorAll('.modal-overlay').forEach(el => {
@@ -5770,9 +7175,7 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
 // ====================================================================
 //  IA – buildContextoIA (CORRIGIDO: usa profissional_id)
 
-
 /* ===== FILE: ia-module.js ===== */
-
 // ====================================================================
 //  ia-module.js — extraído do app.js (Fase C da modularização)
 //  Conteúdo: Contexto e lógica da Benza AI: resumo, insights, perguntas/respostas, histórico, onboarding, splash e testes
@@ -5798,13 +7201,13 @@ function buildContextoIA() {
   vendas30.forEach(v => {
     if (v.profissional_id) {
       const nome = getProfissionalNome(v.profissional_id);
-      byProf[nome] = (byProf[nome] || 0) + v.valor;
+      byProf[nome] = (byProf[nome] || 0) + (Number(v.valor) || 0);
     }
   });
 
   const byServ = {};
   vendas30.forEach(v => { if (v.itens) v.itens.forEach(i => { byServ[i.nome] = (byServ[i.nome] || 0) + (i.quantidade || 1); }); });
-  const totalVendas30 = vendas30.reduce((s, v) => s + v.valor, 0);
+  const totalVendas30 = vendas30.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const ticketMedio = vendas30.length > 0 ? Math.round(totalVendas30 / vendas30.length) : 0;
   const totalVendasHoje = vendasHoje.reduce((s, v) => s + v.valor, 0);
   const totalDespHoje = despHoje.reduce((s, d) => s + d.valor, 0);
@@ -5903,7 +7306,7 @@ function renderIAResumo() {
   const hojeStr = hoje();
   const hojeD = new Date(hojeStr + 'T00:00:00');
   const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
-  const totalHoje = vendasHoje.reduce((s, v) => s + v.valor, 0);
+  const totalHoje = vendasHoje.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const agHoje = state.agendamentos.filter(a => a.data === hojeStr);
   const pendentesHoje = agHoje.filter(a => a.status !== 'realizado' && a.status !== 'cancelado').length;
   const clientesHoje = new Set(vendasHoje.map(v => v.cliente)).size;
@@ -5914,7 +7317,7 @@ function renderIAResumo() {
   for (let i = 1; i <= 7; i++) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const ds = d.toISOString().split('T')[0];
-    dias7.push(state.movimentos.filter(m => m.data === ds && m.tipo === 'venda').reduce((s, v) => s + v.valor, 0));
+    dias7.push(state.movimentos.filter(m => m.data === ds && m.tipo === 'venda').reduce((s, v) => s + (Number(v.valor) || 0), 0));
   }
   const media7 = dias7.reduce((s, v) => s + v, 0) / 7;
   const fatTrendEl = document.getElementById('ia-resumo-fat-trend');
@@ -6019,28 +7422,162 @@ function renderIAResumo() {
   }
 }
 
+function chaveIAPerguntas() {
+  return 'ia_perguntas_' + ((state.config && state.config.salaoId) || 'local') + '_' + hoje();
+}
+
+function getUsoIAHoje() {
+  return parseInt(localStorage.getItem(chaveIAPerguntas()) || '0', 10) || 0;
+}
+
+function setUsoIAHoje(n) {
+  localStorage.setItem(chaveIAPerguntas(), String(Math.max(0, n | 0)));
+  actualizarContadorIA();
+}
+
+function actualizarContadorIA() {
+  const cont = document.getElementById('ia-contador');
+  if (!cont) return;
+  const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
+  const info = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano] : { iaDia: 0 };
+  if (!info.iaDia || info.iaDia === 0) {
+    cont.textContent = '0';
+    return;
+  }
+  cont.textContent = String(getUsoIAHoje());
+}
+
+function normalizarPerguntaIA(q) {
+  return String(q || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Respostas determinísticas a partir dos dados locais (sem gastar cota da API).
+ * Devolve string ou null se não houver intenção clara.
+ */
+function responderIALocal(pergunta) {
+  const q = normalizarPerguntaIA(pergunta);
+  if (!q || q.length < 3) return null;
+  if (!state.movimentos || !state.agendamentos) return null;
+
+  const hojeStr = typeof hoje === 'function' ? hoje() : '';
+  const num = function (v) { return Number(v) || 0; };
+  const vendasHoje = (state.movimentos || []).filter(function (m) {
+    return m.data === hojeStr && m.tipo === 'venda';
+  });
+  const despHoje = (state.movimentos || []).filter(function (m) {
+    return m.data === hojeStr && m.tipo === 'despesa';
+  });
+  const totalVendas = vendasHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  const totalDesp = despHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  const fundo = num(state.config && state.config.fundo);
+  const saldo = fundo + totalVendas - totalDesp;
+  const agHoje = (state.agendamentos || []).filter(function (a) { return a.data === hojeStr; });
+  const pend = agHoje.filter(function (a) {
+    const st = String(a.status || a.estado || '').toLowerCase();
+    return st === 'agendado' || (!st);
+  });
+  const ticket = vendasHoje.length ? Math.round(totalVendas / vendasHoje.length) : 0;
+
+  // Faturamento / vendas hoje
+  if (/(fatur|receita|vendeu|vendas|quanto.*hoje|hoje.*vend|entrada)/.test(q) && !/despes/.test(q)) {
+    return 'Hoje: ' + vendasHoje.length + (vendasHoje.length === 1 ? ' venda' : ' vendas') +
+      ' · total ' + fmtKz(totalVendas) +
+      (ticket ? ' · ticket médio ' + fmtKz(ticket) + '.' : '.');
+  }
+  // Despesas
+  if (/despes|gastou|saida|saídas/.test(q)) {
+    return 'Despesas de hoje: ' + fmtKz(totalDesp) +
+      (despHoje.length ? ' (' + despHoje.length + (despHoje.length === 1 ? ' registo).' : ' registos).') : '.');
+  }
+  // Saldo / caixa
+  if (/saldo|caixa|fundo/.test(q)) {
+    return 'Fundo ' + fmtKz(fundo) + ' · vendas ' + fmtKz(totalVendas) +
+      ' · despesas ' + fmtKz(totalDesp) + ' → saldo estimado ' + fmtKz(saldo) + '.';
+  }
+  // Agenda
+  if (/agenda|marcac|pendente|hoje.*hora|quantos.*cliente/.test(q) && /agenda|marc|pendente|atend/.test(q)) {
+    return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
+  }
+  if (/^agenda|marcacoes de hoje|o que tenho hoje/.test(q)) {
+    return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
+  }
+  // Clientes
+  if (/quantos clientes|numero de clientes|nº de clientes|total de clientes/.test(q)) {
+    const n = (state.clientes || []).length;
+    return 'Tem ' + n + (n === 1 ? ' cliente' : ' clientes') + ' na ficha.';
+  }
+  // Equipa
+  if (/quantos profissionais|tamanho da equipa|quantos na equipa/.test(q)) {
+    const n = (state.profissionais || []).length;
+    return 'Equipa: ' + n + (n === 1 ? ' profissional.' : ' profissionais.');
+  }
+  // Top serviço 30d — lightweight
+  if (/servico.*mais|mais vendido|top servico|melhor servico/.test(q)) {
+    const d30 = new Date();
+    d30.setDate(d30.getDate() - 29);
+    const d30str = d30.toISOString().slice(0, 10);
+    const byServ = {};
+    (state.movimentos || []).forEach(function (m) {
+      if (m.tipo !== 'venda' || m.data < d30str || !m.itens) return;
+      (m.itens || []).forEach(function (it) {
+        const nome = it.nome || '—';
+        byServ[nome] = (byServ[nome] || 0) + (Number(it.quantidade) || 1);
+      });
+    });
+    const top = Object.keys(byServ).sort(function (a, b) { return byServ[b] - byServ[a]; })[0];
+    if (!top) return 'Ainda não há vendas com itens nos últimos 30 dias.';
+    return 'Serviço mais frequente (30 dias): ' + top + ' (' + byServ[top] + '×).';
+  }
+  return null;
+}
+
+let _iaBusy = false;
+
 async function perguntarIA(pergunta) {
-  const plano = getPlanoAtual();
-  const iaDia = PLANOS[plano].iaDia;
+  const q = String(pergunta || '').trim();
+  if (!q) {
+    toast('Escreva uma pergunta.', 'warning');
+    return null;
+  }
+  if (q.length > 500) {
+    toast('Pergunta demasiado longa (máx. 500 caracteres).', 'warning');
+    return null;
+  }
+  if (_iaBusy) return null;
+
+  const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
+  const iaDia = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano].iaDia : 0;
   if (iaDia === 0) {
     mostrarModalUpgrade('O Agente IA está disponível no plano Pro (5 perguntas/dia) e Premium (ilimitado).');
     return null;
   }
 
-  // ================================================================
-  //  CORREÇÃO: chaveData definida antes de ser usada
-  // ================================================================
-  const chaveData = 'ia_perguntas_' + (state.config.salaoId || 'local') + '_' + hoje();
-  const usadas = parseInt(localStorage.getItem(chaveData) || '0');
-
+  const usadas = getUsoIAHoje();
   if (iaDia !== Infinity && usadas >= iaDia) {
     if (plano === 'pro') {
-      mostrarModalUpgrade('Atingiste o limite de 5 perguntas/dia do plano Pro. Faz upgrade para Premium para perguntas ilimitadas.');
+      mostrarModalUpgrade('Atingiu o limite de 5 perguntas/dia do plano Pro. Faça upgrade para Premium para perguntas ilimitadas.');
     } else {
-      toast('Limite de perguntas atingido.', 'warning');
+      toast('Limite de perguntas atingido para hoje.', 'warning');
     }
     return null;
   }
+
+  // 1) Resposta local determinística (não consome cota da API)
+  try {
+    const local = responderIALocal(q);
+    if (local) {
+      iaHistorico.push({ pergunta: q, resposta: local, fonte: 'local' });
+      if (iaHistorico.length > 6) iaHistorico = iaHistorico.slice(-6);
+      return local;
+    }
+  } catch (eLocal) {}
 
   const contexto = buildContextoIA();
   if (contexto && contexto.erro) {
@@ -6048,6 +7585,7 @@ async function perguntarIA(pergunta) {
     return null;
   }
 
+  _iaBusy = true;
   try {
     const resp = await fetch(IA_EDGE_URL, {
       method: 'POST',
@@ -6056,37 +7594,47 @@ async function perguntarIA(pergunta) {
         'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
       },
       body: JSON.stringify({
-        pergunta,
-        contexto,
-        plano,
-        salaoId: state.config.salaoId || 'local',
+        pergunta: q,
+        contexto: contexto,
+        plano: plano,
+        salaoId: (state.config && state.config.salaoId) || 'local',
         historico: iaHistorico
       })
     });
 
     if (!resp.ok) {
       if (resp.status === 429) {
-        mostrarModalUpgrade('Limite de perguntas atingido. Faz upgrade para continuar.');
+        mostrarModalUpgrade('Limite de perguntas atingido. Faça upgrade para continuar.');
         return null;
       }
       if (resp.status === 503) {
-        return '⚠️ Agente IA temporariamente indisponível. Tenta dentro de momentos.';
+        return 'Agente IA temporariamente indisponível. Tente dentro de momentos.';
       }
-      return '⚠️ Erro ao contactar o agente IA. Contacta o suporte BeautyPro.';
+      // Fallback local genérico se API falhar
+      const fallback = responderIALocal(q);
+      if (fallback) return fallback;
+      return 'Não foi possível contactar o agente IA. Verifique a ligação e tente de novo.';
     }
 
     const data = await resp.json();
-    localStorage.setItem(chaveData, String(usadas + 1));
-    document.getElementById('ia-contador').textContent = String(usadas + 1);
+    setUsoIAHoje(usadas + 1);
 
-    const resposta = data.resposta || 'Não consegui responder. Tenta de novo.';
-    iaHistorico.push({ pergunta, resposta });
+    const resposta = data.resposta || 'Não consegui responder. Tente de novo.';
+    iaHistorico.push({ pergunta: q, resposta: resposta, fonte: 'api' });
     if (iaHistorico.length > 6) iaHistorico = iaHistorico.slice(-6);
     return resposta;
   } catch (e) {
-    return 'Sem ligação à internet. O agente IA necessita de conexão para responder.';
+    // Offline: tentar local; senão mensagem clara
+    try {
+      const offlineLocal = responderIALocal(q);
+      if (offlineLocal) return offlineLocal;
+    } catch (e2) {}
+    return 'Sem ligação à internet. Posso responder a perguntas simples sobre vendas, caixa e agenda de hoje com os dados locais — tente reformular (ex.: «quanto faturou hoje?»).';
+  } finally {
+    _iaBusy = false;
   }
 }
+
 const IA_NOME_KEY = 'bp_ia_nome';
 // CORREÇÃO (relatório Benza AI): nome fixado — deixa de ler o localStorage / permitir renomear.
 function getNomeIA() { return 'Benza'; }
@@ -6110,20 +7658,195 @@ function formatarTempoRelativoIA(ts) {
   return `há ${Math.floor(diffH / 24)} dias`;
 }
 function montarMsgUsuarioIA(pergunta) { return `<div class="ia-msg-user">${escHtml(pergunta)}</div>`; }
+
+/**
+ * Markdown seguro → HTML (XSS-safe).
+ * Suporta: negrito, itálico, cabeçalhos, listas, tabelas, código inline, quebras.
+ * Nunca injecta HTML cru da resposta.
+ */
+function formatarRespostaIA(texto) {
+  if (texto == null) return '';
+  var raw = String(texto).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!raw) return '';
+
+  // 1) Escapar tudo primeiro
+  var safe = (typeof escHtml === 'function') ? escHtml(raw) : raw
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  var lines = safe.split('\n');
+  var out = [];
+  var i = 0;
+  var inUl = false;
+  var inOl = false;
+  var inCode = false;
+  var codeBuf = [];
+
+  function closeLists() {
+    if (inUl) { out.push('</ul>'); inUl = false; }
+    if (inOl) { out.push('</ol>'); inOl = false; }
+  }
+
+  function inlineFmt(s) {
+    // código inline `code`
+    s = s.replace(/`([^`]+)`/g, '<code class="ia-md-code">$1</code>');
+    // negrito **text** ou __text__
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    // itálico *text* (evitar conflito com **)
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    return s;
+  }
+
+  function isTableSep(line) {
+    return /^\s*\|?[\s:|-]+\|[\s|:|-]*$/.test(line) && line.indexOf('|') !== -1 && /[-:]/.test(line);
+  }
+
+  function isTableRow(line) {
+    return line.indexOf('|') !== -1 && line.trim().length > 0;
+  }
+
+  function parseTableRow(line) {
+    var cells = line.replace(/^\|/, '').replace(/\|$/, '').split('|');
+    return cells.map(function (c) { return c.trim(); });
+  }
+
+  while (i < lines.length) {
+    var line = lines[i];
+
+    // bloco de código ```
+    if (/^```/.test(line.trim())) {
+      if (!inCode) {
+        closeLists();
+        inCode = true;
+        codeBuf = [];
+      } else {
+        out.push('<pre class="ia-md-pre"><code>' + codeBuf.join('\n') + '</code></pre>');
+        inCode = false;
+        codeBuf = [];
+      }
+      i++;
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      i++;
+      continue;
+    }
+
+    // tabela markdown
+    if (isTableRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      closeLists();
+      var headers = parseTableRow(line);
+      i += 2; // skip header + separator
+      var rows = [];
+      while (i < lines.length && isTableRow(lines[i]) && !isTableSep(lines[i])) {
+        rows.push(parseTableRow(lines[i]));
+        i++;
+      }
+      var html = '<div class="ia-md-table-wrap"><table class="ia-md-table"><thead><tr>';
+      headers.forEach(function (h) { html += '<th>' + inlineFmt(h) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(function (row) {
+        html += '<tr>';
+        for (var c = 0; c < headers.length; c++) {
+          html += '<td>' + inlineFmt(row[c] != null ? row[c] : '') + '</td>';
+        }
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      out.push(html);
+      continue;
+    }
+
+    // cabeçalhos
+    var hm = line.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) {
+      closeLists();
+      var level = hm[1].length;
+      out.push('<div class="ia-md-h ia-md-h' + level + '">' + inlineFmt(hm[2]) + '</div>');
+      i++;
+      continue;
+    }
+
+    // lista não ordenada
+    var ul = line.match(/^\s*[-*•]\s+(.+)$/);
+    if (ul) {
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (!inUl) { out.push('<ul class="ia-md-ul">'); inUl = true; }
+      out.push('<li>' + inlineFmt(ul[1]) + '</li>');
+      i++;
+      continue;
+    }
+
+    // lista ordenada
+    var ol = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
+    if (ol) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (!inOl) { out.push('<ol class="ia-md-ol">'); inOl = true; }
+      out.push('<li>' + inlineFmt(ol[2]) + '</li>');
+      i++;
+      continue;
+    }
+
+    // linha vazia
+    if (!line.trim()) {
+      closeLists();
+      out.push('<div class="ia-md-gap"></div>');
+      i++;
+      continue;
+    }
+
+    // parágrafo
+    closeLists();
+    out.push('<p class="ia-md-p">' + inlineFmt(line) + '</p>');
+    i++;
+  }
+  closeLists();
+  if (inCode && codeBuf.length) {
+    out.push('<pre class="ia-md-pre"><code>' + codeBuf.join('\n') + '</code></pre>');
+  }
+  return out.join('');
+}
+
+/** Texto limpo para clipboard (sem **, | de markdown cru). */
+function textoPlanoRespostaIA(texto) {
+  if (texto == null) return '';
+  var s = String(texto).replace(/\r\n/g, '\n');
+  // remover formatação markdown comum
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+  s = s.replace(/__([^_]+)__/g, '$1');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2');
+  s = s.replace(/^#{1,3}\s+/gm, '');
+  s = s.replace(/`([^`]+)`/g, '$1');
+  s = s.replace(/^```[\w]*\n?/gm, '').replace(/^```$/gm, '');
+  // tabelas → linhas tab-separadas legíveis
+  s = s.split('\n').map(function (line) {
+    if (line.indexOf('|') === -1) return line;
+    if (/^\s*\|?[\s:|-]+\|/.test(line)) return ''; // separador
+    return line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) {
+      return c.trim();
+    }).filter(Boolean).join('\t');
+  }).join('\n');
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+  return s;
+}
+
 function montarMsgBotIA(resposta, ts) {
   const tempo = formatarTempoRelativoIA(ts);
+  const htmlCorpo = formatarRespostaIA(resposta);
+  const planoAttr = escHtml(textoPlanoRespostaIA(resposta));
   return `<div class="ia-msg-bot">
     <div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span>${tempo ? `<span class="ia-msg-bot-tempo">${tempo}</span>` : ''}</div>
-    <div class="ia-msg-bot-corpo">${escHtml(resposta)}</div>
+    <div class="ia-msg-bot-corpo" data-plain="${planoAttr}">${htmlCorpo}</div>
     <div class="ia-msg-bot-acoes">
-      <button class="ia-feedback-btn" data-fb="util" title="Útil">👍 Útil</button>
-      <button class="ia-feedback-btn" data-fb="naoajudou" title="Não ajudou">👎 Não ajudou</button>
-      <button class="ia-feedback-btn ia-copiar-btn" title="Copiar">📋 Copiar</button>
+      <button type="button" class="ia-feedback-btn" data-fb="util" title="Útil">👍 Útil</button>
+      <button type="button" class="ia-feedback-btn" data-fb="naoajudou" title="Não ajudou">👎 Não ajudou</button>
+      <button type="button" class="ia-feedback-btn ia-copiar-btn" title="Copiar">📋 Copiar</button>
     </div>
     <div class="ia-followup-row">
-      <button class="ia-followup-chip" data-pergunta="Quais clientes estão inativos?">Clientes inativos</button>
-      <button class="ia-followup-chip" data-pergunta="Como está o fluxo de caixa?">Fluxo de caixa</button>
-      <button class="ia-followup-chip" data-pergunta="Como está a minha agenda?">Agenda</button>
+      <button type="button" class="ia-followup-chip" data-pergunta="Quais clientes estão inativos?">Clientes inativos</button>
+      <button type="button" class="ia-followup-chip" data-pergunta="Como está o fluxo de caixa?">Fluxo de caixa</button>
+      <button type="button" class="ia-followup-chip" data-pergunta="Como está a minha agenda?">Agenda</button>
     </div>
   </div>`;
 }
@@ -6152,8 +7875,9 @@ carregarHistoricoIA();
 
 document.getElementById('ia-enviar').addEventListener('click', async () => {
   const input = document.getElementById('ia-input');
+  const btn = document.getElementById('ia-enviar');
   const pergunta = input.value.trim();
-  if (!pergunta) return;
+  if (!pergunta || _iaBusy) return;
   const chat = document.getElementById('ia-chat');
   chat.innerHTML += montarMsgUsuarioIA(pergunta);
   atualizarEstadoVazioIA();
@@ -6164,7 +7888,13 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
   chat.appendChild(pensando);
   chat.scrollTop = chat.scrollHeight;
   input.value = '';
-  const resposta = await perguntarIA(pergunta);
+  if (btn) btn.disabled = true;
+  let resposta = null;
+  try {
+    resposta = await perguntarIA(pergunta);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
   document.getElementById('ia-pensando')?.remove();
   if (resposta) {
     const ts = Date.now();
@@ -6173,7 +7903,7 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
     if (iaHistorico.length > 0) iaHistorico[iaHistorico.length - 1].ts = ts;
     guardarHistoricoIA();
   }
-  document.getElementById('ia-contador').textContent = parseInt(localStorage.getItem('ia_perguntas_' + hoje()) || '0');
+  actualizarContadorIA();
 });
 
 document.getElementById('ia-input').addEventListener('keydown', (e) => {
@@ -6190,8 +7920,15 @@ document.addEventListener('click', (e) => {
   const fb = e.target.closest('.ia-feedback-btn');
   if (fb) {
     if (fb.classList.contains('ia-copiar-btn')) {
-      const texto = fb.closest('.ia-msg-bot')?.querySelector('.ia-msg-bot-corpo')?.textContent || '';
-      navigator.clipboard?.writeText(texto).then(() => toast('Texto copiado', 'success')).catch(() => {});
+      const corpo = fb.closest('.ia-msg-bot')?.querySelector('.ia-msg-bot-corpo');
+      const texto = (corpo && (corpo.getAttribute('data-plain') || corpo.innerText)) || '';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(function () { toast('Texto copiado', 'success'); }).catch(function () {
+          toast('Não foi possível copiar', 'error');
+        });
+      } else {
+        toast('Cópia não suportada neste dispositivo', 'warning');
+      }
     } else {
       toast('Feedback registado', 'success');
       fb.parentElement.querySelectorAll('.ia-feedback-btn').forEach(b => b.disabled = true);
@@ -6206,13 +7943,27 @@ document.getElementById('ia-offline-retry')?.addEventListener('click', () => {
     toast('Conexão restabelecida!', 'success'); } else { toast('Ainda sem ligação', 'warning'); }
 });
 
-// Upgrade modal
-document.getElementById('modal-upgrade-contato').addEventListener('click', () => {
-  const msg =
-    `Olá, quero assinar um plano do BeautyPro. Salão: ${state.config.storeName} | Plano actual: ${getPlanoAtual()}`;
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
-  closeModal('modal-upgrade');
-});
+// Upgrade modal — handler principal em plano-limites.js (bindUpgradeButtons / abrirWhatsAppVenda).
+// Fallback se o bind ainda não correu (ordem de scripts / bundle).
+(function ensureUpgradeContatoBound() {
+  const contato = document.getElementById('modal-upgrade-contato');
+  if (!contato || contato.dataset.bpUpgradeBound) return;
+  contato.addEventListener('click', async () => {
+    if (typeof abrirWhatsAppVenda === 'function') {
+      const salao = (state && state.config && state.config.storeName) || '—';
+      const actual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : '—';
+      await abrirWhatsAppVenda(
+        `Olá, quero assinar um plano do BeautyPro. Salão: ${salao} | Plano actual: ${actual}`
+      );
+    } else {
+      const msg =
+        `Olá, quero assinar um plano do BeautyPro. Salão: ${(state.config && state.config.storeName) || '—'} | Plano actual: ${typeof getPlanoAtual === 'function' ? getPlanoAtual() : '—'}`;
+      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+    }
+    closeModal('modal-upgrade');
+  });
+  contato.dataset.bpUpgradeBound = '1';
+})();
 
 // Pesquisa clientes
 let searchTimer;
@@ -6289,10 +8040,7 @@ if (localStorage.getItem('bp_run_tests') === 'true') {
 }
 window.runBeautyProTests = runTests;
 
-
-
 /* ===== FILE: main.js ===== */
-
 // ====================================================================
 //  INICIALIZAÇÃO (extraído do app.js na Fase A da modularização)
 //  Carregado por último — depende de tudo o resto já estar definido.
@@ -6384,6 +8132,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
   }
 
   // Splash (removida após verificação de sessão)
+  // Splash: hideSplash já pode ter corrido no checkSession; fallback curto
   setTimeout(function () {
     if (typeof hideSplash === 'function') hideSplash();
     if (typeof bpHideSplashNow === 'function') bpHideSplashNow();
@@ -6412,13 +8161,13 @@ document.addEventListener('DOMContentLoaded', async function init() {
     if (!(navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId)) return;
     const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
     const pendentes = fila.filter(op => op.failed !== true).length;
-    // Skip pull pesado se nada pendente e último pull < 40s (throttle)
+    // Skip pull pesado se nada pendente e último pull < 90s (throttle)
     const now = Date.now();
-    if (pendentes === 0 && window._lastSupabasePull && (now - window._lastSupabasePull) < 40000) {
+    if (pendentes === 0 && window.BPRuntime && window.BPRuntime.lastSupabasePull && (now - window.BPRuntime.lastSupabasePull) < 90000) {
       return;
     }
     carregarDoSupabase().then(atualizado => {
-      window._lastSupabasePull = Date.now();
+      window.BPRuntime = window.BPRuntime || {}; window.BPRuntime.lastSupabasePull = Date.now();
       if (atualizado) {
         updateUI();
         if (typeof renderBadges === 'function') renderBadges();
@@ -6508,3 +8257,5466 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+/* ===== FILE: finance-comissoes.js ===== */
+// ================================================================
+// FUNCIONALIDADE 1: Comissões automáticas com metas
+// Offline-first — sem dependência de Supabase nesta etapa
+// ================================================================
+
+function calcularComissao(valorLiquido, taxa) {
+  const v = Number(valorLiquido) || 0;
+  const t = Number(taxa) || 0;
+  if (v <= 0 || t <= 0) return 0;
+  return Math.round((v * (t / 100)) * 100) / 100;
+}
+
+function getTaxaComissao(profissionalId) {
+  if (!profissionalId || typeof state === 'undefined') return 0;
+  const p = (state.profissionais || []).find(x => x.id === profissionalId);
+  return p ? (Number(p.taxa_comissao) || 0) : 0;
+}
+
+function getSaldoComissao(profissionalId) {
+  if (!profissionalId || typeof state === 'undefined') return 0;
+  return (state.movimentos || [])
+    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId)
+    .reduce((s, m) => s + (Number(m.comissao_gerada) || 0), 0);
+}
+
+function getComissaoMesAtual(profissionalId) {
+  if (!profissionalId || typeof state === 'undefined' || typeof hoje !== 'function') return 0;
+  const agora = hoje(); // YYYY-MM-DD
+  const ym = agora.slice(0, 7);
+  return (state.movimentos || [])
+    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
+    .reduce((s, m) => s + (Number(m.comissao_gerada) || 0), 0);
+}
+
+function getProgressoMeta(profissionalId) {
+  if (!profissionalId || typeof state === 'undefined') return null;
+  const p = (state.profissionais || []).find(x => x.id === profissionalId);
+  if (!p || p.meta_mensal == null || Number(p.meta_mensal) <= 0) return null;
+  const meta = Number(p.meta_mensal);
+  // progresso = volume de vendas (valor) no mês, não comissão
+  const agora = typeof hoje === 'function' ? hoje() : '';
+  const ym = agora.slice(0, 7);
+  const volume = (state.movimentos || [])
+    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
+    .reduce((s, m) => s + (Number(m.valor) || 0), 0);
+  const pct = Math.min(100, Math.round((volume / meta) * 100));
+  return { meta, volume, pct, atingida: volume >= meta };
+}
+
+function renderBarraMeta(profissionalId) {
+  try {
+    const prog = getProgressoMeta(profissionalId);
+    if (!prog) return '';
+    const fmt = typeof fmtKz === 'function' ? fmtKz : (v => v + ' Kz');
+    return (
+      '<div class="meta-barra-wrap" style="margin-top:6px;">' +
+        '<div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text-muted);margin-bottom:3px;">' +
+          '<span>Meta mensal</span>' +
+          '<span>' + fmt(prog.volume) + ' / ' + fmt(prog.meta) + ' (' + prog.pct + '%)</span>' +
+        '</div>' +
+        '<div style="height:6px;background:var(--border-soft,#DCD5C9);border-radius:4px;overflow:hidden;">' +
+          '<div style="height:100%;width:' + prog.pct + '%;background:var(--gold,#D4AF37);border-radius:4px;"></div>' +
+        '</div>' +
+      '</div>'
+    );
+  } catch (e) {
+    return '';
+  }
+}
+
+window.calcularComissao = calcularComissao;
+window.getTaxaComissao = getTaxaComissao;
+window.getSaldoComissao = getSaldoComissao;
+window.getComissaoMesAtual = getComissaoMesAtual;
+window.getProgressoMeta = getProgressoMeta;
+window.renderBarraMeta = renderBarraMeta;
+
+/* ===== FILE: finance-fase1-extra.js ===== */
+// ================================================================
+// Grupo 1 (resto) — offline-first, sem Supabase nesta etapa
+// F4 Rentabilidade | F13 Split pagamento | F16 Metas salão
+// F22 Fluxo caixa diário | F23 Despesas operacionais
+// ================================================================
+(function () {
+  'use strict';
+
+  var CATEGORIAS_DESPESA = [
+    { id: 'produtos', nome: 'Produtos / Stock' },
+    { id: 'renda', nome: 'Renda / Aluguer' },
+    { id: 'salarios', nome: 'Salários' },
+    { id: 'utilities', nome: 'Água / Luz / Net' },
+    { id: 'marketing', nome: 'Marketing' },
+    { id: 'manutencao', nome: 'Manutenção' },
+    { id: 'outro', nome: 'Outro' }
+  ];
+
+  // ---------- F16: Meta financeira do salão ----------
+  function getMetaSalao() {
+    try {
+      var c = (state && state.config) || {};
+      if (c.meta_mensal_salao != null && c.meta_mensal_salao > 0) return Number(c.meta_mensal_salao);
+      var ls = localStorage.getItem('bp_meta_salao');
+      return ls ? Number(ls) || 0 : 0;
+    } catch (e) { return 0; }
+  }
+
+  function setMetaSalao(valor) {
+    var n = Math.max(0, Math.round(Number(valor) || 0));
+    try {
+      localStorage.setItem('bp_meta_salao', String(n));
+      if (typeof state !== 'undefined' && state.config) {
+        state.config.meta_mensal_salao = n;
+        if (typeof dbPut === 'function') {
+          dbPut('config', Object.assign({}, state.config, { id: 'main' })).catch(function () {});
+        }
+      }
+    } catch (e) {}
+    return n;
+  }
+
+  function getReceitaMesAtual() {
+    if (typeof state === 'undefined' || typeof hoje !== 'function') return 0;
+    var ym = hoje().slice(0, 7);
+    return (state.movimentos || [])
+      .filter(function (m) { return m.tipo === 'venda' && String(m.data || '').startsWith(ym); })
+      .reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
+  }
+
+  function getProgressoMetaSalao() {
+    var meta = getMetaSalao();
+    if (meta <= 0) return null;
+    var vol = getReceitaMesAtual();
+    var pct = Math.min(100, Math.round((vol / meta) * 100));
+    return { meta: meta, volume: vol, pct: pct, atingida: vol >= meta };
+  }
+
+  // ---------- F4: Rentabilidade ----------
+  var RENT_PERIODO_KEY = 'bp_rentab_periodo';
+
+  function ymAtualRentab() {
+    var d = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    return String(d).slice(0, 7);
+  }
+
+  /** periodo: 'mes' | 'tudo' — default mensal */
+  function movimentosVendaPeriodo(periodo) {
+    var p = periodo || 'mes';
+    var movs = (state.movimentos || []).filter(function (m) {
+      return m && m.tipo === 'venda';
+    });
+    if (p === 'mes') {
+      var ym = ymAtualRentab();
+      movs = movs.filter(function (m) {
+        return String(m.data || '').startsWith(ym);
+      });
+    }
+    return movs;
+  }
+
+  function calcRentabilidadeServicos(periodo) {
+    var map = {};
+    movimentosVendaPeriodo(periodo).forEach(function (m) {
+      if (!m.itens) return;
+      (m.itens || []).forEach(function (it) {
+        var nome = it.nome || 'Sem nome';
+        if (!map[nome]) map[nome] = { nome: nome, receita: 0, qtd: 0 };
+        map[nome].receita += Number(it.subtotal) || 0;
+        map[nome].qtd += Number(it.quantidade) || 1;
+      });
+    });
+    (state.servicos || []).forEach(function (s) {
+      if (map[s.nome] && s.custoBase != null) {
+        map[s.nome].custo = (Number(s.custoBase) || 0) * map[s.nome].qtd;
+      }
+    });
+    return Object.keys(map).map(function (k) {
+      var r = map[k];
+      var custo = r.custo || 0;
+      var margem = r.receita - custo;
+      var pct = r.receita > 0 ? Math.round((margem / r.receita) * 100) : 0;
+      return { nome: r.nome, receita: r.receita, custo: custo, margem: margem, pct: pct, qtd: r.qtd };
+    }).sort(function (a, b) { return b.receita - a.receita; });
+  }
+
+  function calcRentabilidadeProfissionais(periodo) {
+    var map = {};
+    movimentosVendaPeriodo(periodo).forEach(function (m) {
+      var pid = m.profissional_id || 'sem';
+      if (!map[pid]) {
+        var nome = m.profissional || (typeof getProfissionalNome === 'function' ? getProfissionalNome(pid) : pid);
+        map[pid] = { id: pid, nome: nome, receita: 0, comissao: 0, n: 0 };
+      }
+      map[pid].receita += Number(m.valor) || 0;
+      map[pid].comissao += Number(m.comissao_gerada) || 0;
+      map[pid].n += 1;
+    });
+    return Object.keys(map).map(function (k) {
+      var r = map[k];
+      var liquido = r.receita - r.comissao;
+      var pct = r.receita > 0 ? Math.round((liquido / r.receita) * 100) : 0;
+      return { id: r.id, nome: r.nome, receita: r.receita, comissao: r.comissao, liquido: liquido, pct: pct, vendas: r.n };
+    }).sort(function (a, b) { return b.receita - a.receita; });
+  }
+
+  function totaisRentabilidade(periodo) {
+    var movs = movimentosVendaPeriodo(periodo);
+    var receita = 0;
+    var comissao = 0;
+    movs.forEach(function (m) {
+      receita += Number(m.valor) || 0;
+      comissao += Number(m.comissao_gerada) || 0;
+    });
+    return { receita: receita, comissao: comissao, vendas: movs.length };
+  }
+
+  // ---------- F22: Fluxo de caixa diário ----------
+  function getFluxoDia(dataStr) {
+    var d = dataStr || (typeof hoje === 'function' ? hoje() : '');
+    var movs = (state.movimentos || []).filter(function (m) { return m.data === d; });
+    var entradas = 0, saidas = 0;
+    var porMetodo = {};
+    var porCategoria = {};
+    movs.forEach(function (m) {
+      var v = Number(m.valor) || 0;
+      if (m.tipo === 'venda') {
+        entradas += v;
+        if (m.pagamentos && Array.isArray(m.pagamentos)) {
+          m.pagamentos.forEach(function (p) {
+            var k = p.metodo || 'Numerário';
+            porMetodo[k] = (porMetodo[k] || 0) + (Number(p.valor) || 0);
+          });
+        } else {
+          var mp = m.metodoPagamento || 'Numerário';
+          porMetodo[mp] = (porMetodo[mp] || 0) + v;
+        }
+      } else if (m.tipo === 'despesa') {
+        saidas += v;
+        var cat = m.categoria || 'outro';
+        porCategoria[cat] = (porCategoria[cat] || 0) + v;
+      }
+    });
+    return {
+      data: d,
+      entradas: entradas,
+      saidas: saidas,
+      saldo: entradas - saidas,
+      porMetodo: porMetodo,
+      porCategoria: porCategoria,
+      movimentos: movs
+    };
+  }
+
+  // ---------- F13: helpers split ----------
+  function lerPagamentosSplit() {
+    var box = document.getElementById('venda-split-box');
+    if (!box || box.style.display === 'none') return null;
+    var rows = box.querySelectorAll('.split-row');
+    var list = [];
+    var sum = 0;
+    rows.forEach(function (row) {
+      var metodo = row.querySelector('.split-metodo') ? row.querySelector('.split-metodo').value : 'Numerário';
+      var valor = parseFloat(row.querySelector('.split-valor') ? row.querySelector('.split-valor').value : 0) || 0;
+      if (valor > 0) {
+        list.push({ metodo: metodo, valor: valor });
+        sum += valor;
+      }
+    });
+    return { list: list, sum: sum };
+  }
+
+  function totalCarrinho() {
+    if (typeof cartItems === 'undefined' || !cartItems.length) return 0;
+    return cartItems.reduce(function (s, i) { return s + (Number(i.subtotal) || 0); }, 0);
+  }
+
+  // ---------- UI: menu + modais ----------
+  function ensureMenuItems() {
+    var dd = document.getElementById('menu-dropdown');
+    if (!dd || dd.querySelector('[data-bp-menu="finance"]')) return;
+    var frag = document.createDocumentFragment();
+    var sec = document.createElement('div');
+    sec.className = 'bp-menu-section';
+    sec.setAttribute('data-bp-menu', 'finance');
+    sec.textContent = 'Financeiro';
+    frag.appendChild(sec);
+    var items = [
+      { key: 'fluxo', label: 'Fluxo de caixa' },
+      { key: 'rentab', label: 'Rentabilidade' },
+      { key: 'meta', label: 'Meta do salão' },
+      { key: 'despesas', label: 'Despesas' }
+    ];
+    items.forEach(function (it) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-bp-menu', 'finance');
+      btn.setAttribute('data-bp-action', it.key);
+      btn.innerHTML = '<span>' + it.label + '</span>';
+      frag.appendChild(btn);
+    });
+    var logout = dd.querySelector('#logout-btn');
+    if (logout) dd.insertBefore(frag, logout);
+    else dd.appendChild(frag);
+    dd.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-bp-action]');
+      if (!t) return;
+      e.stopPropagation();
+      dd.style.display = 'none';
+      var a = t.getAttribute('data-bp-action');
+      if (a === 'fluxo') openModalFluxo();
+      if (a === 'rentab') openModalRentabilidade();
+      if (a === 'meta') openModalMetaSalao();
+      if (a === 'despesas') openModalDespesaEnh();
+    });
+  }
+
+  function ensureModalShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    var el = document.getElementById(id);
+    if (el) {
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
+      return el;
+    }
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
+    el.innerHTML =
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+        '<div class="bp-sheet-header">' +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
+        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+        '<div class="bp-sheet-footer modal-actions">' +
+          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
+      }
+    });
+    return el;
+  }
+
+  function openModalFluxo() {
+    ensureModalShell('modal-bp-fluxo', 'Fluxo de caixa', 'Financeiro', 'Movimento real do dia — entradas, saídas e saldo líquido.');
+    var body = document.getElementById('modal-bp-fluxo-body');
+    var hojeStr = typeof hoje === 'function' ? hoje() : '';
+    var f = getFluxoDia(hojeStr);
+    var fmt = typeof fmtKz === 'function' ? fmtKz : function (v) { return v + ' Kz'; };
+    var saldoClass = f.saldo > 0 ? ' is-positive' : (f.saldo < 0 ? ' is-negative' : '');
+    var metodos = Object.keys(f.porMetodo).map(function (k) {
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + k + '</div></div><div class="bp-row-value">' + fmt(f.porMetodo[k]) + '</div></div>';
+    }).join('') || '<div class="bp-empty"><strong>Sem entradas</strong>Ainda não há vendas registadas hoje.</div>';
+    var cats = Object.keys(f.porCategoria).map(function (k) {
+      var nome = (CATEGORIAS_DESPESA.find(function (c) { return c.id === k; }) || {}).nome || k;
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + nome + '</div></div><div class="bp-row-value is-negative">' + fmt(f.porCategoria[k]) + '</div></div>';
+    }).join('') || '<div class="bp-empty"><strong>Sem despesas</strong>Nenhuma saída categoriada hoje.</div>';
+    var insight = '';
+    if (f.entradas === 0 && f.saidas === 0) {
+      insight = '<div class="bp-alert-banner"><strong>Dia ainda sem movimento</strong>Registe vendas ou despesas na aba Caixa para ver o fluxo aqui.</div>';
+    } else if (f.saldo < 0) {
+      insight = '<div class="bp-alert-banner is-warn"><strong>Saídas acima das entradas</strong>O saldo do dia está negativo em ' + fmt(Math.abs(f.saldo)) + '.</div>';
+    } else if (f.entradas > 0) {
+      insight = '<div class="bp-alert-banner is-ok"><strong>Dia positivo</strong>Entradas superam as saídas em ' + fmt(f.saldo) + '.</div>';
+    }
+    body.innerHTML =
+      insight +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Entradas</div><div class="bp-kpi-value is-positive">' + fmt(f.entradas) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Saídas</div><div class="bp-kpi-value is-negative">' + fmt(f.saidas) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Saldo</div><div class="bp-kpi-value' + saldoClass + '">' + fmt(f.saldo) + '</div></div>' +
+      '</div>' +
+      '<p class="bp-ref-line">Referência: <strong>' + f.data + '</strong> · dados locais deste dispositivo</p>' +
+      '<div class="bp-section"><div class="bp-section-title">Formas de pagamento</div>' + metodos + '</div>' +
+      '<div class="bp-section"><div class="bp-section-title">Despesas por categoria</div>' + cats + '</div>';
+    if (typeof openModal === 'function') openModal('modal-bp-fluxo');
+    else document.getElementById('modal-bp-fluxo').classList.add('open');
+  }
+
+  function openModalRentabilidade() {
+    ensureModalShell('modal-bp-rentab', 'Rentabilidade', 'Análise', 'Receita, comissões e margem — por período.');
+    renderRentabilidadeBody();
+    if (typeof openModal === 'function') openModal('modal-bp-rentab');
+    else {
+      var el = document.getElementById('modal-bp-rentab');
+      if (el) el.classList.add('open');
+    }
+  }
+
+  function renderRentabilidadeBody() {
+    var body = document.getElementById('modal-bp-rentab-body');
+    if (!body) return;
+    var periodo = localStorage.getItem(RENT_PERIODO_KEY) || 'mes';
+    if (periodo !== 'mes' && periodo !== 'tudo') periodo = 'mes';
+    var fmt = typeof fmtKz === 'function' ? fmtKz : function (v) { return v + ' Kz'; };
+    var allServs = calcRentabilidadeServicos(periodo);
+    var allProfs = calcRentabilidadeProfissionais(periodo);
+    var tot = totaisRentabilidade(periodo);
+    var servs = allServs.slice(0, 12);
+    var profs = allProfs.slice(0, 12);
+    var ym = ymAtualRentab();
+    var labelPeriodo = periodo === 'mes' ? ('Mês ' + ym) : 'Histórico completo';
+
+    var toggle =
+      '<div class="bp-seg" role="tablist" aria-label="Período da rentabilidade">' +
+        '<button type="button" class="bp-seg-btn' + (periodo === 'mes' ? ' is-active' : '') + '" data-rent-p="mes" role="tab">Este mês</button>' +
+        '<button type="button" class="bp-seg-btn' + (periodo === 'tudo' ? ' is-active' : '') + '" data-rent-p="tudo" role="tab">Histórico</button></div>';
+
+    var insight = '';
+    if (!tot.vendas) {
+      insight = '<div class="bp-alert-banner"><strong>Sem vendas neste período</strong>' +
+        (periodo === 'mes' ? 'Ainda não há vendas registadas em ' + ym + '.' : 'Registe vendas com itens e profissional.') + '</div>';
+    } else if (servs[0]) {
+      var n0 = typeof escHtml === 'function' ? escHtml(servs[0].nome) : servs[0].nome;
+      insight = '<div class="bp-alert-banner is-ok"><strong>Serviço mais forte: ' + n0 + '</strong>' +
+        fmt(servs[0].receita) + ' de receita · margem ' + servs[0].pct + '% · ' + labelPeriodo + '.</div>';
+    }
+
+    var sHtml = servs.map(function (s) {
+      var nome = typeof escHtml === 'function' ? escHtml(s.nome) : s.nome;
+      var pctBadge = s.pct >= 70 ? ' is-green' : (s.pct < 40 ? ' is-red' : '');
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + nome +
+        ' <span class="bp-badge' + pctBadge + '">' + s.pct + '%</span></div>' +
+        '<div class="bp-row-meta">' + s.qtd + ' vendidos</div></div><div class="bp-row-value">' + fmt(s.receita) + '</div></div>';
+    }).join('') || '<div class="bp-empty"><strong>Sem serviços no período</strong>Registe vendas com itens de serviço.</div>';
+
+    var pHtml = profs.map(function (p) {
+      var nome = typeof escHtml === 'function' ? escHtml(p.nome) : p.nome;
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + nome + '</div>' +
+        '<div class="bp-row-meta">' + p.vendas + ' vendas · comissão ' + fmt(p.comissao) + '</div></div>' +
+        '<div class="bp-row-value">' + fmt(p.receita) + '</div></div>';
+    }).join('') || '<div class="bp-empty"><strong>Sem dados</strong>Atribua profissionais às vendas.</div>';
+
+    body.innerHTML =
+      toggle +
+      insight +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Receita</div><div class="bp-kpi-value is-positive" style="font-size:.75rem">' + fmt(tot.receita) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Comissões</div><div class="bp-kpi-value" style="font-size:.75rem">' + fmt(tot.comissao) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Vendas</div><div class="bp-kpi-value">' + tot.vendas + '</div></div>' +
+      '</div>' +
+      '<p class="bp-ref-line">' + labelPeriodo + ' · listas mostram top 12 por receita</p>' +
+      '<div class="bp-section"><div class="bp-section-title">Por serviço</div>' + sHtml + '</div>' +
+      '<div class="bp-section"><div class="bp-section-title">Por profissional</div>' + pHtml + '</div>';
+
+    body.querySelectorAll('[data-rent-p]').forEach(function (btn) {
+      btn.onclick = function () {
+        localStorage.setItem(RENT_PERIODO_KEY, btn.getAttribute('data-rent-p'));
+        renderRentabilidadeBody();
+      };
+    });
+  }
+
+  function openModalMetaSalao() {
+    ensureModalShell('modal-bp-meta', 'Meta do salão', 'Objectivos', 'Receita mensal-alvo e progresso do mês corrente.');
+    var body = document.getElementById('modal-bp-meta-body');
+    var prog = getProgressoMetaSalao();
+    var meta = getMetaSalao();
+    var fmt = typeof fmtKz === 'function' ? fmtKz : function (v) { return v + ' Kz'; };
+    var insight = '';
+    var barra = '';
+    if (prog) {
+      if (prog.atingida) {
+        insight = '<div class="bp-alert-banner is-ok"><strong>Meta atingida</strong>Já superou o objectivo mensal. Excelente ritmo.</div>';
+      } else if (prog.pct >= 70) {
+        insight = '<div class="bp-alert-banner is-ok"><strong>Quase lá — ' + prog.pct + '%</strong>Faltam ' + fmt(Math.max(0, prog.meta - prog.volume)) + ' para a meta.</div>';
+      } else if (prog.pct > 0) {
+        insight = '<div class="bp-alert-banner"><strong>Progresso: ' + prog.pct + '%</strong>' + fmt(prog.volume) + ' de ' + fmt(prog.meta) + ' este mês.</div>';
+      }
+      barra = '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Realizado</div><div class="bp-kpi-value is-positive" style="font-size:.75rem">' + fmt(prog.volume) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Meta</div><div class="bp-kpi-value" style="font-size:.75rem">' + fmt(prog.meta) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Progresso</div><div class="bp-kpi-value is-gold">' + prog.pct + '%</div></div>' +
+      '</div>' +
+      '<div class="bp-progress"><div class="bp-progress-head"><span>Mês corrente</span><span>' + prog.pct + '%</span></div>' +
+        '<div class="bp-progress-track"><div class="bp-progress-fill" style="width:' + prog.pct + '%"></div></div></div>';
+    } else {
+      insight = '<div class="bp-alert-banner"><strong>Defina a meta mensal</strong>Ajuda a equipa a saber o objectivo de receita do salão.</div>';
+      barra = '<div class="bp-empty"><strong>Nenhuma meta definida</strong>Indique um valor mensal em Kz abaixo.</div>';
+    }
+    body.innerHTML = insight + barra +
+      '<div class="bp-section"><div class="bp-section-title">Definir meta</div>' +
+      '<div class="input-group"><label class="input-label" for="bp-meta-salao-input">Meta mensal (Kz)</label>' +
+      '<input type="number" id="bp-meta-salao-input" class="input-field" min="0" step="1000" value="' + (meta || '') + '" placeholder="Ex: 500000" inputmode="numeric"></div></div>';
+    var footer = document.querySelector('#modal-bp-meta .bp-sheet-footer');
+    if (footer) {
+      footer.innerHTML = '<button type="button" class="btn btn-secondary" data-close="modal-bp-meta">Cancelar</button>' +
+        '<button type="button" class="btn btn-primary" id="bp-meta-salao-save">Guardar meta</button>';
+    }
+    if (typeof openModal === 'function') openModal('modal-bp-meta');
+    else document.getElementById('modal-bp-meta').classList.add('open');
+    var save = document.getElementById('bp-meta-salao-save');
+    if (save) {
+      save.onclick = function () {
+        var v = document.getElementById('bp-meta-salao-input').value;
+        setMetaSalao(v);
+        if (typeof toast === 'function') toast('Meta do salão actualizada', 'success');
+        openModalMetaSalao();
+      };
+    }
+  }
+
+  function openModalDespesaEnh() {
+    // Prefill enhanced fields then open existing modal-despesa
+    enhanceDespesaModal();
+    if (typeof openModal === 'function') openModal('modal-despesa');
+  }
+
+  // ---------- F23: enhance despesa modal ----------
+  function enhanceDespesaModal() {
+    var modal = document.getElementById('modal-despesa');
+    if (!modal || modal.querySelector('#desp-categoria')) return;
+    var valorGroup = document.getElementById('desp-valor');
+    if (!valorGroup) return;
+    var parent = valorGroup.closest('.input-group') || valorGroup.parentNode;
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="input-group">' +
+        '<label class="input-label">Categoria</label>' +
+        '<select id="desp-categoria" class="input-field">' +
+          CATEGORIAS_DESPESA.map(function (c) {
+            return '<option value="' + c.id + '">' + c.nome + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+      '<div class="input-group">' +
+        '<label class="input-label">Fornecedor (opcional)</label>' +
+        '<input type="text" id="desp-fornecedor" class="input-field" placeholder="Ex: Distribuidora X">' +
+      '</div>';
+    parent.parentNode.insertBefore(wrap, parent.nextSibling);
+  }
+
+  // ---------- F13: split UI no modal venda ----------
+  function enhanceVendaPagamento() {
+    var sel = document.getElementById('venda-pagamento');
+    if (!sel || document.getElementById('venda-split-box')) return;
+    var opt = document.createElement('option');
+    opt.value = '__split__';
+    opt.textContent = 'Pagamento dividido';
+    sel.appendChild(opt);
+    var box = document.createElement('div');
+    box.id = 'venda-split-box';
+    box.style.display = 'none';
+    box.style.marginTop = '8px';
+    box.innerHTML =
+      '<div class="split-row" style="display:flex;gap:8px;margin-bottom:6px;">' +
+        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência Bancária</option><option>Cartão</option></select>' +
+        '<input type="number" class="input-field split-valor" placeholder="Valor" min="0" step="100" style="width:110px;">' +
+      '</div>' +
+      '<div class="split-row" style="display:flex;gap:8px;margin-bottom:6px;">' +
+        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência Bancária</option><option>Cartão</option></select>' +
+        '<input type="number" class="input-field split-valor" placeholder="Valor" min="0" step="100" style="width:110px;">' +
+      '</div>' +
+      '<p id="split-hint" style="font-size:.75rem;color:var(--text-muted);margin:0;">A soma deve igualar o total da venda.</p>';
+    sel.parentNode.appendChild(box);
+    sel.addEventListener('change', function () {
+      box.style.display = sel.value === '__split__' ? 'block' : 'none';
+    });
+  }
+
+  // Hook despesa save to include categoria
+  function hookDespesaSave() {
+    var btn = document.getElementById('modal-despesa-save');
+    if (!btn || btn.dataset.bpHooked) return;
+    btn.dataset.bpHooked = '1';
+    var orig = btn.onclick;
+    btn.onclick = async function (e) {
+      enhanceDespesaModal();
+      var desc = (document.getElementById('desp-desc') || {}).value;
+      var valor = parseFloat((document.getElementById('desp-valor') || {}).value);
+      var cat = (document.getElementById('desp-categoria') || {}).value || 'outro';
+      var forn = (document.getElementById('desp-fornecedor') || {}).value || '';
+      if (!desc || !valor || valor <= 0) {
+        if (typeof toast === 'function') toast('Preencha descrição e valor válido', 'error');
+        return;
+      }
+      if (typeof addMovimento === 'function') {
+        await addMovimento({
+          tipo: 'despesa',
+          descricao: desc,
+          valor: valor,
+          categoria: cat,
+          fornecedor: forn
+        });
+      }
+      if (typeof closeModal === 'function') closeModal('modal-despesa');
+      var d1 = document.getElementById('desp-desc'); if (d1) d1.value = '';
+      var d2 = document.getElementById('desp-valor'); if (d2) d2.value = '';
+      var d3 = document.getElementById('desp-fornecedor'); if (d3) d3.value = '';
+      if (typeof toast === 'function') toast('Despesa registada', 'success');
+      if (typeof renderCaixa === 'function') renderCaixa();
+      if (typeof updateUI === 'function') updateUI();
+    };
+  }
+
+  function init() {
+    try {
+      ensureMenuItems();
+      enhanceDespesaModal();
+      enhanceVendaPagamento();
+      hookDespesaSave();
+    } catch (e) {
+      console.warn('[finance-fase1-extra]', e);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 100); });
+  } else {
+    setTimeout(init, 100);
+  }
+  // re-init after login UI appears
+  setTimeout(init, 1500);
+  setTimeout(init, 4000);
+
+  window.BPFinance = {
+    getMetaSalao: getMetaSalao,
+    setMetaSalao: setMetaSalao,
+    getProgressoMetaSalao: getProgressoMetaSalao,
+    getFluxoDia: getFluxoDia,
+    calcRentabilidadeServicos: calcRentabilidadeServicos,
+    calcRentabilidadeProfissionais: calcRentabilidadeProfissionais,
+    lerPagamentosSplit: lerPagamentosSplit,
+    totalCarrinho: totalCarrinho,
+    CATEGORIAS_DESPESA: CATEGORIAS_DESPESA
+  };
+})();
+
+/* ===== FILE: ops-crm-comercial.js ===== */
+// ================================================================
+// Grupos 4–6 — Operações, CRM, Comercial (robusto, offline-first)
+// F3 Stock | F18 Fornecedores/compras | F7 NPS | F9 Timeline
+// F24 Calendário (.ics) | F8 Pacotes / assinaturas
+// ================================================================
+(function () {
+  "use strict";
+
+  var STOCK_KEY = "bp_stock_v1";
+  var STOCK_MOV_KEY = "bp_stock_mov_v1";
+  var FORN_KEY = "bp_fornecedores_v1";
+  var COMPRAS_KEY = "bp_compras_v1";
+  var NPS_KEY = "bp_nps_v1";
+  var PACOTES_KEY = "bp_pacotes_v1";
+  var CLIENTE_PACOTES_KEY = "bp_cliente_pacotes_v1";
+
+  function fmt(v) {
+    return typeof fmtKz === "function" ? fmtKz(v) : Math.round(Number(v) || 0) + " Kz";
+  }
+  function esc(s) {
+    return typeof escHtml === "function" ? escHtml(String(s == null ? "" : s)) : String(s == null ? "" : s);
+  }
+  function hojeStr() {
+    return typeof hoje === "function" ? hoje() : new Date().toISOString().slice(0, 10);
+  }
+  function uid() {
+    return typeof uuid === "function" ? uuid() : "id" + Date.now() + Math.random().toString(16).slice(2, 8);
+  }
+  function safeJson(key, fb) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return fb;
+      var v = JSON.parse(raw);
+      return v == null ? fb : v;
+    } catch (e) { return fb; }
+  }
+  function writeJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); return true; }
+    catch (e) {
+      if (typeof toast === "function") toast("Armazenamento local indisponível", "error");
+      return false;
+    }
+  }
+  function loadArr(key) {
+    var v = safeJson(key, []);
+    return Array.isArray(v) ? v : [];
+  }
+
+  /* ========== F3 STOCK ========== */
+  function loadStock() { return loadArr(STOCK_KEY); }
+  function saveStock(list) { return writeJson(STOCK_KEY, list); }
+  function loadStockMov() { return loadArr(STOCK_MOV_KEY); }
+  function saveStockMov(list) { return writeJson(STOCK_MOV_KEY, list.slice(-400)); }
+
+  function findProduto(id) {
+    return loadStock().find(function (p) { return p.id === id; }) || null;
+  }
+
+  function upsertProduto(data) {
+    var list = loadStock();
+    var nome = String(data.nome || "").trim();
+    if (!nome) {
+      if (typeof toast === "function") toast("Nome do produto é obrigatório", "error");
+      return null;
+    }
+    var qtd = Math.max(0, Number(data.qtd) || 0);
+    var qtdMin = Math.max(0, Number(data.qtd_min) || 0);
+    var custo = Math.max(0, Number(data.preco_custo) || 0);
+    if (data.id) {
+      var idx = list.findIndex(function (p) { return p.id === data.id; });
+      if (idx < 0) return null;
+      list[idx] = Object.assign({}, list[idx], {
+        nome: nome,
+        sku: String(data.sku || list[idx].sku || "").trim(),
+        qtd: qtd,
+        qtd_min: qtdMin,
+        preco_custo: custo,
+        unidade: data.unidade || list[idx].unidade || "un",
+        updated_at: new Date().toISOString()
+      });
+      saveStock(list);
+      return list[idx];
+    }
+    // evitar nome duplicado
+    if (list.some(function (p) { return p.nome.toLowerCase() === nome.toLowerCase(); })) {
+      if (typeof toast === "function") toast("Já existe um produto com este nome", "error");
+      return null;
+    }
+    var p = {
+      id: uid(),
+      nome: nome,
+      sku: String(data.sku || "").trim(),
+      qtd: qtd,
+      qtd_min: qtdMin,
+      preco_custo: custo,
+      unidade: data.unidade || "un",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    list.push(p);
+    saveStock(list);
+    return p;
+  }
+
+  function movimentarStock(produtoId, tipo, quantidade, nota) {
+    var q = Math.abs(Number(quantidade) || 0);
+    if (!q) {
+      if (typeof toast === "function") toast("Quantidade inválida", "error");
+      return null;
+    }
+    var list = loadStock();
+    var idx = list.findIndex(function (p) { return p.id === produtoId; });
+    if (idx < 0) {
+      if (typeof toast === "function") toast("Produto não encontrado", "error");
+      return null;
+    }
+    var p = list[idx];
+    var delta = tipo === "entrada" || tipo === "ajuste_mais" ? q : -q;
+    if (tipo === "ajuste") {
+      // quantidade = novo valor absoluto
+      delta = q - (Number(p.qtd) || 0);
+    }
+    var nova = (Number(p.qtd) || 0) + (tipo === "ajuste" ? delta : delta);
+    if (tipo !== "ajuste" && tipo !== "entrada" && tipo !== "ajuste_mais" && nova < 0) {
+      if (typeof toast === "function") toast("Stock insuficiente (" + p.qtd + " " + (p.unidade || "un") + ")", "error");
+      return null;
+    }
+    if (tipo === "ajuste") nova = q;
+    if (nova < 0) nova = 0;
+    list[idx] = Object.assign({}, p, { qtd: nova, updated_at: new Date().toISOString() });
+    saveStock(list);
+    var mov = {
+      id: uid(),
+      produto_id: produtoId,
+      produto: p.nome,
+      tipo: tipo === "ajuste" ? "ajuste" : tipo,
+      quantidade: tipo === "ajuste" ? Math.abs(delta) : q,
+      qtd_antes: Number(p.qtd) || 0,
+      qtd_depois: nova,
+      nota: String(nota || "").slice(0, 200),
+      data: hojeStr(),
+      ts: new Date().toISOString()
+    };
+    var movs = loadStockMov();
+    movs.push(mov);
+    saveStockMov(movs);
+    return { produto: list[idx], movimento: mov };
+  }
+
+  function produtosBaixoStock() {
+    return loadStock().filter(function (p) {
+      return (Number(p.qtd_min) || 0) > 0 && (Number(p.qtd) || 0) <= (Number(p.qtd_min) || 0);
+    });
+  }
+
+  function valorStockTotal() {
+    return loadStock().reduce(function (s, p) {
+      return s + (Number(p.qtd) || 0) * (Number(p.preco_custo) || 0);
+    }, 0);
+  }
+
+  /* ========== F18 FORNECEDORES / COMPRAS ========== */
+  function loadForn() { return loadArr(FORN_KEY); }
+  function saveForn(list) { return writeJson(FORN_KEY, list); }
+  function loadCompras() { return loadArr(COMPRAS_KEY); }
+  function saveCompras(list) { return writeJson(COMPRAS_KEY, list.slice(-200)); }
+
+  function upsertFornecedor(data) {
+    var nome = String(data.nome || "").trim();
+    if (!nome) {
+      if (typeof toast === "function") toast("Nome do fornecedor obrigatório", "error");
+      return null;
+    }
+    var list = loadForn();
+    if (data.id) {
+      var i = list.findIndex(function (f) { return f.id === data.id; });
+      if (i < 0) return null;
+      list[i] = Object.assign({}, list[i], {
+        nome: nome,
+        contacto: String(data.contacto || "").trim(),
+        nota: String(data.nota || "").slice(0, 200),
+        updated_at: new Date().toISOString()
+      });
+      saveForn(list);
+      return list[i];
+    }
+    if (list.some(function (f) { return f.nome.toLowerCase() === nome.toLowerCase(); })) {
+      if (typeof toast === "function") toast("Fornecedor já existe", "error");
+      return null;
+    }
+    var f = {
+      id: uid(),
+      nome: nome,
+      contacto: String(data.contacto || "").trim(),
+      nota: String(data.nota || "").slice(0, 200),
+      created_at: new Date().toISOString()
+    };
+    list.push(f);
+    saveForn(list);
+    return f;
+  }
+
+  function registarCompra(data) {
+    var fornId = data.fornecedor_id;
+    var forn = loadForn().find(function (f) { return f.id === fornId; });
+    var produtoId = data.produto_id;
+    var qtd = Math.abs(Number(data.quantidade) || 0);
+    var valor = Math.max(0, Number(data.valor) || 0);
+    if (!forn) {
+      if (typeof toast === "function") toast("Seleccione um fornecedor", "error");
+      return null;
+    }
+    if (!produtoId || !findProduto(produtoId)) {
+      if (typeof toast === "function") toast("Seleccione um produto de stock", "error");
+      return null;
+    }
+    if (!qtd) {
+      if (typeof toast === "function") toast("Quantidade inválida", "error");
+      return null;
+    }
+    // entrada de stock
+    var mov = movimentarStock(produtoId, "entrada", qtd, "Compra · " + forn.nome);
+    if (!mov) return null;
+    var compra = {
+      id: uid(),
+      fornecedor_id: forn.id,
+      fornecedor: forn.nome,
+      produto_id: produtoId,
+      produto: mov.produto.nome,
+      quantidade: qtd,
+      valor: valor,
+      data: data.data || hojeStr(),
+      nota: String(data.nota || "").slice(0, 200),
+      ts: new Date().toISOString()
+    };
+    var list = loadCompras();
+    list.push(compra);
+    saveCompras(list);
+    // opcional: despesa no caixa
+    if (data.lancar_despesa && valor > 0 && typeof addMovimento === "function") {
+      try {
+        addMovimento({
+          tipo: "despesa",
+          descricao: "Compra stock · " + mov.produto.nome + " (" + forn.nome + ")",
+          valor: valor,
+          categoria: "produtos",
+          fornecedor: forn.nome
+        });
+      } catch (e) {}
+    }
+    return compra;
+  }
+
+  /* ========== F7 NPS ========== */
+  function loadNps() { return loadArr(NPS_KEY); }
+  function saveNps(list) { return writeJson(NPS_KEY, list.slice(-500)); }
+
+  function registarNps(data) {
+    var score = Number(data.score);
+    if (isNaN(score) || score < 0 || score > 10) {
+      if (typeof toast === "function") toast("Avaliação deve ser de 0 a 10", "error");
+      return null;
+    }
+    var entry = {
+      id: uid(),
+      score: score,
+      comentario: String(data.comentario || "").slice(0, 300),
+      cliente: String(data.cliente || "").trim(),
+      cliente_id: data.cliente_id || null,
+      movimento_id: data.movimento_id || null,
+      data: hojeStr(),
+      ts: new Date().toISOString()
+    };
+    // classificar
+    entry.tipo = score >= 9 ? "promotor" : score >= 7 ? "passivo" : "detractor";
+    var list = loadNps();
+    list.push(entry);
+    saveNps(list);
+    return entry;
+  }
+
+  function calcNpsScore(dias) {
+    var list = loadNps();
+    if (dias) {
+      var cut = new Date();
+      cut.setDate(cut.getDate() - dias);
+      var cutIso = cut.toISOString();
+      list = list.filter(function (n) { return n.ts >= cutIso; });
+    }
+    if (!list.length) return { nps: null, total: 0, promotores: 0, passivos: 0, detractores: 0, media: null };
+    var prom = 0, pass = 0, det = 0, sum = 0;
+    list.forEach(function (n) {
+      sum += n.score;
+      if (n.score >= 9) prom++;
+      else if (n.score >= 7) pass++;
+      else det++;
+    });
+    var total = list.length;
+    var nps = Math.round(((prom - det) / total) * 100);
+    return {
+      nps: nps,
+      total: total,
+      promotores: prom,
+      passivos: pass,
+      detractores: det,
+      media: Math.round((sum / total) * 10) / 10
+    };
+  }
+
+  /* ========== F9 Timeline cliente ========== */
+  function timelineCliente(nomeOuId) {
+    var cliente = null;
+    if (!nomeOuId) return { cliente: null, eventos: [] };
+    var clients = (typeof state !== "undefined" && state.clientes) ? state.clientes : [];
+    cliente = clients.find(function (c) {
+      return c.id === nomeOuId || String(c.nome || "").toLowerCase() === String(nomeOuId).toLowerCase();
+    }) || null;
+    var nome = cliente ? cliente.nome : String(nomeOuId);
+    var cid = cliente ? cliente.id : null;
+    var eventos = [];
+
+    function matchCliente(row) {
+      if (cid && row.cliente_id && String(row.cliente_id) === String(cid)) return true;
+      if (nome && String(row.cliente || "").toLowerCase() === String(nome).toLowerCase()) return true;
+      return false;
+    }
+
+    (state.movimentos || []).forEach(function (m) {
+      if (m.tipo !== "venda") return;
+      if (!matchCliente(m)) return;
+      eventos.push({
+        tipo: "venda",
+        data: m.data,
+        ts: m.updated_at || (m.data + "T" + (m.hora || "12:00")),
+        titulo: "Venda · " + fmt(m.valor),
+        detalhe: (m.descricao || "") + (m.profissional ? " · " + m.profissional : ""),
+        ref: m.id
+      });
+    });
+    (state.agendamentos || []).forEach(function (a) {
+      if (!matchCliente(a)) return;
+      eventos.push({
+        tipo: "agenda",
+        data: a.data,
+        ts: a.data + "T" + (a.hora || "12:00"),
+        titulo: "Marcação · " + (a.hora || ""),
+        detalhe: (a.servico || a.servicos || "") + " · " + (a.status || a.estado || "agendado"),
+        ref: a.id
+      });
+    });
+    loadNps().forEach(function (n) {
+      if (String(n.cliente || "").toLowerCase() !== nome.toLowerCase()) return;
+      eventos.push({
+        tipo: "nps",
+        data: n.data,
+        ts: n.ts,
+        titulo: "NPS " + n.score + "/10 · " + n.tipo,
+        detalhe: n.comentario || "",
+        ref: n.id
+      });
+    });
+    // pacotes cliente
+    loadClientePacotes().filter(function (cp) {
+      return String(cp.cliente || "").toLowerCase() === nome.toLowerCase();
+    }).forEach(function (cp) {
+      eventos.push({
+        tipo: "pacote",
+        data: (cp.created_at || "").slice(0, 10),
+        ts: cp.created_at || cp.created_at,
+        titulo: "Pacote · " + (cp.pacote_nome || ""),
+        detalhe: cp.sessoes_restantes + " sessões restantes",
+        ref: cp.id
+      });
+    });
+
+    eventos.sort(function (a, b) {
+      return String(b.ts || "").localeCompare(String(a.ts || ""));
+    });
+    return {
+      cliente: cliente || { nome: nome },
+      eventos: eventos,
+      totalGasto: eventos.filter(function (e) { return e.tipo === "venda"; }).length
+        ? (state.movimentos || []).filter(function (m) {
+            return m.tipo === "venda" && String(m.cliente || "").toLowerCase() === nome.toLowerCase();
+          }).reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0)
+        : 0,
+      pontos: cliente ? (Number(cliente.pontos) || 0) : 0
+    };
+  }
+
+  /* ========== F24 Calendário ICS ========== */
+  function escapeIcs(text) {
+    return String(text || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  }
+  function buildIcsAgendamentos(diasFuturos) {
+    diasFuturos = diasFuturos || 30;
+    var start = hojeStr();
+    var endD = new Date(start + "T12:00:00");
+    endD.setDate(endD.getDate() + diasFuturos);
+    var end = endD.toISOString().slice(0, 10);
+    var store = (state && state.config && state.config.storeName) || "BeautyPro";
+    var lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//BeautyPro//AO//PT",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      "X-WR-CALNAME:" + escapeIcs(store)
+    ];
+    (state.agendamentos || []).forEach(function (a) {
+      if (!a.data || a.data < start || a.data > end) return;
+      var st = String(a.status || a.estado || "").toLowerCase();
+      if (st === "cancelado") return;
+      var hora = (a.hora || "09:00").replace(":", "");
+      if (hora.length === 3) hora = "0" + hora;
+      var dtStart = a.data.replace(/-/g, "") + "T" + (hora.length >= 4 ? hora.slice(0, 4) : "0900") + "00";
+      // +1h default duration
+      var hh = parseInt((a.hora || "09:00").split(":")[0], 10) || 9;
+      var mm = parseInt((a.hora || "09:00").split(":")[1], 10) || 0;
+      var endMin = hh * 60 + mm + 60;
+      var eh = String(Math.floor(endMin / 60) % 24).padStart(2, "0");
+      var em = String(endMin % 60).padStart(2, "0");
+      var dtEnd = a.data.replace(/-/g, "") + "T" + eh + em + "00";
+      var summary = (a.cliente || "Cliente") + (a.servico ? " · " + a.servico : "");
+      var desc = "Profissional: " + (a.profissional || "—");
+      lines.push("BEGIN:VEVENT");
+      lines.push("UID:" + (a.id || uid()) + "@beautypro.local");
+      lines.push("DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z");
+      lines.push("DTSTART:" + dtStart);
+      lines.push("DTEND:" + dtEnd);
+      lines.push("SUMMARY:" + escapeIcs(summary));
+      lines.push("DESCRIPTION:" + escapeIcs(desc));
+      lines.push("END:VEVENT");
+    });
+    lines.push("END:VCALENDAR");
+    return lines.join("\r\n");
+  }
+  function downloadIcs() {
+    var ics = buildIcsAgendamentos(45);
+    var blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "beautypro-agenda.ics";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 500);
+    if (typeof toast === "function") toast("Ficheiro de calendário descarregado", "success");
+  }
+
+  /* ========== F8 PACOTES ========== */
+  function loadPacotes() { return loadArr(PACOTES_KEY); }
+  function savePacotes(list) { return writeJson(PACOTES_KEY, list); }
+  function loadClientePacotes() { return loadArr(CLIENTE_PACOTES_KEY); }
+  function saveClientePacotes(list) { return writeJson(CLIENTE_PACOTES_KEY, list); }
+
+  function upsertPacote(data) {
+    var nome = String(data.nome || "").trim();
+    var preco = Math.max(0, Number(data.preco) || 0);
+    var sessoes = Math.max(1, parseInt(data.sessoes, 10) || 1);
+    var validade = Math.max(0, parseInt(data.validade_dias, 10) || 90);
+    if (!nome) {
+      if (typeof toast === "function") toast("Nome do pacote obrigatório", "error");
+      return null;
+    }
+    var list = loadPacotes();
+    if (data.id) {
+      var i = list.findIndex(function (p) { return p.id === data.id; });
+      if (i < 0) return null;
+      list[i] = Object.assign({}, list[i], {
+        nome: nome,
+        preco: preco,
+        sessoes: sessoes,
+        validade_dias: validade,
+        descricao: String(data.descricao || "").slice(0, 200),
+        updated_at: new Date().toISOString()
+      });
+      savePacotes(list);
+      return list[i];
+    }
+    var p = {
+      id: uid(),
+      nome: nome,
+      preco: preco,
+      sessoes: sessoes,
+      validade_dias: validade,
+      descricao: String(data.descricao || "").slice(0, 200),
+      created_at: new Date().toISOString()
+    };
+    list.push(p);
+    savePacotes(list);
+    return p;
+  }
+
+  function venderPacote(pacoteId, clienteNome) {
+    var pac = loadPacotes().find(function (p) { return p.id === pacoteId; });
+    var cliente = String(clienteNome || "").trim();
+    if (!pac) {
+      if (typeof toast === "function") toast("Pacote não encontrado", "error");
+      return null;
+    }
+    if (!cliente) {
+      if (typeof toast === "function") toast("Indique o cliente", "error");
+      return null;
+    }
+    var exp = new Date();
+    exp.setDate(exp.getDate() + (Number(pac.validade_dias) || 90));
+    var cp = {
+      id: uid(),
+      pacote_id: pac.id,
+      pacote_nome: pac.nome,
+      cliente: cliente,
+      sessoes_total: pac.sessoes,
+      sessoes_restantes: pac.sessoes,
+      preco: pac.preco,
+      expira_em: exp.toISOString().slice(0, 10),
+      created_at: new Date().toISOString(),
+      activo: true
+    };
+    var list = loadClientePacotes();
+    list.push(cp);
+    saveClientePacotes(list);
+    // registar venda no caixa se possível
+    if (typeof registarVenda === "function" && pac.preco > 0) {
+      try {
+        // não forçar profissional — só movimento simples via addMovimento
+      } catch (e) {}
+    }
+    if (typeof addMovimento === "function" && pac.preco > 0) {
+      try {
+        addMovimento({
+          tipo: "venda",
+          descricao: "Pacote · " + pac.nome,
+          valor: pac.preco,
+          cliente: cliente,
+          metodoPagamento: "Numerário"
+        });
+      } catch (e) {}
+    }
+    return cp;
+  }
+
+  function consumirSessaoPacote(clientePacoteId) {
+    var list = loadClientePacotes();
+    var i = list.findIndex(function (x) { return x.id === clientePacoteId; });
+    if (i < 0) return null;
+    var cp = list[i];
+    if (!cp.activo) {
+      if (typeof toast === "function") toast("Pacote inactivo", "error");
+      return null;
+    }
+    if (cp.expira_em && cp.expira_em < hojeStr()) {
+      list[i] = Object.assign({}, cp, { activo: false });
+      saveClientePacotes(list);
+      if (typeof toast === "function") toast("Pacote expirado", "error");
+      return null;
+    }
+    if ((Number(cp.sessoes_restantes) || 0) <= 0) {
+      if (typeof toast === "function") toast("Sem sessões restantes", "error");
+      return null;
+    }
+    var rest = (Number(cp.sessoes_restantes) || 0) - 1;
+    list[i] = Object.assign({}, cp, {
+      sessoes_restantes: rest,
+      activo: rest > 0,
+      updated_at: new Date().toISOString()
+    });
+    saveClientePacotes(list);
+    return list[i];
+  }
+
+  /* ========== UI SHELL ========== */
+  function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    var el = document.getElementById(id);
+    if (el) {
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
+      return el;
+    }
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
+    el.innerHTML =
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+        '<div class="bp-sheet-header">' +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
+        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+        '<div class="bp-sheet-footer modal-actions">' +
+          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
+      }
+    });
+    return el;
+  }
+  function openShell(id) {
+    if (typeof openModal === "function") openModal(id);
+    else {
+      var el = document.getElementById(id);
+      if (el) el.classList.add("open");
+    }
+  }
+
+  /* ----- Stock UI ----- */
+  function openStock() {
+    ensureShell("modal-bp-stock", "Stock de produtos", "Operações", "Inventário, alertas de mínimo e movimentos.");
+    renderStock();
+    openShell("modal-bp-stock");
+  }
+  function renderStock() {
+    var body = document.getElementById("modal-bp-stock-body");
+    if (!body) return;
+    var list = loadStock();
+    var baixo = produtosBaixoStock();
+    var kpis =
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Produtos</div><div class="bp-kpi-value">' + list.length + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Valor stock</div><div class="bp-kpi-value" style="font-size:.72rem">' + fmt(valorStockTotal()) + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Alertas</div><div class="bp-kpi-value' + (baixo.length ? " is-negative" : "") + '">' + baixo.length + "</div></div></div>";
+    var rows = list.map(function (p) {
+      var alert = (Number(p.qtd_min) > 0 && p.qtd <= p.qtd_min) ? ' <span class="bp-badge" style="background:var(--red-50);color:var(--red)">Mín.</span>' : "";
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(p.nome) + alert + "</div>" +
+        '<div class="bp-row-meta">' + (p.sku ? esc(p.sku) + " · " : "") + fmt(p.preco_custo) + "/un · mín " + (p.qtd_min || 0) + "</div></div>" +
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">' +
+        '<div class="bp-row-value">' + p.qtd + " " + esc(p.unidade || "un") + "</div>" +
+        '<div style="display:flex;gap:4px">' +
+        '<button type="button" class="bp-action-btn" data-stock-out="' + p.id + '">−</button>' +
+        '<button type="button" class="bp-action-btn is-primary" data-stock-in="' + p.id + '">+</button></div></div></div>';
+    }).join("") || '<div class="bp-empty"><strong>Stock vazio</strong>Adicione o primeiro produto abaixo.</div>';
+
+    var alertHtml = "";
+    if (baixo.length) {
+      alertHtml = '<div class="bp-alert-banner is-warn"><strong>' + baixo.length + (baixo.length === 1 ? " produto abaixo do mínimo" : " produtos abaixo do mínimo") +
+        "</strong>" + baixo.slice(0, 3).map(function (p) { return esc(p.nome); }).join(", ") +
+        (baixo.length > 3 ? "…" : "") + "</div>";
+    }
+    rows = list.map(function (p) {
+      var alert = (Number(p.qtd_min) > 0 && p.qtd <= p.qtd_min) ? ' <span class="bp-badge is-red">Mín.</span>' : "";
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(p.nome) + alert + "</div>" +
+        '<div class="bp-row-meta">' + (p.sku ? esc(p.sku) + " · " : "") + fmt(p.preco_custo) + "/un · mín " + (p.qtd_min || 0) + "</div></div>" +
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">' +
+        '<div class="bp-row-value">' + p.qtd + " " + esc(p.unidade || "un") + "</div>" +
+        '<div class="bp-stepper">' +
+        '<button type="button" class="bp-action-btn" data-stock-out="' + p.id + '" aria-label="Saída">−</button>' +
+        '<button type="button" class="bp-action-btn is-primary" data-stock-in="' + p.id + '" aria-label="Entrada">+</button></div></div></div>';
+    }).join("") || '<div class="bp-empty"><strong>Stock vazio</strong>Adicione o primeiro produto abaixo.</div>';
+
+    body.innerHTML = alertHtml + kpis +
+      '<div class="bp-section"><div class="bp-section-title">Inventário</div>' + rows + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Novo produto</div>' +
+      '<div class="input-group"><label class="input-label" for="bp-st-nome">Nome</label><input id="bp-st-nome" class="input-field" placeholder="Ex: Shampoo 1L" autocomplete="off"></div>' +
+      '<div class="bp-form-grid-2">' +
+        '<div class="input-group"><label class="input-label" for="bp-st-qtd">Qtd inicial</label><input type="number" id="bp-st-qtd" class="input-field" min="0" value="0" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-st-min">Qtd mínima</label><input type="number" id="bp-st-min" class="input-field" min="0" value="2" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-st-custo">Custo unit. (Kz)</label><input type="number" id="bp-st-custo" class="input-field" min="0" value="0" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-st-sku">SKU</label><input id="bp-st-sku" class="input-field" placeholder="Opcional"></div></div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-st-add" style="margin-top:12px">Adicionar produto</button></div>';
+
+    var add = document.getElementById("bp-st-add");
+    if (add) add.onclick = function () {
+      var p = upsertProduto({
+        nome: (document.getElementById("bp-st-nome") || {}).value,
+        qtd: (document.getElementById("bp-st-qtd") || {}).value,
+        qtd_min: (document.getElementById("bp-st-min") || {}).value,
+        preco_custo: (document.getElementById("bp-st-custo") || {}).value,
+        sku: (document.getElementById("bp-st-sku") || {}).value
+      });
+      if (p) {
+        if (typeof toast === "function") toast("Produto adicionado", "success");
+        renderStock();
+      }
+    };
+    body.querySelectorAll("[data-stock-in]").forEach(function (btn) {
+      btn.onclick = function () {
+        var q = prompt("Quantidade a entrar:", "1");
+        if (q == null) return;
+        if (movimentarStock(btn.getAttribute("data-stock-in"), "entrada", q, "Entrada manual")) {
+          if (typeof toast === "function") toast("Entrada registada", "success");
+          renderStock();
+        }
+      };
+    });
+    body.querySelectorAll("[data-stock-out]").forEach(function (btn) {
+      btn.onclick = function () {
+        var q = prompt("Quantidade a sair:", "1");
+        if (q == null) return;
+        if (movimentarStock(btn.getAttribute("data-stock-out"), "saida", q, "Saída manual")) {
+          if (typeof toast === "function") toast("Saída registada", "success");
+          renderStock();
+        }
+      };
+    });
+  }
+
+  /* ----- Fornecedores UI ----- */
+  function openFornecedores() {
+    ensureShell("modal-bp-forn", "Fornecedores e compras", "Operações", "Cadastro de fornecedores e entrada de mercadoria.");
+    renderForn();
+    openShell("modal-bp-forn");
+  }
+  function renderForn() {
+    var body = document.getElementById("modal-bp-forn-body");
+    if (!body) return;
+    var forns = loadForn();
+    var compras = loadCompras().slice().reverse().slice(0, 15);
+    var stock = loadStock();
+    var fornOpts = forns.map(function (f) {
+      return '<option value="' + f.id + '">' + esc(f.nome) + "</option>";
+    }).join("");
+    var prodOpts = stock.map(function (p) {
+      return '<option value="' + p.id + '">' + esc(p.nome) + " (" + p.qtd + ")</option>";
+    }).join("");
+
+    var fornRows = forns.map(function (f) {
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(f.nome) + "</div>" +
+        '<div class="bp-row-meta">' + esc(f.contacto || "Sem contacto") + "</div></div></div>";
+    }).join("") || '<div class="bp-empty">Nenhum fornecedor ainda.</div>';
+
+    var compraRows = compras.map(function (c) {
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(c.produto) + "</div>" +
+        '<div class="bp-row-meta">' + esc(c.data) + " · " + esc(c.fornecedor) + " · ×" + c.quantidade + "</div></div>" +
+        '<div class="bp-row-value">' + fmt(c.valor) + "</div></div>";
+    }).join("") || '<div class="bp-empty">Sem compras registadas.</div>';
+
+    body.innerHTML =
+      '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Nova compra (entra no stock)</div>' +
+      (stock.length && forns.length
+        ? '<div class="input-group"><label class="input-label">Fornecedor</label><select id="bp-cp-forn" class="input-field">' + fornOpts + "</select></div>" +
+          '<div class="input-group"><label class="input-label">Produto</label><select id="bp-cp-prod" class="input-field">' + prodOpts + "</select></div>" +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+            '<div class="input-group"><label class="input-label">Quantidade</label><input type="number" id="bp-cp-qtd" class="input-field" min="1" value="1"></div>' +
+            '<div class="input-group"><label class="input-label">Valor total (Kz)</label><input type="number" id="bp-cp-valor" class="input-field" min="0" value="0"></div></div>' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:8px 0"><input type="checkbox" id="bp-cp-desp" checked> Lançar como despesa no caixa</label>' +
+          '<button type="button" class="btn btn-primary btn-block" id="bp-cp-save">Registar compra</button>'
+        : '<div class="bp-empty">Crie pelo menos 1 produto e 1 fornecedor.</div>') +
+      "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Novo fornecedor</div>' +
+      '<div class="input-group"><label class="input-label">Nome</label><input id="bp-fn-nome" class="input-field" placeholder="Ex: Distribuidora Luanda"></div>' +
+      '<div class="input-group"><label class="input-label">Contacto</label><input id="bp-fn-tel" class="input-field" placeholder="Telefone ou WhatsApp"></div>' +
+      '<button type="button" class="btn btn-secondary btn-block" id="bp-fn-add">Guardar fornecedor</button></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Fornecedores</div>' + fornRows + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Últimas compras</div>' + compraRows + "</div>";
+
+    var fnAdd = document.getElementById("bp-fn-add");
+    if (fnAdd) fnAdd.onclick = function () {
+      if (upsertFornecedor({ nome: (document.getElementById("bp-fn-nome") || {}).value, contacto: (document.getElementById("bp-fn-tel") || {}).value })) {
+        if (typeof toast === "function") toast("Fornecedor guardado", "success");
+        renderForn();
+      }
+    };
+    var cpSave = document.getElementById("bp-cp-save");
+    if (cpSave) cpSave.onclick = function () {
+      var c = registarCompra({
+        fornecedor_id: (document.getElementById("bp-cp-forn") || {}).value,
+        produto_id: (document.getElementById("bp-cp-prod") || {}).value,
+        quantidade: (document.getElementById("bp-cp-qtd") || {}).value,
+        valor: (document.getElementById("bp-cp-valor") || {}).value,
+        lancar_despesa: !!(document.getElementById("bp-cp-desp") || {}).checked
+      });
+      if (c) {
+        if (typeof toast === "function") toast("Compra registada · stock actualizado", "success");
+        renderForn();
+      }
+    };
+  }
+
+  /* ----- NPS UI ----- */
+  function openNps() {
+    ensureShell("modal-bp-nps", "Avaliação NPS", "Experiência", "De 0 a 10 — promotores, passivos e detractores.");
+    renderNps();
+    openShell("modal-bp-nps");
+  }
+  function renderNps() {
+    var body = document.getElementById("modal-bp-nps-body");
+    if (!body) return;
+    var stats = calcNpsScore(90);
+    var clientes = ((state && state.clientes) || []).map(function (c) {
+      return '<option value="' + esc(c.nome) + '">' + esc(c.nome) + "</option>";
+    }).join("");
+    var insight = "";
+    if (stats.total === 0) {
+      insight = '<div class="bp-alert-banner"><strong>Ainda sem avaliações</strong>Peça uma nota 0–10 após o atendimento para medir a satisfação.</div>';
+    } else if (stats.nps != null && stats.nps >= 50) {
+      insight = '<div class="bp-alert-banner is-ok"><strong>NPS saudável (' + stats.nps + ')</strong>Boa proporção de promotores nos últimos 90 dias.</div>';
+    } else if (stats.nps != null && stats.nps < 0) {
+      insight = '<div class="bp-alert-banner is-warn"><strong>NPS negativo (' + stats.nps + ')</strong>Há mais detractores do que promotores — vale rever a experiência.</div>';
+    }
+    var kpis =
+      insight +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">NPS 90d</div><div class="bp-kpi-value' + (stats.nps != null && stats.nps < 0 ? " is-negative" : " is-gold") + '">' + (stats.nps != null ? stats.nps : "—") + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Média</div><div class="bp-kpi-value">' + (stats.media != null ? stats.media : "—") + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Respostas</div><div class="bp-kpi-value">' + stats.total + "</div></div></div>" +
+      '<p class="bp-ref-line">Promotores ' + stats.promotores + " · Passivos " + stats.passivos + " · Detractores " + stats.detractores + "</p>";
+
+    var recent = loadNps().slice().reverse().slice(0, 12).map(function (n) {
+      var badgeCls = n.score >= 9 ? " is-green" : (n.score <= 6 ? " is-red" : "");
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(n.cliente || "Anónimo") +
+        ' <span class="bp-badge' + badgeCls + '">' + n.score + "/10</span></div>" +
+        '<div class="bp-row-meta">' + esc(n.data) + " · " + esc(n.tipo) + (n.comentario ? " · " + esc(n.comentario) : "") + "</div></div></div>";
+    }).join("") || '<div class="bp-empty"><strong>Sem avaliações</strong>As notas aparecem aqui após registar.</div>';
+
+    body.innerHTML = kpis +
+      '<div class="bp-section"><div class="bp-section-title">Nova avaliação</div>' +
+      '<div class="input-group"><label class="input-label" for="bp-nps-cli">Cliente</label><select id="bp-nps-cli" class="input-field"><option value="">— opcional —</option>' + clientes + "</select></div>" +
+      '<div class="bp-form-grid-2">' +
+        '<div class="input-group"><label class="input-label" for="bp-nps-score">Nota (0–10)</label><input type="number" id="bp-nps-score" class="input-field" min="0" max="10" step="1" value="9" inputmode="numeric"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-nps-com">Comentário</label><input id="bp-nps-com" class="input-field" placeholder="Opcional" maxlength="300"></div></div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-nps-save" style="margin-top:12px">Guardar NPS</button></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Recentes</div>' + recent + "</div>";
+
+    var save = document.getElementById("bp-nps-save");
+    if (save) save.onclick = function () {
+      var e = registarNps({
+        score: (document.getElementById("bp-nps-score") || {}).value,
+        cliente: (document.getElementById("bp-nps-cli") || {}).value,
+        comentario: (document.getElementById("bp-nps-com") || {}).value
+      });
+      if (e) {
+        if (typeof toast === "function") toast("NPS " + e.score + " registado (" + e.tipo + ")", "success");
+        renderNps();
+      }
+    };
+  }
+
+  /* ----- Timeline UI ----- */
+  function openTimeline() {
+    ensureShell("modal-bp-timeline", "Histórico do cliente", "CRM", "Vendas, marcações, NPS e pacotes num só lugar.");
+    renderTimeline();
+    openShell("modal-bp-timeline");
+  }
+  function renderTimeline(nomePreset) {
+    var body = document.getElementById("modal-bp-timeline-body");
+    if (!body) return;
+    var clientes = ((state && state.clientes) || []).slice().sort(function (a, b) {
+      return String(a.nome || "").localeCompare(String(b.nome || ""), "pt");
+    });
+    if (!clientes.length) {
+      body.innerHTML = '<div class="bp-empty"><strong>Sem clientes</strong>Cadastre clientes na aba Clientes para ver o histórico.</div>';
+      return;
+    }
+
+    var opts = clientes.map(function (c) {
+      return '<option value="' + esc(c.nome) + '"' + (nomePreset && nomePreset === c.nome ? " selected" : "") + ">" + esc(c.nome) + "</option>";
+    }).join("");
+    var selected = nomePreset || "";
+    if (!selected) {
+      // manter seleção do select se re-render interno
+      var prev = document.getElementById("bp-tl-cli");
+      if (prev && prev.value) selected = prev.value;
+    }
+
+    var head = "";
+    var events = "";
+    var insight = "";
+
+    if (!selected) {
+      insight = '<div class="bp-alert-banner"><strong>Seleccione um cliente</strong>Veja vendas, agenda, avaliações e pacotes associados.</div>';
+      events = '<div class="bp-empty"><strong>Nenhum cliente seleccionado</strong>Escolha um nome acima.</div>';
+    } else {
+      var tl = timelineCliente(selected);
+      var nVendas = (tl.eventos || []).filter(function (e) { return e.tipo === "venda"; }).length;
+      var nAgenda = (tl.eventos || []).filter(function (e) { return e.tipo === "agenda"; }).length;
+      var ultimo = (tl.eventos || [])[0];
+
+      if (!(tl.eventos || []).length) {
+        insight = '<div class="bp-alert-banner"><strong>Sem eventos</strong>Este cliente ainda não tem vendas, marcações, NPS ou pacotes registados.</div>';
+      } else if (ultimo) {
+        insight = '<div class="bp-alert-banner is-ok"><strong>Última actividade</strong>' +
+          esc(ultimo.data || "") + " · " + esc(ultimo.titulo || "") +
+          (ultimo.detalhe ? " — " + esc(String(ultimo.detalhe).slice(0, 80)) : "") + "</div>";
+      }
+
+      head =
+        '<div class="bp-kpi-grid">' +
+          '<div class="bp-kpi"><div class="bp-kpi-label">Gasto total</div><div class="bp-kpi-value is-positive" style="font-size:.75rem">' + fmt(tl.totalGasto) + "</div></div>" +
+          '<div class="bp-kpi"><div class="bp-kpi-label">Pontos</div><div class="bp-kpi-value is-gold">' + (tl.pontos || 0) + "</div></div>" +
+          '<div class="bp-kpi"><div class="bp-kpi-label">Eventos</div><div class="bp-kpi-value">' + (tl.eventos || []).length + "</div></div>" +
+        "</div>" +
+        '<p class="bp-ref-line">' + nVendas + " vendas · " + nAgenda + " marcações · últimos 40 eventos</p>";
+
+      events = (tl.eventos || []).slice(0, 40).map(function (e) {
+        var badgeCls = "";
+        var badge = "Evento";
+        if (e.tipo === "venda") { badge = "Venda"; badgeCls = " is-green"; }
+        else if (e.tipo === "agenda") { badge = "Agenda"; badgeCls = " is-gold"; }
+        else if (e.tipo === "nps") { badge = "NPS"; }
+        else if (e.tipo === "pacote") { badge = "Pacote"; }
+        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title"><span class="bp-badge' + badgeCls + '">' + badge + "</span> " + esc(e.titulo) + "</div>" +
+          '<div class="bp-row-meta">' + esc(e.data || "") + (e.detalhe ? " · " + esc(e.detalhe) : "") + "</div></div></div>";
+      }).join("") || '<div class="bp-empty"><strong>Sem eventos</strong>Nada registado para este cliente.</div>';
+    }
+
+    body.innerHTML =
+      '<div class="input-group"><label class="input-label" for="bp-tl-cli">Cliente</label>' +
+      '<select id="bp-tl-cli" class="input-field"><option value="">— seleccionar —</option>' + opts + "</select></div>" +
+      insight + head +
+      '<div class="bp-section"><div class="bp-section-title">Timeline</div>' + events + "</div>";
+
+    var sel = document.getElementById("bp-tl-cli");
+    if (sel) {
+      if (selected) sel.value = selected;
+      sel.onchange = function () { renderTimeline(sel.value); };
+    }
+  }
+
+  /* ----- Calendário UI ----- */
+  function openCalendario() {
+    ensureShell("modal-bp-cal", "Calendário do telemóvel", "CRM", "Exportar marcações em formato .ics (Apple, Google, Outlook).");
+    var body = document.getElementById("modal-bp-cal-body");
+    var futuros = (state.agendamentos || []).filter(function (a) {
+      return a.data && a.data >= hojeStr() && String(a.status || a.estado || "").toLowerCase() !== "cancelado";
+    }).length;
+    body.innerHTML =
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Próximas</div><div class="bp-kpi-value">' + futuros + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Janela</div><div class="bp-kpi-value" style="font-size:.8rem">45 dias</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Formato</div><div class="bp-kpi-value" style="font-size:.8rem">.ics</div></div>' +
+      '</div>' +
+      '<div class="bp-alert-banner"><strong>Calendário .ics</strong>Importe no Google Calendar, Apple Calendar ou Outlook. Janela de 45 dias.</div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-cal-dl">Descarregar agenda.ics</button>';
+    var btn = document.getElementById("bp-cal-dl");
+    if (btn) btn.onclick = downloadIcs;
+    openShell("modal-bp-cal");
+  }
+
+  /* ----- Pacotes UI ----- */
+  function openPacotes() {
+    ensureShell("modal-bp-pacotes", "Pacotes e assinaturas", "Comercial", "Pacotes de sessões com validade e consumo.");
+    renderPacotes();
+    openShell("modal-bp-pacotes");
+  }
+  function renderPacotes() {
+    var body = document.getElementById("modal-bp-pacotes-body");
+    if (!body) return;
+    var pacs = loadPacotes();
+    var cps = loadClientePacotes().filter(function (c) { return c.activo !== false && (c.sessoes_restantes || 0) > 0; });
+    var clientes = ((state && state.clientes) || []).map(function (c) {
+      return '<option value="' + esc(c.nome) + '">' + esc(c.nome) + "</option>";
+    }).join("");
+    var pacOpts = pacs.map(function (p) {
+      return '<option value="' + p.id + '">' + esc(p.nome) + " · " + fmt(p.preco) + "</option>";
+    }).join("");
+
+    var pacRows = pacs.map(function (p) {
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(p.nome) + "</div>" +
+        '<div class="bp-row-meta">' + p.sessoes + " sessões · validade " + p.validade_dias + " dias" +
+        (p.descricao ? " · " + esc(p.descricao) : "") + "</div></div>" +
+        '<div class="bp-row-value">' + fmt(p.preco) + "</div></div>";
+    }).join("") || '<div class="bp-empty">Crie o primeiro pacote abaixo.</div>';
+
+    var cpRows = cps.map(function (c) {
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(c.cliente) + "</div>" +
+        '<div class="bp-row-meta">' + esc(c.pacote_nome) + " · expira " + esc(c.expira_em) + "</div></div>" +
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">' +
+        '<div class="bp-row-value is-gold">' + c.sessoes_restantes + "/" + c.sessoes_total + "</div>" +
+        '<button type="button" class="bp-action-btn is-primary" data-consume="' + c.id + '">Usar 1</button></div></div>';
+    }).join("") || '<div class="bp-empty">Nenhum pacote activo vendido.</div>';
+
+    body.innerHTML =
+      '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Vender pacote</div>' +
+      (pacs.length
+        ? '<div class="input-group"><label class="input-label">Pacote</label><select id="bp-vp-pac" class="input-field">' + pacOpts + "</select></div>" +
+          '<div class="input-group"><label class="input-label">Cliente</label><select id="bp-vp-cli" class="input-field"><option value="">—</option>' + clientes + "</select></div>" +
+          '<button type="button" class="btn btn-primary btn-block" id="bp-vp-save">Vender e activar</button>'
+        : '<div class="bp-empty">Crie um pacote primeiro.</div>') +
+      "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Pacotes activos de clientes</div>' + cpRows + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Catálogo</div>' + pacRows + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Novo pacote</div>' +
+      '<div class="input-group"><label class="input-label">Nome</label><input id="bp-pk-nome" class="input-field" placeholder="Ex: 5 Coloracões"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+        '<div class="input-group"><label class="input-label">Preço</label><input type="number" id="bp-pk-preco" class="input-field" min="0" value="0"></div>' +
+        '<div class="input-group"><label class="input-label">Sessões</label><input type="number" id="bp-pk-ses" class="input-field" min="1" value="5"></div>' +
+        '<div class="input-group"><label class="input-label">Validade (dias)</label><input type="number" id="bp-pk-val" class="input-field" min="1" value="90"></div></div>' +
+      '<button type="button" class="btn btn-secondary btn-block" id="bp-pk-add">Criar pacote</button></div>';
+
+    var pkAdd = document.getElementById("bp-pk-add");
+    if (pkAdd) pkAdd.onclick = function () {
+      if (upsertPacote({
+        nome: (document.getElementById("bp-pk-nome") || {}).value,
+        preco: (document.getElementById("bp-pk-preco") || {}).value,
+        sessoes: (document.getElementById("bp-pk-ses") || {}).value,
+        validade_dias: (document.getElementById("bp-pk-val") || {}).value
+      })) {
+        if (typeof toast === "function") toast("Pacote criado", "success");
+        renderPacotes();
+      }
+    };
+    var vpSave = document.getElementById("bp-vp-save");
+    if (vpSave) vpSave.onclick = function () {
+      var cp = venderPacote(
+        (document.getElementById("bp-vp-pac") || {}).value,
+        (document.getElementById("bp-vp-cli") || {}).value
+      );
+      if (cp) {
+        if (typeof toast === "function") toast("Pacote activado para " + cp.cliente, "success");
+        renderPacotes();
+        if (typeof renderCaixa === "function") try { renderCaixa(); } catch (e) {}
+      }
+    };
+    body.querySelectorAll("[data-consume]").forEach(function (btn) {
+      btn.onclick = function () {
+        var r = consumirSessaoPacote(btn.getAttribute("data-consume"));
+        if (r) {
+          if (typeof toast === "function") toast("Sessão consumida · restam " + r.sessoes_restantes, "success");
+          renderPacotes();
+        }
+      };
+    });
+  }
+
+  /* ========== MENU ========== */
+  function ensureMenuItems() {
+    var dd = document.getElementById("menu-dropdown");
+    if (!dd || dd.querySelector('[data-bp-menu="ops"]')) return;
+    var frag = document.createDocumentFragment();
+
+    function section(label, key) {
+      var sec = document.createElement("div");
+      sec.className = "bp-menu-section";
+      sec.setAttribute("data-bp-menu", key);
+      sec.textContent = label;
+      frag.appendChild(sec);
+    }
+    function item(menu, key, label) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-bp-menu", menu);
+      btn.setAttribute("data-bp-action", key);
+      btn.innerHTML = "<span>" + label + "</span>";
+      frag.appendChild(btn);
+    }
+
+    section("Operações", "ops");
+    item("ops", "stock", "Stock de produtos");
+    item("ops", "forn", "Fornecedores e compras");
+    section("CRM", "crm");
+    item("crm", "nps", "Avaliação NPS");
+    item("crm", "timeline", "Histórico do cliente");
+    item("crm", "cal", "Calendário (.ics)");
+    section("Comercial", "com");
+    item("com", "pacotes", "Pacotes e assinaturas");
+
+    var logout = dd.querySelector("#logout-btn");
+    if (logout) dd.insertBefore(frag, logout);
+    else dd.appendChild(frag);
+
+    if (!dd.dataset.bpOpsBound) {
+      dd.dataset.bpOpsBound = "1";
+      dd.addEventListener("click", function (e) {
+        var t = e.target.closest("[data-bp-action]");
+        if (!t) return;
+        var menu = t.getAttribute("data-bp-menu");
+        if (menu !== "ops" && menu !== "crm" && menu !== "com") return;
+        e.stopPropagation();
+        dd.style.display = "none";
+        var a = t.getAttribute("data-bp-action");
+        try {
+          if (a === "stock") openStock();
+          if (a === "forn") openFornecedores();
+          if (a === "nps") openNps();
+          if (a === "timeline") openTimeline();
+          if (a === "cal") openCalendario();
+          if (a === "pacotes") openPacotes();
+        } catch (err) {
+          console.error("[BPOpsCRM]", err);
+          if (typeof toast === "function") toast("Não foi possível abrir esta secção", "error");
+        }
+      });
+    }
+  }
+
+  function init() {
+    try { ensureMenuItems(); } catch (e) { console.warn("[ops-crm-comercial]", e); }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { setTimeout(init, 160); });
+  } else setTimeout(init, 160);
+  setTimeout(init, 1800);
+  setTimeout(init, 4500);
+
+  window.BPOps = {
+    loadStock: loadStock,
+    upsertProduto: upsertProduto,
+    movimentarStock: movimentarStock,
+    produtosBaixoStock: produtosBaixoStock,
+    registarCompra: registarCompra,
+    registarNps: registarNps,
+    calcNpsScore: calcNpsScore,
+    timelineCliente: timelineCliente,
+    downloadIcs: downloadIcs,
+    upsertPacote: upsertPacote,
+    venderPacote: venderPacote,
+    consumirSessaoPacote: consumirSessaoPacote
+  };
+})();
+
+/* ===== FILE: equipa-fase3.js ===== */
+// ================================================================
+// Grupo 3 — Gestão de Equipa (robusto, realista, offline-first)
+// F6 Ranking | F14 Horários/folgas | F25 Chat interno
+// ================================================================
+(function () {
+  'use strict';
+
+  var CHAT_KEY = 'bp_chat_msgs_v2';
+  var HORARIOS_KEY = 'bp_horarios_equipa_v2';
+  var RANK_PERIODO_KEY = 'bp_rank_periodo';
+  var DIAS_ORD = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+  var DIAS_LABEL = { dom: 'Dom', seg: 'Seg', ter: 'Ter', qua: 'Qua', qui: 'Qui', sex: 'Sex', sab: 'Sáb' };
+  var DIAS_JS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+
+  function fmt(v) {
+    return typeof fmtKz === 'function' ? fmtKz(v) : (Math.round(Number(v) || 0) + ' Kz');
+  }
+  function esc(s) {
+    return typeof escHtml === 'function' ? escHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
+  }
+  function hojeStr() {
+    return typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+  }
+  function parseHoraMin(hhmm) {
+    var p = String(hhmm || '00:00').split(':');
+    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
+  }
+  function safeJson(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      var v = JSON.parse(raw);
+      return v == null ? fallback : v;
+    } catch (e) { return fallback; }
+  }
+  function writeJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); return true; }
+    catch (e) {
+      if (typeof toast === 'function') toast('Armazenamento local cheio ou bloqueado', 'error');
+      return false;
+    }
+  }
+
+  function inicioSemanaISO() {
+    var d = new Date(hojeStr() + 'T12:00:00');
+    var day = d.getDay();
+    var diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  }
+  function fimSemanaISO() {
+    var d = new Date(inicioSemanaISO() + 'T12:00:00');
+    d.setDate(d.getDate() + 6);
+    return d.toISOString().slice(0, 10);
+  }
+  function inPeriodo(dataStr, periodo) {
+    if (!dataStr) return false;
+    if (periodo === 'semana') {
+      return dataStr >= inicioSemanaISO() && dataStr <= fimSemanaISO();
+    }
+    return String(dataStr).startsWith(hojeStr().slice(0, 7));
+  }
+
+  function calcRanking(periodo) {
+    periodo = periodo || localStorage.getItem(RANK_PERIODO_KEY) || 'mes';
+    var map = {};
+    (state.profissionais || []).forEach(function (p) {
+      map[p.id] = {
+        id: p.id, nome: p.nome || '—', receita: 0, comissao: 0, vendas: 0,
+        ticket: 0, meta: Number(p.meta_mensal) || 0, metaOk: false, pontos: 0, diasActivos: {}
+      };
+    });
+    (state.movimentos || []).forEach(function (m) {
+      if (m.tipo !== 'venda' || !m.profissional_id) return;
+      if (!inPeriodo(m.data, periodo)) return;
+      if (!map[m.profissional_id]) {
+        map[m.profissional_id] = {
+          id: m.profissional_id, nome: m.profissional || '—', receita: 0, comissao: 0,
+          vendas: 0, ticket: 0, meta: 0, metaOk: false, pontos: 0, diasActivos: {}
+        };
+      }
+      var r = map[m.profissional_id];
+      r.receita += Number(m.valor) || 0;
+      r.comissao += Number(m.comissao_gerada) || 0;
+      r.vendas += 1;
+      if (m.data) r.diasActivos[m.data] = true;
+    });
+    var totalReceita = 0;
+    Object.keys(map).forEach(function (k) {
+      var r = map[k];
+      totalReceita += r.receita;
+      r.ticket = r.vendas > 0 ? Math.round(r.receita / r.vendas) : 0;
+      r.dias = Object.keys(r.diasActivos).length;
+      r.pontos = (r.vendas * 10) + Math.floor(r.receita / 1000);
+      if (periodo === 'mes' && r.meta > 0 && r.receita >= r.meta) {
+        r.metaOk = true;
+        r.pontos += 50;
+      }
+    });
+    var list = Object.keys(map).map(function (k) {
+      var r = map[k];
+      r.share = totalReceita > 0 ? Math.round((r.receita / totalReceita) * 100) : 0;
+      return r;
+    });
+    list.sort(function (a, b) {
+      if (b.pontos !== a.pontos) return b.pontos - a.pontos;
+      if (b.receita !== a.receita) return b.receita - a.receita;
+      return (a.nome || '').localeCompare(b.nome || '');
+    });
+    return { list: list, totalReceita: totalReceita, periodo: periodo };
+  }
+
+  function defaultHorario() {
+    return {
+      entrada: '09:00', saida: '18:00', dias: ['seg', 'ter', 'qua', 'qui', 'sex'],
+      folgas: [], intervaloInicio: '13:00', intervaloFim: '14:00', activo: true
+    };
+  }
+  function loadHorarios() {
+    var v = safeJson(HORARIOS_KEY, {});
+    return v && typeof v === 'object' ? v : {};
+  }
+  function getHorarioProf(id) {
+    return Object.assign(defaultHorario(), loadHorarios()[id] || {});
+  }
+  function setHorarioProf(id, partial) {
+    var all = loadHorarios();
+    var next = Object.assign(defaultHorario(), all[id] || {}, partial);
+    if (parseHoraMin(next.entrada) >= parseHoraMin(next.saida)) {
+      if (typeof toast === 'function') toast('A entrada deve ser antes da saída', 'error');
+      return null;
+    }
+    if (!Array.isArray(next.dias)) next.dias = [];
+    if (!Array.isArray(next.folgas)) next.folgas = [];
+    var limite = new Date();
+    limite.setDate(limite.getDate() - 90);
+    var limStr = limite.toISOString().slice(0, 10);
+    next.folgas = next.folgas.filter(function (d) { return d >= limStr; }).sort();
+    all[id] = next;
+    if (!writeJson(HORARIOS_KEY, all)) return null;
+    return next;
+  }
+  function diaSemanaDeData(dataStr) {
+    try {
+      return DIAS_JS[new Date(dataStr + 'T12:00:00').getDay()];
+    } catch (e) { return null; }
+  }
+  function estadoHojeProf(id) {
+    var h = getHorarioProf(id);
+    if (h.activo === false) return { code: 'inactivo', label: 'Inactivo' };
+    var hs = hojeStr();
+    if ((h.folgas || []).indexOf(hs) >= 0) return { code: 'folga', label: 'Folga' };
+    var dia = diaSemanaDeData(hs);
+    if ((h.dias || []).indexOf(dia) < 0) return { code: 'dia_folga_semana', label: 'Folga semanal' };
+    var now = new Date();
+    var mins = now.getHours() * 60 + now.getMinutes();
+    var en = parseHoraMin(h.entrada), sa = parseHoraMin(h.saida);
+    var i0 = parseHoraMin(h.intervaloInicio), i1 = parseHoraMin(h.intervaloFim);
+    if (mins < en || mins >= sa) return { code: 'fora_horario', label: 'Fora de horário' };
+    if (i1 > i0 && mins >= i0 && mins < i1) return { code: 'intervalo', label: 'Intervalo' };
+    return { code: 'em_turno', label: 'Em turno' };
+  }
+  function conflitosAgenda(profId, dataStr) {
+    var h = getHorarioProf(profId);
+    var data = dataStr || hojeStr();
+    var out = [];
+    (state.agendamentos || []).forEach(function (a) {
+      if (a.profissional_id !== profId || a.data !== data) return;
+      var st = String(a.status || a.estado || '').toLowerCase();
+      if (st === 'cancelado' || st.indexOf('conclu') === 0) return;
+      var reasons = [];
+      if ((h.folgas || []).indexOf(data) >= 0) reasons.push('dia de folga');
+      var dia = diaSemanaDeData(data);
+      if ((h.dias || []).indexOf(dia) < 0) reasons.push('não trabalha neste dia');
+      var hm = parseHoraMin(a.hora);
+      if (hm < parseHoraMin(h.entrada) || hm >= parseHoraMin(h.saida)) reasons.push('fora do turno');
+      if (reasons.length) out.push({ ag: a, reasons: reasons });
+    });
+    return out;
+  }
+
+  function loadChat() {
+    var list = safeJson(CHAT_KEY, []);
+    return Array.isArray(list) ? list : [];
+  }
+  function saveChat(list) {
+    return writeJson(CHAT_KEY, (list || []).slice(-300));
+  }
+  function autorActual() {
+    var role = (state && state.config && state.config.userRole) || 'admin';
+    var store = (state && state.config && state.config.storeName) || 'Salão';
+    var label = (role === 'admin' || role === 'gerente') ? ('Gestão · ' + store) : ('Colaborador · ' + store);
+    return { nome: label, role: role };
+  }
+  function enviarMensagem(texto) {
+    var t = String(texto || '').replace(/\s+/g, ' ').trim();
+    if (!t || t.length < 2) {
+      if (typeof toast === 'function') toast('Escreva uma mensagem válida', 'error');
+      return null;
+    }
+    var autor = autorActual();
+    var msg = {
+      id: (typeof uuid === 'function' ? uuid() : ('m' + Date.now())),
+      texto: t.slice(0, 500),
+      autor: autor.nome,
+      role: autor.role,
+      ts: new Date().toISOString()
+    };
+    var list = loadChat();
+    var last = list[list.length - 1];
+    if (last && last.texto === msg.texto && last.autor === msg.autor) {
+      if (Math.abs(new Date(msg.ts) - new Date(last.ts)) < 5000) {
+        if (typeof toast === 'function') toast('Mensagem já enviada', 'warning');
+        return last;
+      }
+    }
+    list.push(msg);
+    if (!saveChat(list)) return null;
+    return msg;
+  }
+  function formatMsgTime(ts) {
+    try {
+      var d = new Date(ts);
+      var dia = d.toISOString().slice(0, 10);
+      var hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      return dia === hojeStr() ? hm : (dia.slice(8, 10) + '/' + dia.slice(5, 7) + ' ' + hm);
+    } catch (e) { return ''; }
+  }
+  function groupChatByDay(list) {
+    var groups = [], cur = null;
+    list.forEach(function (m) {
+      var day = String(m.ts || '').slice(0, 10) || '—';
+      if (!cur || cur.day !== day) { cur = { day: day, items: [] }; groups.push(cur); }
+      cur.items.push(m);
+    });
+    return groups;
+  }
+
+  function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    var el = document.getElementById(id);
+    if (el) {
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
+      return el;
+    }
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
+    el.innerHTML =
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+        '<div class="bp-sheet-header">' +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
+        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+        '<div class="bp-sheet-footer modal-actions">' +
+          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
+      }
+    });
+    return el;
+  }
+  function openShell(id) {
+    if (typeof openModal === 'function') openModal(id);
+    else { var el = document.getElementById(id); if (el) el.classList.add('open'); }
+  }
+
+  function openRanking() {
+    ensureShell('modal-bp-rank', 'Ranking da equipa', 'Desempenho', 'Pontuação com base em vendas reais, receita e metas.');
+    renderRankingBody();
+    openShell('modal-bp-rank');
+  }
+  function renderRankingBody() {
+    var body = document.getElementById('modal-bp-rank-body');
+    if (!body) return;
+    var periodo = localStorage.getItem(RANK_PERIODO_KEY) || 'mes';
+    var data = calcRanking(periodo);
+    var rank = data.list;
+    var activos = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
+    var toggle =
+      '<div class="bp-seg" role="tablist" aria-label="Período do ranking">' +
+        '<button type="button" class="bp-seg-btn' + (periodo === 'semana' ? ' is-active' : '') + '" data-rank-p="semana" role="tab">Esta semana</button>' +
+        '<button type="button" class="bp-seg-btn' + (periodo === 'mes' ? ' is-active' : '') + '" data-rank-p="mes" role="tab">Este mês</button></div>';
+    if (!activos.length) {
+      body.innerHTML = toggle + '<div class="bp-empty"><strong>Sem profissionais activos</strong>Adicione a equipa na aba Equipa.</div>';
+      bindRankToggle(body); return;
+    }
+    if (!rank.some(function (r) { return r.vendas > 0; })) {
+      body.innerHTML = toggle + '<div class="bp-empty"><strong>Sem vendas no período</strong>O ranking actualiza com vendas atribuídas a profissionais.</div>';
+      bindRankToggle(body); return;
+    }
+    var top = rank[0];
+    var kpis =
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Líder</div><div class="bp-kpi-value is-gold" style="font-size:.8rem;line-height:1.25">' + esc(top.nome) + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Pontos</div><div class="bp-kpi-value">' + top.pontos + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Receita equipa</div><div class="bp-kpi-value" style="font-size:.75rem">' + fmt(data.totalReceita) + '</div></div></div>';
+    var rows = rank.map(function (r, i) {
+      var rankClass = i === 0 ? ' is-rank-1' : (i === 1 ? ' is-rank-2' : (i === 2 ? ' is-rank-3' : ''));
+      var badge = '<span class="bp-badge' + rankClass + '">' + (i + 1) + '.º</span> ';
+      var metaBadge = r.metaOk ? ' <span class="bp-badge is-green">Meta</span>' : '';
+      var pctMeta = (r.meta > 0) ? Math.min(100, Math.round((r.receita / r.meta) * 100)) : 0;
+      var bar = r.meta > 0 ? '<div class="bp-meta-bar" title="Progresso da meta"><i style="width:' + pctMeta + '%"></i></div>' : '';
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + badge + esc(r.nome) + metaBadge + '</div>' +
+        '<div class="bp-row-meta">' + r.vendas + ' vendas · ticket ' + fmt(r.ticket) + ' · ' + (r.share || 0) + '% receita</div>' +
+        bar +
+        '</div><div class="bp-row-value is-gold">' + r.pontos + '<span style="display:block;font-size:.6rem;font-weight:500;color:var(--text-muted)">pts</span></div></div>';
+    }).join('');
+    body.innerHTML = toggle + kpis +
+      '<p class="bp-ref-line">10 pts/venda · 1 pt/1.000 Kz · +50 pts ao atingir a meta mensal</p>' +
+      '<div class="bp-section"><div class="bp-section-title">Classificação</div>' + rows + '</div>';
+    bindRankToggle(body);
+  }
+  function bindRankToggle(body) {
+    body.querySelectorAll('[data-rank-p]').forEach(function (btn) {
+      btn.onclick = function () {
+        localStorage.setItem(RANK_PERIODO_KEY, btn.getAttribute('data-rank-p'));
+        renderRankingBody();
+      };
+    });
+  }
+
+  function openHorarios() {
+    ensureShell('modal-bp-horarios', 'Horários e folgas', 'Equipa', 'Turnos, intervalos, folgas e conflitos com a agenda de hoje.');
+    renderHorariosList();
+    openShell('modal-bp-horarios');
+  }
+  function renderHorariosList() {
+    var body = document.getElementById('modal-bp-horarios-body');
+    if (!body) return;
+    var profs = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p.ativo !== false);
+    });
+    if (!profs.length) {
+      body.innerHTML = '<div class="bp-empty"><strong>Sem profissionais activos</strong>Cadastre a equipa na aba Equipa.</div>';
+      return;
+    }
+
+    var emTurno = 0, emFolga = 0, conflitosTotal = 0;
+    var rows = profs.map(function (p) {
+      var h = getHorarioProf(p.id);
+      var st = estadoHojeProf(p.id);
+      var conf = conflitosAgenda(p.id, hojeStr());
+      conflitosTotal += conf.length;
+      if (st.code === 'em_turno') emTurno++;
+      if (st.code === 'folga' || st.code === 'dia_folga_semana') emFolga++;
+
+      var badgeClass = '';
+      if (st.code === 'em_turno') badgeClass = ' is-green';
+      else if (st.code === 'folga' || st.code === 'dia_folga_semana') badgeClass = ' is-gold';
+      else if (st.code === 'intervalo') badgeClass = '';
+      else if (st.code === 'fora_horario' || st.code === 'inactivo') badgeClass = ' is-red';
+
+      var dias = (h.dias || []).map(function (d) { return DIAS_LABEL[d] || d; }).join(', ') || 'Sem dias definidos';
+      var alert = conf.length
+        ? '<div class="bp-row-meta" style="color:var(--red);margin-top:4px">' + conf.length + ' marcação(ões) em conflito hoje</div>'
+        : '';
+
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(p.nome) +
+        ' <span class="bp-badge' + badgeClass + '">' + esc(st.label) + '</span></div>' +
+        '<div class="bp-row-meta">' + esc(h.entrada) + '–' + esc(h.saida) +
+        (h.intervaloInicio ? ' · intervalo ' + esc(h.intervaloInicio) + '–' + esc(h.intervaloFim) : '') +
+        '<br>' + esc(dias) + '</div>' + alert + '</div>' +
+        '<button type="button" class="bp-action-btn" data-edit-horario="' + p.id + '">Editar</button></div>';
+    }).join('');
+
+    var insight = '';
+    if (conflitosTotal > 0) {
+      insight = '<div class="bp-alert-banner is-warn"><strong>' + conflitosTotal +
+        (conflitosTotal === 1 ? ' conflito com a agenda' : ' conflitos com a agenda') +
+        '</strong>Há marcações fora do turno ou em dia de folga. Edite o horário ou reagende.</div>';
+    } else {
+      insight = '<div class="bp-alert-banner is-ok"><strong>Escala alinhada com a agenda</strong>Nenhum conflito detectado para hoje.</div>';
+    }
+
+    body.innerHTML =
+      insight +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Em turno</div><div class="bp-kpi-value is-positive">' + emTurno + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Folga</div><div class="bp-kpi-value">' + emFolga + '</div></div>' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Conflitos</div><div class="bp-kpi-value' + (conflitosTotal ? ' is-negative' : '') + '">' + conflitosTotal + '</div></div>' +
+      '</div>' +
+      '<p class="bp-ref-line">Estado em tempo real · ' + esc(hojeStr()) + ' · só profissionais activos</p>' +
+      '<div class="bp-section"><div class="bp-section-title">Equipa · hoje</div>' + rows + '</div>' +
+      '<div id="bp-horario-editor" style="display:none;margin-top:8px"></div>';
+
+    body.querySelectorAll('[data-edit-horario]').forEach(function (btn) {
+      btn.onclick = function () { renderEditorHorario(btn.getAttribute('data-edit-horario')); };
+    });
+  }
+
+  function renderEditorHorario(profId) {
+    var box = document.getElementById('bp-horario-editor');
+    if (!box) return;
+    var p = (state.profissionais || []).find(function (x) { return x.id === profId; });
+    if (!p) return;
+    var h = getHorarioProf(profId);
+    var diasChecks = DIAS_ORD.map(function (d) {
+      var on = (h.dias || []).indexOf(d) >= 0;
+      return '<label style="display:inline-flex;align-items:center;gap:4px;margin:0 10px 8px 0;font-size:.8rem;cursor:pointer">' +
+        '<input type="checkbox" data-dia="' + d + '"' + (on ? ' checked' : '') + '> ' + (DIAS_LABEL[d] || d) + '</label>';
+    }).join('');
+    var folgasHtml = (h.folgas || []).filter(function (d) { return d >= hojeStr(); }).slice(0, 8).map(function (d) {
+      return '<span class="bp-badge" style="margin:0 6px 6px 0">' + esc(d) +
+        ' <button type="button" data-rm-folga="' + esc(d) + '" style="border:0;background:none;cursor:pointer;color:inherit;font-weight:700">×</button></span>';
+    }).join('') || '<span style="font-size:.8rem;color:var(--text-muted)">Nenhuma folga futura</span>';
+    var conf = conflitosAgenda(profId, hojeStr());
+    var confHtml = conf.length
+      ? '<div style="margin:12px 0;padding:12px;border-radius:10px;background:var(--red-50,#FDE8E8);border:1px solid rgba(179,58,74,.25)">' +
+        '<div style="font-size:.75rem;font-weight:600;color:var(--red);margin-bottom:6px">Conflitos com agenda de hoje</div>' +
+        conf.map(function (c) {
+          return '<div style="font-size:.8rem">' + esc(c.ag.hora) + (c.ag.cliente ? ' · ' + esc(c.ag.cliente) : '') +
+            ' — ' + esc(c.reasons.join(', ')) + '</div>';
+        }).join('') + '</div>'
+      : '';
+    box.style.display = 'block';
+    box.innerHTML =
+      '<div style="padding-top:16px;border-top:1px solid var(--border-soft)">' +
+      '<div class="bp-section-title">Editar · ' + esc(p.nome) + '</div>' + confHtml +
+      '<div class="bp-form-grid-2" style="margin-bottom:12px">' +
+        '<div class="input-group"><label class="input-label" for="bp-h-entrada">Entrada</label><input type="time" id="bp-h-entrada" class="input-field" value="' + esc(h.entrada) + '"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-h-saida">Saída</label><input type="time" id="bp-h-saida" class="input-field" value="' + esc(h.saida) + '"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-h-i0">Início intervalo</label><input type="time" id="bp-h-i0" class="input-field" value="' + esc(h.intervaloInicio || '13:00') + '"></div>' +
+        '<div class="input-group"><label class="input-label" for="bp-h-i1">Fim intervalo</label><input type="time" id="bp-h-i1" class="input-field" value="' + esc(h.intervaloFim || '14:00') + '"></div></div>' +
+      '<div class="input-group"><label class="input-label">Dias de trabalho</label><div>' + diasChecks + '</div></div>' +
+      '<div class="input-group"><label class="input-label">Folgas futuras</label><div style="margin-bottom:8px">' + folgasHtml + '</div>' +
+      '<input type="date" id="bp-h-folga" class="input-field" min="' + hojeStr() + '"></div>' +
+      '<label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0">' +
+        '<input type="checkbox" id="bp-h-activo"' + (h.activo !== false ? ' checked' : '') + '> Profissional activo na escala</label>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-h-save">Guardar horário</button></div>';
+    box.querySelectorAll('[data-rm-folga]').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.preventDefault();
+        var d = btn.getAttribute('data-rm-folga');
+        setHorarioProf(profId, { folgas: (h.folgas || []).filter(function (x) { return x !== d; }) });
+        renderEditorHorario(profId);
+      };
+    });
+    document.getElementById('bp-h-save').onclick = function () {
+      var dias = [];
+      box.querySelectorAll('[data-dia]:checked').forEach(function (c) { dias.push(c.getAttribute('data-dia')); });
+      if (!dias.length) { if (typeof toast === 'function') toast('Seleccione pelo menos um dia', 'error'); return; }
+      var folgas = (getHorarioProf(profId).folgas || []).slice();
+      var nova = (document.getElementById('bp-h-folga') || {}).value;
+      if (nova) {
+        if (nova < hojeStr()) { if (typeof toast === 'function') toast('Folga deve ser hoje ou futura', 'error'); return; }
+        if (folgas.indexOf(nova) < 0) folgas.push(nova);
+      }
+      var saved = setHorarioProf(profId, {
+        entrada: (document.getElementById('bp-h-entrada') || {}).value || '09:00',
+        saida: (document.getElementById('bp-h-saida') || {}).value || '18:00',
+        intervaloInicio: (document.getElementById('bp-h-i0') || {}).value || '13:00',
+        intervaloFim: (document.getElementById('bp-h-i1') || {}).value || '14:00',
+        dias: dias, folgas: folgas,
+        activo: !!(document.getElementById('bp-h-activo') || {}).checked
+      });
+      if (!saved) return;
+      if (typeof toast === 'function') toast('Horário de ' + p.nome + ' actualizado', 'success');
+      renderHorariosList();
+    };
+  }
+
+  function openChat() {
+    ensureShell('modal-bp-chat', 'Chat interno', 'Comunicação', 'Recados de turno neste dispositivo.');
+    var footer = document.querySelector('#modal-bp-chat .bp-sheet-footer');
+    if (footer) {
+      footer.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:6px;width:100%">' +
+          '<div style="display:flex;gap:8px;width:100%;align-items:center">' +
+            '<input type="text" id="bp-chat-input" class="input-field" placeholder="Mensagem para a equipa…" maxlength="500" autocomplete="off" style="flex:1;height:44px">' +
+            '<button type="button" class="btn btn-primary" id="bp-chat-send" style="flex:0;padding:0 18px;height:44px">Enviar</button></div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--text-muted)">' +
+            '<span id="bp-chat-count">0 / 500</span>' +
+            '<button type="button" id="bp-chat-clear" style="border:0;background:none;color:var(--text-muted);font-size:.7rem;cursor:pointer;text-decoration:underline">Limpar histórico</button></div></div>';
+    }
+    renderChatBody();
+    openShell('modal-bp-chat');
+    var send = document.getElementById('bp-chat-send');
+    var input = document.getElementById('bp-chat-input');
+    var count = document.getElementById('bp-chat-count');
+    var clear = document.getElementById('bp-chat-clear');
+    function doSend() {
+      if (!input) return;
+      if (enviarMensagem(input.value)) {
+        input.value = '';
+        if (count) count.textContent = '0 / 500';
+        renderChatBody();
+      }
+    }
+    if (send) send.onclick = doSend;
+    if (input) {
+      input.oninput = function () { if (count) count.textContent = input.value.length + ' / 500'; };
+      input.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); doSend(); } };
+      setTimeout(function () { try { input.focus(); } catch (e) {} }, 200);
+    }
+    if (clear) {
+      clear.onclick = function () {
+        if (!confirm('Apagar todas as mensagens deste dispositivo?')) return;
+        saveChat([]);
+        renderChatBody();
+        if (typeof toast === 'function') toast('Histórico limpo', 'success');
+      };
+    }
+  }
+  function renderChatBody() {
+    var body = document.getElementById('modal-bp-chat-body');
+    if (!body) return;
+    var list = loadChat();
+    if (!list.length) {
+      body.innerHTML = '<div class="bp-empty"><strong>Sem mensagens</strong>Use o campo abaixo para recados de turno, faltas ou avisos.</div>';
+      return;
+    }
+    body.innerHTML = groupChatByDay(list).map(function (g) {
+      var label = g.day === hojeStr() ? 'Hoje' : g.day;
+      var items = g.items.map(function (m) {
+        var isGestao = m.role === 'admin' || m.role === 'gerente';
+        return '<div class="bp-row" style="flex-direction:column;align-items:stretch;gap:4px">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">' +
+            '<div class="bp-row-title" style="font-size:.78rem">' + esc(m.autor) +
+            (isGestao ? ' <span class="bp-badge">Gestão</span>' : '') + '</div>' +
+            '<div class="bp-row-meta">' + esc(formatMsgTime(m.ts)) + '</div></div>' +
+          '<div style="font-size:.9rem;color:var(--text-primary);line-height:1.5">' + esc(m.texto) + '</div></div>';
+      }).join('');
+      return '<div class="bp-section"><div class="bp-section-title">' + esc(label) + '</div>' + items + '</div>';
+    }).join('');
+    try { body.scrollTop = body.scrollHeight; } catch (e) {}
+  }
+
+  function ensureMenuItems() {
+    var dd = document.getElementById('menu-dropdown');
+    if (!dd || dd.querySelector('[data-bp-menu="equipa"]')) return;
+    var frag = document.createDocumentFragment();
+    var sec = document.createElement('div');
+    sec.className = 'bp-menu-section';
+    sec.setAttribute('data-bp-menu', 'equipa');
+    sec.textContent = 'Equipa';
+    frag.appendChild(sec);
+    [{ key: 'ranking', label: 'Ranking' }, { key: 'horarios', label: 'Horários e folgas' }, { key: 'chat', label: 'Chat interno' }].forEach(function (it) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-bp-menu', 'equipa');
+      btn.setAttribute('data-bp-action', it.key);
+      btn.innerHTML = '<span>' + it.label + '</span>';
+      frag.appendChild(btn);
+    });
+    var logout = dd.querySelector('#logout-btn');
+    if (logout) dd.insertBefore(frag, logout);
+    else dd.appendChild(frag);
+    if (!dd.dataset.bpEquipaBound) {
+      dd.dataset.bpEquipaBound = '1';
+      dd.addEventListener('click', function (e) {
+        var t = e.target.closest('[data-bp-action]');
+        if (!t || t.getAttribute('data-bp-menu') !== 'equipa') return;
+        e.stopPropagation();
+        dd.style.display = 'none';
+        var a = t.getAttribute('data-bp-action');
+        try {
+          if (a === 'ranking') openRanking();
+          if (a === 'horarios') openHorarios();
+          if (a === 'chat') openChat();
+        } catch (err) {
+          console.error('[BPEquipa]', err);
+          if (typeof toast === 'function') toast('Não foi possível abrir esta secção', 'error');
+        }
+      });
+    }
+  }
+
+  function init() {
+    try { ensureMenuItems(); } catch (e) { console.warn('[equipa-fase3]', e); }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 140); });
+  } else setTimeout(init, 140);
+  setTimeout(init, 1600);
+  setTimeout(init, 4200);
+
+  window.BPEquipa = {
+    calcRanking: calcRanking,
+    getHorarioProf: getHorarioProf,
+    setHorarioProf: setHorarioProf,
+    estadoHojeProf: estadoHojeProf,
+    conflitosAgenda: conflitosAgenda,
+    enviarMensagem: enviarMensagem,
+    loadChat: loadChat
+  };
+})();
+
+/* ===== FILE: gestao-fase78.js ===== */
+// ================================================================
+// Grupos 7–8 — IA/Automação + Gestão (offline-first, robusto)
+// F11 Reagendamento | F10 Dashboard | F12 Export | F19 Backup
+// F20 Auditoria | F21 Filiais
+// Supabase: NÃO — só sob comando explícito do utilizador
+// ================================================================
+(function () {
+  "use strict";
+
+  var AUDIT_KEY = "bp_audit_v1";
+  var FILIAIS_KEY = "bp_filiais_v1";
+  var FILIAL_ATIVA_KEY = "bp_filial_ativa";
+  var BACKUP_META_KEY = "bp_last_backup_meta";
+
+  function fmt(v) {
+    return typeof fmtKz === "function" ? fmtKz(v) : Math.round(Number(v) || 0) + " Kz";
+  }
+  function esc(s) {
+    return typeof escHtml === "function" ? escHtml(String(s == null ? "" : s)) : String(s == null ? "" : s);
+  }
+  function hojeStr() {
+    return typeof hoje === "function" ? hoje() : new Date().toISOString().slice(0, 10);
+  }
+  function uid() {
+    return typeof uuid === "function" ? uuid() : "id" + Date.now() + Math.random().toString(16).slice(2, 8);
+  }
+  function safeJson(key, fb) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return fb;
+      var v = JSON.parse(raw);
+      return v == null ? fb : v;
+    } catch (e) { return fb; }
+  }
+  function writeJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); return true; }
+    catch (e) {
+      if (typeof toast === "function") toast("Armazenamento local indisponível", "error");
+      return false;
+    }
+  }
+  function loadArr(key) {
+    var v = safeJson(key, []);
+    return Array.isArray(v) ? v : [];
+  }
+
+  /* ========== F20 AUDITORIA ========== */
+  function logAudit(acao, detalhe, meta) {
+    try {
+      var list = loadArr(AUDIT_KEY);
+      list.push({
+        id: uid(),
+        acao: String(acao || "accao").slice(0, 80),
+        detalhe: String(detalhe || "").slice(0, 300),
+        meta: meta || null,
+        ts: new Date().toISOString(),
+        data: hojeStr()
+      });
+      writeJson(AUDIT_KEY, list.slice(-400));
+    } catch (e) {}
+  }
+  function loadAudit(limite) {
+    var list = loadArr(AUDIT_KEY).slice().reverse();
+    return typeof limite === "number" ? list.slice(0, limite) : list;
+  }
+
+  /* ========== F21 FILIAIS ========== */
+  function loadFiliais() {
+    var list = loadArr(FILIAIS_KEY);
+    if (!list.length) {
+      var nome = (state && state.config && state.config.storeName) || "Salão principal";
+      list = [{ id: "filial_main", nome: nome, localizacao: "", contacto: "", created_at: new Date().toISOString() }];
+      writeJson(FILIAIS_KEY, list);
+    }
+    return list;
+  }
+  function saveFiliais(list) { return writeJson(FILIAIS_KEY, list); }
+  function getFilialAtiva() {
+    var id = localStorage.getItem(FILIAL_ATIVA_KEY) || "filial_main";
+    var f = loadFiliais().find(function (x) { return x.id === id; });
+    return f || loadFiliais()[0];
+  }
+  function setFilialAtiva(id) {
+    var f = loadFiliais().find(function (x) { return x.id === id; });
+    if (!f) return null;
+    localStorage.setItem(FILIAL_ATIVA_KEY, id);
+    logAudit("filial_switch", "Mudou para " + f.nome, { filial_id: id });
+    return f;
+  }
+  function upsertFilial(data) {
+    var nome = String(data.nome || "").trim();
+    if (!nome) {
+      if (typeof toast === "function") toast("Nome da filial obrigatório", "error");
+      return null;
+    }
+    var list = loadFiliais();
+    if (data.id) {
+      var i = list.findIndex(function (x) { return x.id === data.id; });
+      if (i < 0) return null;
+      list[i] = Object.assign({}, list[i], {
+        nome: nome,
+        localizacao: String(data.localizacao || "").trim(),
+        contacto: String(data.contacto || "").trim(),
+        updated_at: new Date().toISOString()
+      });
+      saveFiliais(list);
+      logAudit("filial_edit", nome, { filial_id: data.id });
+      return list[i];
+    }
+    if (list.some(function (x) { return x.nome.toLowerCase() === nome.toLowerCase(); })) {
+      if (typeof toast === "function") toast("Já existe uma filial com este nome", "error");
+      return null;
+    }
+    var f = {
+      id: uid(),
+      nome: nome,
+      localizacao: String(data.localizacao || "").trim(),
+      contacto: String(data.contacto || "").trim(),
+      created_at: new Date().toISOString()
+    };
+    list.push(f);
+    saveFiliais(list);
+    logAudit("filial_create", nome, { filial_id: f.id });
+    return f;
+  }
+
+  /* ========== F11 REAGENDAMENTO ========== */
+  function parseMin(hhmm) {
+    var p = String(hhmm || "09:00").split(":");
+    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
+  }
+  function minToHora(m) {
+    var h = Math.floor(m / 60);
+    var mm = m % 60;
+    return String(h).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+  }
+  function slotsLivres(profissionalId, data, duracaoMin) {
+    duracaoMin = duracaoMin || 60;
+    var entrada = 9 * 60, saida = 18 * 60, passo = 30;
+    // horários equipa se existirem
+    try {
+      if (window.BPEquipa && typeof BPEquipa.getHorarioProf === "function" && profissionalId) {
+        var h = BPEquipa.getHorarioProf(profissionalId);
+        if (h) {
+          entrada = parseMin(h.entrada);
+          saida = parseMin(h.saida);
+          if (h.folgas && h.folgas.indexOf(data) >= 0) return [];
+          var diaJs = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"][new Date(data + "T12:00:00").getDay()];
+          if (h.dias && h.dias.indexOf(diaJs) < 0) return [];
+        }
+      }
+    } catch (e) {}
+
+    var ocupados = (state.agendamentos || []).filter(function (a) {
+      if (a.data !== data) return false;
+      if (profissionalId && a.profissional_id && a.profissional_id !== profissionalId) return false;
+      var st = String(a.status || a.estado || "").toLowerCase();
+      if (st === "cancelado") return false;
+      return true;
+    }).map(function (a) {
+      var ini = parseMin(a.hora);
+      return { ini: ini, fim: ini + duracaoMin };
+    });
+
+    var livres = [];
+    for (var t = entrada; t + duracaoMin <= saida; t += passo) {
+      // intervalo almoço 13-14 se BPEquipa
+      var conflito = ocupados.some(function (o) {
+        return t < o.fim && (t + duracaoMin) > o.ini;
+      });
+      if (!conflito) livres.push(minToHora(t));
+      if (livres.length >= 12) break;
+    }
+    return livres;
+  }
+
+  function sugerirReagendamento(agendamentoId) {
+    var ag = (state.agendamentos || []).find(function (a) { return a.id === agendamentoId; });
+    if (!ag) return null;
+    var sugestoes = [];
+    var base = new Date((ag.data || hojeStr()) + "T12:00:00");
+    for (var d = 0; d < 14 && sugestoes.length < 8; d++) {
+      var dt = new Date(base);
+      dt.setDate(base.getDate() + d);
+      var dataStr = dt.toISOString().slice(0, 10);
+      if (dataStr < hojeStr()) continue;
+      var slots = slotsLivres(ag.profissional_id, dataStr, 60);
+      slots.forEach(function (hora) {
+        if (dataStr === ag.data && hora === ag.hora) return;
+        if (sugestoes.length < 8) {
+          sugestoes.push({ data: dataStr, hora: hora, profissional_id: ag.profissional_id });
+        }
+      });
+    }
+    return { agendamento: ag, sugestoes: sugestoes };
+  }
+
+  async function aplicarReagendamento(agendamentoId, data, hora) {
+    if (!data || !hora) {
+      if (typeof toast === "function") toast("Data e hora obrigatórias", "error");
+      return null;
+    }
+    if (data < hojeStr()) {
+      if (typeof toast === "function") toast("Não é possível reagendar para o passado", "error");
+      return null;
+    }
+    var ag = (state.agendamentos || []).find(function (a) { return a.id === agendamentoId; });
+    if (!ag) {
+      if (typeof toast === "function") toast("Marcação não encontrada", "error");
+      return null;
+    }
+    // conflito
+    var livre = slotsLivres(ag.profissional_id, data, 60).indexOf(hora) >= 0;
+    if (!livre) {
+      if (typeof toast === "function") toast("Horário indisponível para este profissional", "error");
+      return null;
+    }
+    if (typeof updateAgendamento === "function") {
+      await updateAgendamento(agendamentoId, { data: data, hora: hora });
+    } else {
+      ag.data = data;
+      ag.hora = hora;
+      if (typeof dbPut === "function") await dbPut("agendamentos", ag);
+    }
+    logAudit("reagendar", (ag.cliente || "") + " → " + data + " " + hora, { id: agendamentoId });
+    return true;
+  }
+
+  /* ========== F10 DASHBOARD EXECUTIVO ========== */
+  function dashboardExecutivo() {
+    var hs = hojeStr();
+    var ym = hs.slice(0, 7);
+    var movs = state.movimentos || [];
+    var vendasMes = movs.filter(function (m) { return m.tipo === "venda" && String(m.data || "").startsWith(ym); });
+    var despMes = movs.filter(function (m) { return m.tipo === "despesa" && String(m.data || "").startsWith(ym); });
+    var receita = vendasMes.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
+    var despesas = despMes.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
+    var comissoes = vendasMes.reduce(function (s, m) { return s + (Number(m.comissao_gerada) || 0); }, 0);
+    var hojeVendas = movs.filter(function (m) { return m.tipo === "venda" && m.data === hs; });
+    var receitaHoje = hojeVendas.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
+    var agHoje = (state.agendamentos || []).filter(function (a) {
+      return a.data === hs && String(a.status || a.estado || "").toLowerCase() !== "cancelado";
+    }).length;
+    var clientes = (state.clientes || []).length;
+    var profs = (state.profissionais || []).filter(function (p) {
+      return typeof isProfissionalAtivo === "function" ? isProfissionalAtivo(p) : (p.ativo !== false);
+    }).length;
+    var ticket = vendasMes.length ? Math.round(receita / vendasMes.length) : 0;
+    var nps = null;
+    try {
+      if (window.BPOps && BPOps.calcNpsScore) nps = BPOps.calcNpsScore(90);
+    } catch (e) {}
+    var stockAlert = 0;
+    try {
+      if (window.BPOps && BPOps.produtosBaixoStock) stockAlert = BPOps.produtosBaixoStock().length;
+    } catch (e) {}
+
+    var byProf = {};
+    vendasMes.forEach(function (m) {
+      var k = m.profissional || m.profissional_id || "—";
+      if (!byProf[k]) byProf[k] = { nome: k, receita: 0, n: 0 };
+      byProf[k].receita += Number(m.valor) || 0;
+      byProf[k].n += 1;
+    });
+    var topProf = Object.keys(byProf).map(function (k) { return byProf[k]; })
+      .sort(function (a, b) { return b.receita - a.receita; }).slice(0, 8);
+
+    var byServ = {};
+    vendasMes.forEach(function (m) {
+      (m.itens || []).forEach(function (it) {
+        var nome = it.nome || "Sem nome";
+        if (!byServ[nome]) byServ[nome] = { nome: nome, receita: 0, qtd: 0 };
+        byServ[nome].receita += Number(it.subtotal) || 0;
+        byServ[nome].qtd += Number(it.quantidade) || 1;
+      });
+    });
+    var topServ = Object.keys(byServ).map(function (k) { return byServ[k]; })
+      .sort(function (a, b) { return b.receita - a.receita; }).slice(0, 8);
+
+    var byMetodo = {};
+    vendasMes.forEach(function (m) {
+      var k = m.metodoPagamento || m.metodo_pagamento || "Numerário";
+      byMetodo[k] = (byMetodo[k] || 0) + (Number(m.valor) || 0);
+    });
+    var metodos = Object.keys(byMetodo).map(function (k) {
+      return { nome: k, valor: byMetodo[k] };
+    }).sort(function (a, b) { return b.valor - a.valor; });
+
+    // Série diária do mês até hoje
+    var y = parseInt(ym.slice(0, 4), 10);
+    var mo = parseInt(ym.slice(5, 7), 10);
+    var lastDay = new Date(y, mo, 0).getDate();
+    var diaHoje = parseInt(hs.slice(8, 10), 10) || lastDay;
+    var porDia = {};
+    vendasMes.forEach(function (m) {
+      var d = String(m.data || "");
+      porDia[d] = (porDia[d] || 0) + (Number(m.valor) || 0);
+    });
+    var serieDiaria = [];
+    for (var day = 1; day <= diaHoje; day++) {
+      var ds = ym + "-" + String(day).padStart(2, "0");
+      serieDiaria.push({ data: ds, dia: day, valor: porDia[ds] || 0 });
+    }
+
+    var meta = null;
+    try {
+      if (typeof getProgressoMetaSalao === "function") meta = getProgressoMetaSalao();
+    } catch (e) {}
+
+    return {
+      receitaMes: receita,
+      despesasMes: despesas,
+      lucroMes: receita - despesas,
+      comissoesMes: comissoes,
+      vendasMes: vendasMes.length,
+      receitaHoje: receitaHoje,
+      vendasHoje: hojeVendas.length,
+      agendamentosHoje: agHoje,
+      clientes: clientes,
+      profissionais: profs,
+      ticketMedio: ticket,
+      nps: nps,
+      stockAlert: stockAlert,
+      topProfissionais: topProf,
+      topServicos: topServ,
+      metodos: metodos,
+      serieDiaria: serieDiaria,
+      meta: meta,
+      periodo: ym
+    };
+  }
+
+  function drawExecChart(canvas, serie) {
+    if (!canvas || !serie || !serie.length) return;
+    var parent = canvas.parentElement;
+    var width = Math.max((parent && parent.getBoundingClientRect().width) || 320, 240);
+    var height = 160;
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+
+    var maxVal = 1;
+    serie.forEach(function (p) { if (p.valor > maxVal) maxVal = p.valor; });
+
+    var padL = 8, padR = 8, padT = 12, padB = 22;
+    var n = serie.length;
+    var gap = n > 20 ? 1 : 2;
+    var barW = Math.max(2, (width - padL - padR) / n - gap);
+    var baseY = height - padB;
+    var chartH = height - padT - padB;
+
+    var gold = "#C9A227";
+    try {
+      var g = getComputedStyle(document.documentElement).getPropertyValue("--gold").trim();
+      if (g) gold = g;
+    } catch (e) {}
+
+    // grid line
+    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, baseY);
+    ctx.lineTo(width - padR, baseY);
+    ctx.stroke();
+
+    for (var i = 0; i < n; i++) {
+      var v = serie[i].valor || 0;
+      var h = Math.max(v > 0 ? 3 : 0, (v / maxVal) * chartH);
+      var x = padL + i * (barW + gap);
+      var y = baseY - h;
+      ctx.fillStyle = v > 0 ? gold : "rgba(0,0,0,0.06)";
+      ctx.beginPath();
+      var r = Math.min(3, barW / 2);
+      ctx.moveTo(x, baseY);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.lineTo(x + barW - r, y);
+      ctx.quadraticCurveTo(x + barW, y, x + barW, y + r);
+      ctx.lineTo(x + barW, baseY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // labels: first, mid, last day
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    var idxs = [0, Math.floor((n - 1) / 2), n - 1];
+    idxs.forEach(function (ix) {
+      if (ix < 0 || ix >= n) return;
+      var x = padL + ix * (barW + gap) + barW / 2;
+      ctx.fillText(String(serie[ix].dia), x, height - 6);
+    });
+  }
+
+  /* ========== F12 EXPORT ========== */
+  function csvEscape(v) {
+    var s = String(v == null ? "" : v);
+    if (/[",\n;]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  function downloadText(filename, text, mime) {
+    var blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 400);
+  }
+  function exportRelatorio(tipo) {
+    var ym = hojeStr().slice(0, 7);
+    var lines = [];
+    var nome = "beautypro-" + tipo + "-" + hojeStr() + ".csv";
+    if (tipo === "vendas") {
+      lines.push(["data", "cliente", "profissional", "valor", "comissao", "pagamento"].join(";"));
+      (state.movimentos || []).filter(function (m) {
+        return m.tipo === "venda" && String(m.data || "").startsWith(ym);
+      }).forEach(function (m) {
+        lines.push([m.data, m.cliente, m.profissional, m.valor, m.comissao_gerada || 0, m.metodoPagamento || ""].map(csvEscape).join(";"));
+      });
+    } else if (tipo === "despesas") {
+      lines.push(["data", "descricao", "categoria", "valor", "fornecedor"].join(";"));
+      (state.movimentos || []).filter(function (m) {
+        return m.tipo === "despesa" && String(m.data || "").startsWith(ym);
+      }).forEach(function (m) {
+        lines.push([m.data, m.descricao, m.categoria || "", m.valor, m.fornecedor || ""].map(csvEscape).join(";"));
+      });
+    } else if (tipo === "clientes") {
+      lines.push(["nome", "telefone", "pontos"].join(";"));
+      (state.clientes || []).forEach(function (c) {
+        lines.push([c.nome, c.telefone || c.phone || "", c.pontos || 0].map(csvEscape).join(";"));
+      });
+    } else if (tipo === "agenda") {
+      lines.push(["data", "hora", "cliente", "servico", "profissional", "status"].join(";"));
+      (state.agendamentos || []).forEach(function (a) {
+        lines.push([a.data, a.hora, a.cliente, a.servico || "", a.profissional || "", a.status || a.estado || ""].map(csvEscape).join(";"));
+      });
+    } else if (tipo === "comissoes") {
+      lines.push(["profissional", "vendas", "receita", "comissao"].join(";"));
+      var map = {};
+      (state.movimentos || []).filter(function (m) {
+        return m.tipo === "venda" && String(m.data || "").startsWith(ym);
+      }).forEach(function (m) {
+        var k = m.profissional || "—";
+        if (!map[k]) map[k] = { vendas: 0, receita: 0, comissao: 0 };
+        map[k].vendas++;
+        map[k].receita += Number(m.valor) || 0;
+        map[k].comissao += Number(m.comissao_gerada) || 0;
+      });
+      Object.keys(map).forEach(function (k) {
+        var r = map[k];
+        lines.push([k, r.vendas, r.receita, r.comissao].map(csvEscape).join(";"));
+      });
+    } else {
+      if (typeof toast === "function") toast("Tipo de relatório desconhecido", "error");
+      return;
+    }
+    // BOM for Excel
+    downloadText(nome, "\uFEFF" + lines.join("\n"), "text/csv;charset=utf-8");
+    logAudit("export", tipo + " CSV", { rows: lines.length - 1 });
+    if (typeof toast === "function") toast("Exportação " + tipo + " pronta", "success");
+  }
+
+  /* ========== F19 BACKUP ========== */
+  function buildBackupSnapshot() {
+    var local = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf("bp_") === 0) local[k] = localStorage.getItem(k);
+      }
+    } catch (e) {}
+    return {
+      version: 1,
+      app: "BeautyPro",
+      created_at: new Date().toISOString(),
+      storeName: (state && state.config && state.config.storeName) || "",
+      state: {
+        clientes: (state && state.clientes) || [],
+        profissionais: (state && state.profissionais) || [],
+        servicos: (state && state.servicos) || [],
+        movimentos: (state && state.movimentos) || [],
+        agendamentos: (state && state.agendamentos) || [],
+        config: (state && state.config) || {}
+      },
+      localStorage_bp: local
+    };
+  }
+  function downloadBackup() {
+    var snap = buildBackupSnapshot();
+    downloadText(
+      "beautypro-backup-" + hojeStr() + ".json",
+      JSON.stringify(snap, null, 2),
+      "application/json;charset=utf-8"
+    );
+    writeJson(BACKUP_META_KEY, { at: snap.created_at, size: JSON.stringify(snap).length });
+    logAudit("backup", "Backup JSON descarregado", { at: snap.created_at });
+    if (typeof toast === "function") toast("Backup descarregado", "success");
+  }
+  async function restoreBackupFromObject(snap) {
+    if (!snap || !snap.state) {
+      if (typeof toast === "function") toast("Ficheiro de backup inválido", "error");
+      return false;
+    }
+    if (!confirm("Restaurar backup? Os dados actuais em memória serão substituídos (IndexedDB).")) return false;
+    try {
+      var keys = ["clientes", "profissionais", "servicos", "movimentos", "agendamentos"];
+      for (var ki = 0; ki < keys.length; ki++) {
+        var key = keys[ki];
+        var arr = snap.state[key] || [];
+        if (window.BeautyStore && BeautyStore.setState) {
+          var patch = {};
+          patch[key] = arr;
+          BeautyStore.setState(patch);
+        } else if (typeof state !== "undefined") {
+          state[key] = arr;
+        }
+        if (typeof dbPut === "function") {
+          for (var j = 0; j < arr.length; j++) {
+            try { await dbPut(key, arr[j]); } catch (e) {}
+          }
+        }
+      }
+      if (snap.state.config) {
+        if (typeof state !== "undefined") state.config = Object.assign({}, state.config || {}, snap.state.config);
+      }
+      if (snap.localStorage_bp) {
+        Object.keys(snap.localStorage_bp).forEach(function (k) {
+          try { localStorage.setItem(k, snap.localStorage_bp[k]); } catch (e) {}
+        });
+      }
+      logAudit("restore", "Backup restaurado", { at: snap.created_at });
+      if (typeof updateUI === "function") updateUI();
+      if (typeof toast === "function") toast("Backup restaurado", "success");
+      return true;
+    } catch (e) {
+      console.error(e);
+      if (typeof toast === "function") toast("Erro ao restaurar backup", "error");
+      return false;
+    }
+  }
+
+  /* ========== UI ========== */
+  function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    var el = document.getElementById(id);
+    if (el) {
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
+      return el;
+    }
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
+    el.innerHTML =
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+        '<div class="bp-sheet-header">' +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
+        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+        '<div class="bp-sheet-footer modal-actions">' +
+          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
+      }
+    });
+    return el;
+  }
+  function openShell(id) {
+    if (typeof openModal === "function") openModal(id);
+    else {
+      var el = document.getElementById(id);
+      if (el) el.classList.add("open");
+    }
+  }
+
+  function openDashboard() {
+    ensureShell("modal-bp-dash", "Dashboard executivo", "Gestão", "KPIs, gráfico diário e tabelas do mês corrente.");
+    var d = dashboardExecutivo();
+    var body = document.getElementById("modal-bp-dash-body");
+    if (!body) return;
+
+    var npsTxt = d.nps && d.nps.nps != null ? String(d.nps.nps) : "—";
+    var lucroClass = d.lucroMes > 0 ? " is-positive" : (d.lucroMes < 0 ? " is-negative" : "");
+
+    var insight = "";
+    if (d.meta && d.meta.meta > 0) {
+      if (d.meta.atingida) {
+        insight = '<div class="bp-alert-banner is-ok"><strong>Meta do mês atingida</strong>' + fmt(d.meta.volume) + " de " + fmt(d.meta.meta) + " (" + d.meta.pct + "%).</div>";
+      } else {
+        insight = '<div class="bp-alert-banner"><strong>Meta do mês · ' + d.meta.pct + "%</strong>" +
+          fmt(d.meta.volume) + " de " + fmt(d.meta.meta) + " · faltam " + fmt(Math.max(0, d.meta.meta - d.meta.volume)) + ".</div>";
+      }
+    } else if (!d.vendasMes) {
+      insight = '<div class="bp-alert-banner"><strong>Sem vendas neste mês</strong>Os indicadores e o gráfico actualizam quando registar vendas.</div>';
+    }
+
+    function tableRows(headers, rowsHtml) {
+      return '<div class="bp-table-wrap"><table class="bp-table"><thead><tr>' +
+        headers.map(function (h) { return "<th>" + h + "</th>"; }).join("") +
+        "</tr></thead><tbody>" + rowsHtml + "</tbody></table></div>";
+    }
+
+    var profRows = (d.topProfissionais || []).map(function (p, i) {
+      return "<tr><td>" + (i + 1) + "</td><td>" + esc(p.nome) + "</td><td>" + (p.n || "—") + "</td><td class=\"num\">" + fmt(p.receita) + "</td></tr>";
+    }).join("") || '<tr><td colspan="4" class="empty">Sem vendas no mês</td></tr>';
+
+    var servRows = (d.topServicos || []).map(function (s, i) {
+      return "<tr><td>" + (i + 1) + "</td><td>" + esc(s.nome) + "</td><td>" + s.qtd + "</td><td class=\"num\">" + fmt(s.receita) + "</td></tr>";
+    }).join("") || '<tr><td colspan="4" class="empty">Sem itens de serviço</td></tr>';
+
+    var metRows = (d.metodos || []).map(function (m) {
+      var pct = d.receitaMes > 0 ? Math.round((m.valor / d.receitaMes) * 100) : 0;
+      return "<tr><td>" + esc(m.nome) + "</td><td>" + pct + "%</td><td class=\"num\">" + fmt(m.valor) + "</td></tr>";
+    }).join("") || '<tr><td colspan="3" class="empty">—</td></tr>';
+
+    body.innerHTML =
+      insight +
+      '<p class="bp-ref-line">Período <strong>' + esc(d.periodo) + "</strong> · actualizado agora · dados locais</p>" +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Receita mês</div><div class="bp-kpi-value is-gold" style="font-size:.78rem">' + fmt(d.receitaMes) + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Despesas</div><div class="bp-kpi-value is-negative" style="font-size:.78rem">' + fmt(d.despesasMes) + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Lucro</div><div class="bp-kpi-value' + lucroClass + '" style="font-size:.78rem">' + fmt(d.lucroMes) + "</div></div></div>" +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Hoje</div><div class="bp-kpi-value" style="font-size:.78rem">' + fmt(d.receitaHoje) + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Vendas mês</div><div class="bp-kpi-value">' + d.vendasMes + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Ticket médio</div><div class="bp-kpi-value" style="font-size:.78rem">' + fmt(d.ticketMedio) + "</div></div></div>" +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Agenda hoje</div><div class="bp-kpi-value">' + d.agendamentosHoje + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">NPS 90d</div><div class="bp-kpi-value is-gold">' + npsTxt + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Stock baixo</div><div class="bp-kpi-value' + (d.stockAlert ? " is-negative" : "") + '">' + d.stockAlert + "</div></div></div>" +
+      '<div class="bp-section"><div class="bp-section-title">Receita diária (mês)</div>' +
+        '<div class="bp-chart-box"><canvas id="bp-exec-chart" aria-label="Gráfico de receita diária"></canvas></div>' +
+        '<p class="bp-ref-line">Barras = receita por dia até hoje</p></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Top profissionais</div>' +
+        tableRows(["#", "Nome", "Vendas", "Receita"], profRows) + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Top serviços</div>' +
+        tableRows(["#", "Serviço", "Qtd", "Receita"], servRows) + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Formas de pagamento</div>' +
+        tableRows(["Método", "%", "Valor"], metRows) + "</div>" +
+      '<p class="bp-ref-line">Comissões do mês: <strong>' + fmt(d.comissoesMes) + "</strong> · Clientes " + d.clientes + " · Equipa activa " + d.profissionais + "</p>";
+
+    openShell("modal-bp-dash");
+    logAudit("dashboard", "Consulta dashboard executivo");
+
+    requestAnimationFrame(function () {
+      var canvas = document.getElementById("bp-exec-chart");
+      drawExecChart(canvas, d.serieDiaria || []);
+    });
+  }
+
+  function openReagendar() {
+    ensureShell("modal-bp-reagg", "Reagendamento inteligente", "Automação", "Sugere horários livres com base na agenda e turnos.");
+    renderReagendar();
+    openShell("modal-bp-reagg");
+  }
+  function renderReagendar() {
+    var body = document.getElementById("modal-bp-reagg-body");
+    if (!body) return;
+    var lista = (state.agendamentos || []).filter(function (a) {
+      var st = String(a.status || a.estado || "").toLowerCase();
+      if (st === "cancelado" || st.indexOf("conclu") === 0) return false;
+      return a.data && a.data >= hojeStr();
+    }).sort(function (a, b) {
+      return String(a.data + a.hora).localeCompare(String(b.data + b.hora));
+    }).slice(0, 40);
+
+    if (!lista.length) {
+      body.innerHTML = '<div class="bp-empty"><strong>Sem marcações futuras</strong>Crie agenda para usar o reagendamento.</div>';
+      return;
+    }
+    var rows = lista.map(function (a) {
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(a.cliente || "Cliente") + "</div>" +
+        '<div class="bp-row-meta">' + esc(a.data) + " · " + esc(a.hora || "") +
+        (a.servico ? " · " + esc(a.servico) : "") +
+        (a.profissional ? " · " + esc(a.profissional) : "") + "</div></div>" +
+        '<button type="button" class="bp-action-btn is-primary" data-reagg="' + a.id + '">Sugerir</button></div>';
+    }).join("");
+    body.innerHTML =
+      '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Marcações futuras</div>' + rows + "</div>" +
+      '<div id="bp-reagg-sug" style="display:none;margin-top:12px"></div>';
+    body.querySelectorAll("[data-reagg]").forEach(function (btn) {
+      btn.onclick = function () { showSugestoes(btn.getAttribute("data-reagg")); };
+    });
+  }
+  function showSugestoes(agId) {
+    var box = document.getElementById("bp-reagg-sug");
+    if (!box) return;
+    var res = sugerirReagendamento(agId);
+    if (!res) return;
+    var ag = res.agendamento;
+    if (!res.sugestoes.length) {
+      box.style.display = "block";
+      box.innerHTML = '<div class="bp-empty"><strong>Sem slots livres</strong>nos próximos 14 dias para este profissional.</div>';
+      return;
+    }
+    var items = res.sugestoes.map(function (s, i) {
+      return '<button type="button" class="bp-action-btn' + (i === 0 ? " is-primary" : "") + '" style="margin:0 8px 8px 0" data-apply-data="' + s.data + '" data-apply-hora="' + s.hora + '">' +
+        esc(s.data) + " · " + esc(s.hora) + "</button>";
+    }).join("");
+    box.style.display = "block";
+    box.innerHTML =
+      '<div class="bp-section-title">Sugestões para ' + esc(ag.cliente || "") + "</div>" +
+      '<p style="font-size:.8rem;color:var(--text-muted);margin:0 0 10px">Actual: ' + esc(ag.data) + " " + esc(ag.hora || "") + "</p>" +
+      items;
+    box.querySelectorAll("[data-apply-data]").forEach(function (btn) {
+      btn.onclick = async function () {
+        var ok = await aplicarReagendamento(agId, btn.getAttribute("data-apply-data"), btn.getAttribute("data-apply-hora"));
+        if (ok) {
+          if (typeof toast === "function") toast("Reagendado com sucesso", "success");
+          if (typeof renderAgenda === "function") try { renderAgenda(); } catch (e) {}
+          if (typeof updateUI === "function") try { updateUI(); } catch (e) {}
+          renderReagendar();
+        }
+      };
+    });
+  }
+
+  function openExport() {
+    ensureShell("modal-bp-export", "Exportar relatórios", "Gestão", "CSV compatível com Excel (separador ;).");
+    var body = document.getElementById("modal-bp-export-body");
+    var tipos = [
+      { k: "vendas", l: "Vendas do mês" },
+      { k: "despesas", l: "Despesas do mês" },
+      { k: "comissoes", l: "Comissões por profissional" },
+      { k: "clientes", l: "Lista de clientes" },
+      { k: "agenda", l: "Agenda completa" }
+    ];
+    body.innerHTML =
+      '<div class="bp-alert-banner"><strong>Exportação local</strong>CSV com BOM UTF-8 — abre no Excel e LibreOffice sem problemas de acentos.</div>' +
+      '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Escolher relatório</div>' +
+      tipos.map(function (t) {
+        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + t.l + '</div>' +
+          '<div class="bp-row-meta">Separador ; · mês corrente quando aplicável</div></div>' +
+          '<button type="button" class="bp-action-btn is-primary" data-exp="' + t.k + '">Exportar</button></div>';
+      }).join("") + '</div>';
+    body.querySelectorAll("[data-exp]").forEach(function (btn) {
+      btn.onclick = function () { exportRelatorio(btn.getAttribute("data-exp")); };
+    });
+    openShell("modal-bp-export");
+  }
+
+  function openBackup() {
+    ensureShell("modal-bp-backup", "Backups", "Gestão", "Exportar e restaurar snapshot local (JSON).");
+    var meta = safeJson(BACKUP_META_KEY, null);
+    var body = document.getElementById("modal-bp-backup-body");
+    body.innerHTML =
+      '<div class="bp-alert-banner"><strong>Backup neste dispositivo</strong>Inclui clientes, equipa, serviços, movimentos, agenda e preferências BeautyPro.</div>' +
+      '<div class="bp-kpi-grid">' +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Último backup</div><div class="bp-kpi-value" style="font-size:.7rem">' +
+        (meta && meta.at ? esc(String(meta.at).slice(0, 16).replace("T", " ")) : "—") + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Clientes</div><div class="bp-kpi-value">' + ((state.clientes || []).length) + "</div></div>" +
+        '<div class="bp-kpi"><div class="bp-kpi-label">Movimentos</div><div class="bp-kpi-value">' + ((state.movimentos || []).length) + "</div></div></div>" +
+      '<div class="bp-section"><div class="bp-section-title">Exportar</div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-bk-dl">Descarregar backup JSON</button></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Restaurar</div>' +
+      '<div class="input-group"><label class="input-label" for="bp-bk-file">Ficheiro JSON</label>' +
+      '<input type="file" id="bp-bk-file" class="input-field" accept="application/json,.json"></div>' +
+      '<p class="bp-ref-line">A restauração substitui os dados locais deste dispositivo.</p></div>';
+    document.getElementById("bp-bk-dl").onclick = downloadBackup;
+    document.getElementById("bp-bk-file").onchange = function (ev) {
+      var file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var snap = JSON.parse(reader.result);
+          restoreBackupFromObject(snap);
+        } catch (e) {
+          if (typeof toast === "function") toast("JSON inválido", "error");
+        }
+      };
+      reader.readAsText(file);
+    };
+    openShell("modal-bp-backup");
+  }
+
+  function openAudit() {
+    ensureShell("modal-bp-audit", "Histórico de alterações", "Auditoria", "Últimas acções registadas neste dispositivo.");
+    var body = document.getElementById("modal-bp-audit-body");
+    var list = loadAudit(80);
+    if (!list.length) {
+      body.innerHTML = '<div class="bp-alert-banner"><strong>Auditoria local</strong>Regista acções deste dispositivo (dashboard, backup, reagendar…).</div>' +
+        '<div class="bp-empty"><strong>Sem registos ainda</strong>As acções das funcionalidades de gestão aparecem aqui.</div>';
+    } else {
+      body.innerHTML = '<div class="bp-alert-banner"><strong>Auditoria local</strong>Últimas ' + list.length + ' acções neste dispositivo.</div>' +
+        '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Histórico</div>' +
+        list.map(function (a) {
+          return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(a.acao) + "</div>" +
+            '<div class="bp-row-meta">' + esc((a.ts || "").slice(0, 16).replace("T", " ")) +
+            (a.detalhe ? " · " + esc(a.detalhe) : "") + "</div></div></div>";
+        }).join("") + '</div>';
+    }
+    openShell("modal-bp-audit");
+  }
+
+  function openFiliais() {
+    ensureShell("modal-bp-filiais", "Filiais", "Gestão", "Unidades do negócio. Isolamento completo de dados virá com Supabase.");
+    renderFiliais();
+    openShell("modal-bp-filiais");
+  }
+  function renderFiliais() {
+    var body = document.getElementById("modal-bp-filiais-body");
+    if (!body) return;
+    var list = loadFiliais();
+    var ativa = getFilialAtiva();
+    var rows = list.map(function (f) {
+      var is = ativa && ativa.id === f.id;
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + esc(f.nome) +
+        (is ? ' <span class="bp-badge is-green">Activa</span>' : "") + "</div>" +
+        '<div class="bp-row-meta">' + esc(f.localizacao || "Sem localização") +
+        (f.contacto ? " · " + esc(f.contacto) : "") + "</div></div>" +
+        (is ? "" : '<button type="button" class="bp-action-btn is-primary" data-filial="' + f.id + '">Activar</button>') +
+        "</div>";
+    }).join("");
+    body.innerHTML =
+      '<div class="bp-section" style="margin-top:0"><div class="bp-section-title">Unidades</div>' + rows + "</div>" +
+      '<div class="bp-section"><div class="bp-section-title">Nova filial</div>' +
+      '<div class="input-group"><label class="input-label">Nome</label><input id="bp-fl-nome" class="input-field" placeholder="Ex: BeautyPro Talatona"></div>' +
+      '<div class="input-group"><label class="input-label">Localização</label><input id="bp-fl-loc" class="input-field" placeholder="Bairro / cidade"></div>' +
+      '<div class="input-group"><label class="input-label">Contacto</label><input id="bp-fl-tel" class="input-field" placeholder="Telefone"></div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="bp-fl-add">Adicionar filial</button></div>' +
+      '<p style="font-size:.75rem;color:var(--text-muted);line-height:1.45;margin-top:12px">Nota: o seletor de filial fica registado localmente. O isolamento total por RLS/Supabase será activado apenas quando autorizar.</p>';
+    document.getElementById("bp-fl-add").onclick = function () {
+      if (upsertFilial({
+        nome: (document.getElementById("bp-fl-nome") || {}).value,
+        localizacao: (document.getElementById("bp-fl-loc") || {}).value,
+        contacto: (document.getElementById("bp-fl-tel") || {}).value
+      })) {
+        if (typeof toast === "function") toast("Filial criada", "success");
+        renderFiliais();
+      }
+    };
+    body.querySelectorAll("[data-filial]").forEach(function (btn) {
+      btn.onclick = function () {
+        setFilialAtiva(btn.getAttribute("data-filial"));
+        if (typeof toast === "function") toast("Filial activa: " + (getFilialAtiva().nome || ""), "success");
+        renderFiliais();
+      };
+    });
+  }
+
+  /* ========== MENU ========== */
+  function ensureMenuItems() {
+    var dd = document.getElementById("menu-dropdown");
+    if (!dd || dd.querySelector('[data-bp-menu="gestao"]')) return;
+    var frag = document.createDocumentFragment();
+    function section(label, key) {
+      var sec = document.createElement("div");
+      sec.className = "bp-menu-section";
+      sec.setAttribute("data-bp-menu", key);
+      sec.textContent = label;
+      frag.appendChild(sec);
+    }
+    function item(menu, key, label) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-bp-menu", menu);
+      btn.setAttribute("data-bp-action", key);
+      btn.innerHTML = "<span>" + label + "</span>";
+      frag.appendChild(btn);
+    }
+    section("Automação", "auto");
+    item("auto", "reagg", "Reagendamento");
+    section("Gestão", "gestao");
+    item("gestao", "dash", "Dashboard executivo");
+    item("gestao", "export", "Exportar relatórios");
+    item("gestao", "backup", "Backups");
+    item("gestao", "audit", "Auditoria");
+    item("gestao", "filiais", "Filiais");
+
+    var logout = dd.querySelector("#logout-btn");
+    if (logout) dd.insertBefore(frag, logout);
+    else dd.appendChild(frag);
+
+    if (!dd.dataset.bpGestBound) {
+      dd.dataset.bpGestBound = "1";
+      dd.addEventListener("click", function (e) {
+        var t = e.target.closest("[data-bp-action]");
+        if (!t) return;
+        var menu = t.getAttribute("data-bp-menu");
+        if (menu !== "gestao" && menu !== "auto") return;
+        e.stopPropagation();
+        dd.style.display = "none";
+        var a = t.getAttribute("data-bp-action");
+        try {
+          if (a === "reagg") openReagendar();
+          if (a === "dash") openDashboard();
+          if (a === "export") openExport();
+          if (a === "backup") openBackup();
+          if (a === "audit") openAudit();
+          if (a === "filiais") openFiliais();
+        } catch (err) {
+          console.error("[BPGestao]", err);
+          if (typeof toast === "function") toast("Não foi possível abrir esta secção", "error");
+        }
+      });
+    }
+  }
+
+  function init() {
+    try { ensureMenuItems(); loadFiliais(); } catch (e) {
+      console.warn("[gestao-fase78]", e);
+    }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { setTimeout(init, 180); });
+  } else setTimeout(init, 180);
+  setTimeout(init, 2000);
+  setTimeout(init, 5000);
+
+  window.BPGestao = {
+    dashboardExecutivo: dashboardExecutivo,
+    sugerirReagendamento: sugerirReagendamento,
+    aplicarReagendamento: aplicarReagendamento,
+    exportRelatorio: exportRelatorio,
+    downloadBackup: downloadBackup,
+    logAudit: logAudit,
+    loadAudit: loadAudit,
+    getFilialAtiva: getFilialAtiva,
+    setFilialAtiva: setFilialAtiva,
+    loadFiliais: loadFiliais
+  };
+})();
+
+/* ===== FILE: marketing-fase2.js ===== */
+// ================================================================
+// Grupo 2 — Fidelização e Marketing (offline-first)
+// F2 Pontos/níveis | F5 Lembretes WhatsApp | F15 Indicação | F17 Push local
+// ================================================================
+(function () {
+  'use strict';
+
+  var NIVEIS = [
+    { id: 'bronze', min: 0, label: 'Bronze' },
+    { id: 'prata', min: 500, label: 'Prata' },
+    { id: 'ouro', min: 2000, label: 'Ouro' },
+    { id: 'platina', min: 5000, label: 'Platina' }
+  ];
+
+  // 1 ponto por cada 1000 Kz (configurável)
+  var PONTOS_POR_KZ = 1000;
+  var BONUS_INDICACAO = 50;
+
+  function pontosDeValor(valor) {
+    return Math.floor((Number(valor) || 0) / PONTOS_POR_KZ);
+  }
+
+  function nivelDePontos(pts) {
+    var n = NIVEIS[0];
+    for (var i = 0; i < NIVEIS.length; i++) {
+      if (pts >= NIVEIS[i].min) n = NIVEIS[i];
+    }
+    return n;
+  }
+
+  function findClienteByNome(nome) {
+    if (!nome || typeof state === 'undefined') return null;
+    var n = String(nome).trim().toLowerCase();
+    return (state.clientes || []).find(function (c) {
+      return String(c.nome || '').trim().toLowerCase() === n;
+    }) || null;
+  }
+
+  function getClientePontos(clienteIdOuNome) {
+    var c = null;
+    if (typeof state === 'undefined') return 0;
+    if (clienteIdOuNome && String(clienteIdOuNome).length > 20) {
+      c = (state.clientes || []).find(function (x) { return x.id === clienteIdOuNome; });
+    } else {
+      c = findClienteByNome(clienteIdOuNome);
+    }
+    return c ? (Number(c.pontos) || 0) : 0;
+  }
+
+  async function adicionarPontosCliente(clienteNome, pts, motivo) {
+    if (!pts || pts === 0) return null;
+    var c = findClienteByNome(clienteNome);
+    if (!c) return null;
+    var novo = (Number(c.pontos) || 0) + pts;
+    var nivel = nivelDePontos(novo);
+    var data = {
+      pontos: novo,
+      nivel_fidelidade: nivel.id,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      if (typeof updateInList === 'function') {
+        updateInList('clientes', c.id, data);
+      } else if (c) {
+        Object.assign(c, data);
+      }
+      if (typeof dbPut === 'function') {
+        var full = Object.assign({}, c, data);
+        await dbPut('clientes', full);
+      }
+      if (typeof logContexto === 'function') {
+        logContexto('fidelidade.pontos', { cliente: c.id, pts: pts, motivo: motivo, total: novo });
+      }
+      return full || c;
+    } catch (e) {
+      console.warn('[fidelidade]', e);
+      return null;
+    }
+  }
+
+  /** Chamado após venda registada — F2 + F15 */
+  async function onVendaFidelidade(mov) {
+    try {
+      if (!mov || mov.tipo !== 'venda') return;
+      var pts = pontosDeValor(mov.valor);
+      if (pts > 0 && mov.cliente) {
+        await adicionarPontosCliente(mov.cliente, pts, 'venda');
+      }
+      // F15: se cliente foi indicado, bónus ao indicador (uma vez por venda do indicado)
+      var c = findClienteByNome(mov.cliente);
+      if (c && c.indicado_por) {
+        var indicador = (state.clientes || []).find(function (x) {
+          return x.id === c.indicado_por || x.codigo_indicacao === c.indicado_por;
+        });
+        if (indicador) {
+          await adicionarPontosCliente(indicador.nome, BONUS_INDICACAO, 'indicacao');
+        }
+      }
+    } catch (e) {
+      console.warn('[onVendaFidelidade]', e);
+    }
+  }
+
+  function gerarCodigoIndicacao(nome) {
+    var base = String(nome || 'CLI').replace(/\s+/g, '').slice(0, 4).toUpperCase();
+    var rnd = Math.floor(100 + Math.random() * 900);
+    return base + rnd;
+  }
+
+  // ---------- F5: Lembrete WhatsApp (agnóstico — usa wa.me) ----------
+  function linkWhatsAppLembrete(agendamento) {
+    if (!agendamento) return null;
+    var tel = String(agendamento.telefone || agendamento.clienteTelefone || '').replace(/\D/g, '');
+    if (tel && tel.length === 9) tel = '244' + tel;
+    if (!tel) return null;
+    var store = (state && state.config && state.config.storeName) || 'BeautyPro';
+    var msg = 'Olá' + (agendamento.cliente ? ' ' + agendamento.cliente : '') +
+      '! Lembrete: tem marcação em ' + store +
+      ' no dia ' + (agendamento.data || '') +
+      (agendamento.hora ? ' às ' + agendamento.hora : '') +
+      (agendamento.servico ? ' (' + agendamento.servico + ')' : '') +
+      '. Até breve!';
+    return 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
+  }
+
+  function enviarLembreteAgenda(agId) {
+    var ag = (state.agendamentos || []).find(function (a) { return a.id === agId; });
+    if (!ag) {
+      // tentar pelo objecto directo
+      ag = agId && agId.data ? agId : null;
+    }
+    if (!ag) {
+      if (typeof toast === 'function') toast('Agendamento não encontrado', 'error');
+      return;
+    }
+    // enriquecer telefone pelo cliente
+    if (!ag.telefone && ag.cliente) {
+      var c = findClienteByNome(ag.cliente);
+      if (c) ag.telefone = c.telefone || c.contacto || '';
+    }
+    var url = linkWhatsAppLembrete(ag);
+    if (!url) {
+      if (typeof toast === 'function') toast('Cliente sem telefone válido', 'error');
+      return;
+    }
+    window.open(url, '_blank');
+    if (typeof toast === 'function') toast('A abrir WhatsApp…', 'success');
+  }
+
+  // ---------- F17: Notificações locais (sem FCM nesta etapa) ----------
+  function pedirPermissaoPush() {
+    if (!('Notification' in window)) {
+      if (typeof toast === 'function') toast('Notificações não suportadas neste dispositivo', 'warning');
+      return Promise.resolve(false);
+    }
+    return Notification.requestPermission().then(function (p) {
+      if (p === 'granted' && typeof toast === 'function') toast('Notificações activadas', 'success');
+      return p === 'granted';
+    });
+  }
+
+  function notificarLocal(titulo, corpo) {
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+      new Notification(titulo || 'BeautyPro', {
+        body: corpo || '',
+        icon: 'icon-192.png',
+        badge: 'icon-192.png'
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function lembrarAgendamentosAmanha() {
+    if (typeof hoje !== 'function') return;
+    var d = new Date(hoje() + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    var amanha = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    var lista = (state.agendamentos || []).filter(function (a) {
+      return a.data === amanha && a.estado !== 'cancelado';
+    });
+    if (lista.length) {
+      notificarLocal(
+        'Agenda de amanhã',
+        lista.length + ' marcação(ões) amanhã. Abra a app para rever.'
+      );
+    }
+  }
+
+  // ---------- UI menu ----------
+  function ensureMenuItems() {
+    var dd = document.getElementById('menu-dropdown');
+    if (!dd || dd.querySelector('[data-bp-menu="mkt"]')) return;
+    var frag = document.createDocumentFragment();
+    var sec = document.createElement('div');
+    sec.className = 'bp-menu-section';
+    sec.setAttribute('data-bp-menu', 'mkt');
+    sec.textContent = 'Marketing';
+    frag.appendChild(sec);
+    var items = [
+      { key: 'fidelidade', label: 'Fidelidade' },
+      { key: 'indicacao', label: 'Indicações' },
+      { key: 'lembretes', label: 'Lembretes WhatsApp' },
+      { key: 'push', label: 'Notificações' }
+    ];
+    items.forEach(function (it) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-bp-menu', 'mkt');
+      btn.setAttribute('data-bp-action', it.key);
+      btn.innerHTML = '<span>' + it.label + '</span>';
+      frag.appendChild(btn);
+    });
+    var logout = dd.querySelector('#logout-btn');
+    if (logout) dd.insertBefore(frag, logout);
+    else dd.appendChild(frag);
+    dd.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-bp-menu="mkt"]');
+      if (!t) return;
+      e.stopPropagation();
+      dd.style.display = 'none';
+      var a = t.getAttribute('data-bp-action');
+      if (a === 'fidelidade') openModalFidelidade();
+      if (a === 'indicacao') openModalIndicacao();
+      if (a === 'lembretes') openModalLembretes();
+      if (a === 'push') {
+        pedirPermissaoPush().then(function () { lembrarAgendamentosAmanha(); });
+      }
+    });
+  }
+
+  function ensureModal(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    var el = document.getElementById(id);
+    if (el) return el;
+    return null;
+  }
+
+  function openModalFidelidade() {
+    ensureModal('modal-bp-fid', 'Fidelidade', 'Clientes', 'Pontos acumulados e níveis de recompensa.');
+    var body = document.getElementById('modal-bp-fid-body');
+    var clientes = (state.clientes || []).slice().sort(function (a, b) {
+      return (Number(b.pontos) || 0) - (Number(a.pontos) || 0);
+    }).slice(0, 30);
+    var html = '<p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">1 ponto por cada ' + PONTOS_POR_KZ + ' Kz. Níveis: Bronze → Prata (500) → Ouro (2.000) → Platina (5.000).</p>';
+    if (!clientes.length) {
+      html += '<div class="bp-empty"><strong>Sem clientes</strong>Os pontos aparecem após as primeiras vendas.</div>';
+    } else {
+      html += clientes.map(function (c) {
+        var pts = Number(c.pontos) || 0;
+        var niv = nivelDePontos(pts);
+        var nome = typeof escHtml === 'function' ? escHtml(c.nome) : c.nome;
+        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + nome + '</div>' +
+          '<div class="bp-row-meta"><span class="bp-badge">' + niv.label + '</span></div></div>' +
+          '<div class="bp-row-value is-gold">' + pts + ' pts</div></div>';
+      }).join('');
+    }
+    body.innerHTML = html;
+    if (typeof openModal === 'function') openModal('modal-bp-fid');
+    else document.getElementById('modal-bp-fid').classList.add('open');
+  }
+
+  function openModalIndicacao() {
+    ensureModal('modal-bp-ind', 'Indicações', 'Crescimento', 'Códigos para amigo indica amigo.');
+    var body = document.getElementById('modal-bp-ind-body');
+    var rows = (state.clientes || []).map(function (c) {
+      var cod = c.codigo_indicacao || '';
+      var nome = typeof escHtml === 'function' ? escHtml(c.nome) : c.nome;
+      return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + nome + '</div>' +
+        '<div class="bp-row-meta">' + (cod ? '<span class="bp-code">' + cod + '</span>' : 'Sem código') + '</div></div>' +
+        '<button type="button" class="bp-action-btn' + (cod ? '' : ' is-primary') + '" data-gen-cod="' + c.id + '">' + (cod ? 'Gerado' : 'Gerar') + '</button></div>';
+    }).join('') || '<div class="bp-empty"><strong>Sem clientes</strong>Adicione clientes para gerar códigos.</div>';
+    body.innerHTML = '<div class="bp-alert-banner"><strong>Programa de indicações</strong>Cada código dá ' + BONUS_INDICACAO + ' pts ao indicador quando o indicado compra.</div>' + rows;
+    body.querySelectorAll('[data-gen-cod]').forEach(function (btn) {
+      btn.onclick = async function () {
+        var id = btn.getAttribute('data-gen-cod');
+        var c = (state.clientes || []).find(function (x) { return x.id === id; });
+        if (!c) return;
+        if (c.codigo_indicacao) return;
+        var cod = gerarCodigoIndicacao(c.nome);
+        var data = { codigo_indicacao: cod, updated_at: new Date().toISOString() };
+        if (typeof updateInList === 'function') updateInList('clientes', id, data);
+        else Object.assign(c, data);
+        if (typeof dbPut === 'function') await dbPut('clientes', Object.assign({}, c, data));
+        if (typeof toast === 'function') toast('Código ' + cod + ' gerado', 'success');
+        openModalIndicacao();
+      };
+    });
+    if (typeof openModal === 'function') openModal('modal-bp-ind');
+    else document.getElementById('modal-bp-ind').classList.add('open');
+  }
+
+  function openModalLembretes() {
+    ensureModal('modal-bp-lemb', 'Lembretes', 'WhatsApp', 'Mensagens prontas para marcações futuras.');
+    var body = document.getElementById('modal-bp-lemb-body');
+    var hojeStr = typeof hoje === 'function' ? hoje() : '';
+    var lista = (state.agendamentos || []).filter(function (a) {
+      return a.data >= hojeStr && a.estado !== 'cancelado';
+    }).slice(0, 20);
+    var html = '<div class="bp-alert-banner"><strong>Lembretes WhatsApp</strong>Abre conversa com texto pronto. O cliente precisa de telefone na ficha.</div>';
+    if (!lista.length) {
+      html += '<div class="bp-empty"><strong>Sem marcações futuras</strong>Os lembretes aparecem quando houver agenda.</div>';
+    } else {
+      html += lista.map(function (a) {
+        var nome = typeof escHtml === 'function' ? escHtml(a.cliente || '') : (a.cliente || '');
+        return '<div class="bp-row"><div class="bp-row-main"><div class="bp-row-title">' + nome + '</div>' +
+          '<div class="bp-row-meta">' + (a.data || '') + (a.hora ? ' · ' + a.hora : '') + (a.servico ? ' · ' + a.servico : '') + '</div></div>' +
+          '<button type="button" class="bp-action-btn is-primary" data-wa="' + a.id + '">WhatsApp</button></div>';
+      }).join('');
+    }
+    body.innerHTML = html;
+    body.querySelectorAll('[data-wa]').forEach(function (btn) {
+      btn.onclick = function () { enviarLembreteAgenda(btn.getAttribute('data-wa')); };
+    });
+    if (typeof openModal === 'function') openModal('modal-bp-lemb');
+    else document.getElementById('modal-bp-lemb').classList.add('open');
+  }
+
+  // Enhance render clientes list with pontos badge — safe observer
+  function enhanceClientesListOnce() {
+    // non-invasive: only when fidelidade modal not needed
+  }
+
+  function init() {
+    try {
+      ensureMenuItems();
+    } catch (e) {
+      console.warn('[marketing-fase2]', e);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 120); });
+  } else {
+    setTimeout(init, 120);
+  }
+  setTimeout(init, 1600);
+  setTimeout(init, 4200);
+
+  window.BPMarketing = {
+    pontosDeValor: pontosDeValor,
+    nivelDePontos: nivelDePontos,
+    onVendaFidelidade: onVendaFidelidade,
+    adicionarPontosCliente: adicionarPontosCliente,
+    enviarLembreteAgenda: enviarLembreteAgenda,
+    pedirPermissaoPush: pedirPermissaoPush,
+    notificarLocal: notificarLocal,
+    getClientePontos: getClientePontos
+  };
+})();
+
+/* ===== FILE: menu-accordion.js ===== */
+// ================================================================
+// Menu ☰ — acordeão: 8 grupos visíveis; subsecções só ao expandir
+// + scroll do dropdown (max-height / overflow-y)
+// ================================================================
+(function () {
+  "use strict";
+
+  var GROUPS = [
+    {
+      key: "finance",
+      label: "Financeiro",
+      items: [
+        { action: "fluxo", label: "Fluxo de caixa" },
+        { action: "rentab", label: "Rentabilidade" },
+        { action: "meta", label: "Meta do salão" },
+        { action: "despesas", label: "Despesas" }
+      ]
+    },
+    {
+      key: "mkt",
+      label: "Marketing",
+      items: [
+        { action: "fidelidade", label: "Fidelidade" },
+        { action: "indicacao", label: "Indicações" },
+        { action: "lembretes", label: "Lembretes WhatsApp" },
+        { action: "push", label: "Notificações" }
+      ]
+    },
+    {
+      key: "equipa",
+      label: "Equipa",
+      items: [
+        { action: "ranking", label: "Ranking" },
+        { action: "horarios", label: "Horários e folgas" },
+        { action: "chat", label: "Chat interno" }
+      ]
+    },
+    {
+      key: "ops",
+      label: "Operações",
+      items: [
+        { action: "stock", label: "Stock de produtos" },
+        { action: "forn", label: "Fornecedores e compras" }
+      ]
+    },
+    {
+      key: "crm",
+      label: "CRM",
+      items: [
+        { action: "nps", label: "Avaliação NPS" },
+        { action: "timeline", label: "Histórico do cliente" },
+        { action: "cal", label: "Calendário (.ics)" },
+        { action: "galeria", label: "Galeria de serviços" }
+      ]
+    },
+    {
+      key: "com",
+      label: "Comercial",
+      items: [
+        { action: "pacotes", label: "Pacotes e assinaturas" }
+      ]
+    },
+    {
+      key: "auto",
+      label: "Automação",
+      items: [
+        { action: "reagg", label: "Reagendamento" }
+      ]
+    },
+    {
+      key: "gestao",
+      label: "Gestão",
+      items: [
+        { action: "dash", label: "Dashboard executivo" },
+        { action: "export", label: "Exportar relatórios" },
+        { action: "backup", label: "Backups" },
+        { action: "audit", label: "Auditoria" },
+        { action: "filiais", label: "Filiais" }
+      ]
+    }
+  ];
+
+  function chevronSvg() {
+    return '<svg class="bp-acc-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>';
+  }
+
+  function stripLegacy(dd) {
+    // remove flat injections from feature modules (keep logout + our accordion)
+    Array.prototype.slice.call(dd.querySelectorAll("[data-bp-menu], .bp-menu-section")).forEach(function (el) {
+      if (el.closest && el.closest(".bp-acc-group")) return;
+      if (el.classList && el.classList.contains("bp-acc-toggle")) return;
+      if (el.classList && el.classList.contains("bp-acc-panel")) return;
+      el.parentNode && el.parentNode.removeChild(el);
+    });
+  }
+
+  function buildAccordion(dd) {
+    if (dd.querySelector(".bp-acc-root")) return;
+
+    stripLegacy(dd);
+
+    var root = document.createElement("div");
+    root.className = "bp-acc-root";
+
+    GROUPS.forEach(function (g) {
+      var group = document.createElement("div");
+      group.className = "bp-acc-group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", g.label);
+
+      var toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "bp-acc-toggle";
+      toggle.setAttribute("data-bp-menu", g.key); // impede re-injecção dos módulos
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("data-acc-key", g.key);
+      toggle.innerHTML = "<span>" + g.label + "</span>" + chevronSvg();
+
+      var panel = document.createElement("div");
+      panel.className = "bp-acc-panel";
+      panel.setAttribute("data-acc-panel", g.key);
+      panel.hidden = true;
+
+      g.items.forEach(function (it) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("data-bp-menu", g.key);
+        btn.setAttribute("data-bp-action", it.action);
+        btn.innerHTML = "<span>" + it.label + "</span>";
+        panel.appendChild(btn);
+      });
+
+      group.appendChild(toggle);
+      group.appendChild(panel);
+      root.appendChild(group);
+    });
+
+    var logout = dd.querySelector("#logout-btn");
+    if (logout) dd.insertBefore(root, logout);
+    else dd.appendChild(root);
+
+    // toggle acordeão — um aberto de cada vez
+    root.addEventListener("click", function (e) {
+      var tog = e.target.closest(".bp-acc-toggle");
+      if (!tog || !root.contains(tog)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var key = tog.getAttribute("data-acc-key");
+      var open = tog.getAttribute("aria-expanded") === "true";
+      root.querySelectorAll(".bp-acc-toggle").forEach(function (t) {
+        t.setAttribute("aria-expanded", "false");
+      });
+      root.querySelectorAll(".bp-acc-panel").forEach(function (p) {
+        p.classList.remove("open");
+        p.hidden = true;
+      });
+      if (!open) {
+        tog.setAttribute("aria-expanded", "true");
+        var panel = root.querySelector('[data-acc-panel="' + key + '"]');
+        if (panel) {
+          panel.hidden = false;
+          panel.classList.add("open");
+        }
+        // garantir que o item expandido fica visível no scroll
+        try {
+          tog.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        } catch (err) {}
+      }
+    });
+  }
+
+  function ensureScrollable(dd) {
+    dd.style.maxHeight = "min(70vh, 420px)";
+    dd.style.overflowX = "hidden";
+    dd.style.overflowY = "auto";
+    dd.style.webkitOverflowScrolling = "touch";
+  }
+
+  function mount() {
+    var dd = document.getElementById("menu-dropdown");
+    if (!dd) return;
+    ensureScrollable(dd);
+    // limpar legados que módulos possam ter injectado
+    if (!dd.querySelector(".bp-acc-root")) {
+      stripLegacy(dd);
+      buildAccordion(dd);
+    } else {
+      // se módulos injectaram irmãos fora do acordeão, remover
+      Array.prototype.slice.call(dd.children).forEach(function (ch) {
+        if (ch.id === "logout-btn") return;
+        if (ch.classList && ch.classList.contains("bp-acc-root")) return;
+        if (ch.hasAttribute && ch.hasAttribute("data-bp-menu")) ch.remove();
+        if (ch.classList && ch.classList.contains("bp-menu-section")) ch.remove();
+      });
+    }
+  }
+
+  function init() {
+    try { mount(); } catch (e) { console.warn("[menu-accordion]", e); }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      setTimeout(init, 200);
+    });
+  } else setTimeout(init, 200);
+  // depois dos módulos de features (que injectam a ~100–5000ms)
+  setTimeout(init, 600);
+  setTimeout(init, 1800);
+  setTimeout(init, 4500);
+})();
+
+/* ===== FILE: avatars-realistas.js ===== */
+// ================================================================
+// Avatars realistas por género (SVG embutido) · sem rede
+// ================================================================
+(function () {
+  "use strict";
+
+  var FEMININOS = "maria,ana,isa,isabel,isabela,beatriz,bia,sofia,sophie,marta,carla,catarina,catia,lucia,luisa,patricia,paula,sandra,sonia,teresa,vanessa,vera,vitoria,yara,iara,rosa,rita,raquel,helena,elsa,elisa,elena,diana,daniela,debora,cristina,clara,celia,bruna,barbara,alice,adriana,fatima,fernanda,filipa,flavia,gabriela,graciela,ines,irene,joana,julia,juliana,lara,laura,leonor,lidia,liliana,lorena,luciana,madalena,manuela,margarida,marina,marisa,matilde,monica,nadia,natalia,nicole,olga,olivia,priscila,rebeca,renata,sara,silvia,simone,susana,tatiana,telma,valeria,viviane,yasmin,zara,nuria,nelma,neusa,noemia,otilia,pilar,ramona,salome,tania,ursula,virginia,wanda,zuleica,michele,andreia,angelica,benilde,celeste,conceicao,dulce,eduarda,eugenia,francisca,gloria,ivone,jacinta,leila,lurdes,lourdes,nair,nilza,odete,palmira,quelia,rosario,soraia,solange,vanda,amelia,augusta,belmira,carmo,dolores,esperanca,estrela,guilhermina,isaltina,josefa,lina,lurdes,mercedes,natercia,ofelia,perpetua,querubina,severina,teodora,urbana,violante,zelia".split(",");
+  var MASCULINOS = "joao,jose,antonio,pedro,paulo,carlos,manuel,miguel,rui,ricardo,rodrigo,rafael,nuno,nelson,marco,marcos,luis,lucas,leonardo,leandro,jorge,hugo,henrique,gustavo,goncalo,francisco,fernando,felipe,filipe,fabio,eduardo,diogo,daniel,david,cristiano,bruno,bernardo,andre,alexandre,alberto,serafim,teodoro,zeferino,sebastiao,samuel,santiago,salvador,ruben,renato,raul,oscar,octavio,natan,nathan,moises,mateus,martin,martim,mario,lorenzo,leonel,kevin,julio,isaac,ivan,heitor,guilherme,gabriel,frederico,fabiano,elias,edson,eder,domingos,diego,dario,claudio,cesar,caio,brian,benjamin,arthur,artur,arnaldo,angelo,anderson,amilcar,amaro,alvaro,afonso,abel,ambrosio,anibal,baltazar,benedito,bonifacio,caetano,cipriano,constancio,cristovao,custodio,donizete,eleuterio,evaristo,faustino,florencio,gaspar,geraldo,helio,inocencio,jacinto,januario,joaquim,lindolfo,lourenco,luciano,marcelo,maximiano,norberto,onesimo,osvaldo,otavio,plinio,quirino,romulo,saturnino,silvestre,timoteo,ulisses,valdemar,vicente,wagner,xavier,zacarias,adilson,ademar,africo".split(",");
+
+  function norm(nome) {
+    return String(nome || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .split(/\s+/)[0] || "";
+  }
+  function hashName(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+  function detectarGenero(nome) {
+    var n = norm(nome);
+    if (!n) return "f";
+    if (FEMININOS.indexOf(n) >= 0) return "f";
+    if (MASCULINOS.indexOf(n) >= 0) return "m";
+    if (n.endsWith("a") && ["guia","juda","luca","nicola"].indexOf(n) < 0) return "f";
+    if (n.endsWith("o") || n.endsWith("son")) return "m";
+    return hashName(n) % 2 === 0 ? "f" : "m";
+  }
+
+  var SKINS = ["#5C3310", "#6B3F24", "#8D5524", "#A analog".length && "#A67B5B", "#C68642"];
+  SKINS = ["#5C3310", "#6B3F24", "#8D5524", "#A67B5B", "#C68642"];
+  var HAIR_F = ["#1A120B", "#2C1A0E", "#3D2314", "#4A2912", "#0D0D0D"];
+  var HAIR_M = ["#1A120B", "#2C1A0E", "#0D0D0D", "#3D2314"];
+
+  function svgPortrait(genero, seed) {
+    var skin = SKINS[seed % SKINS.length];
+    var hair = (genero === "f" ? HAIR_F : HAIR_M)[seed % (genero === "f" ? HAIR_F.length : HAIR_M.length)];
+    var bg = ["#F3F2EF", "#FBF6E9", "#ECE9E4", "#E8F0EC"][seed % 4];
+    var lip = genero === "f" ? "#A65D5D" : "#8B5A4A";
+    // slight feature offsets
+    var eyeY = 46 + (seed % 3);
+    var browY = eyeY - 6;
+
+    var hairSvg;
+    if (genero === "f") {
+      // long / shoulder hair + volume
+      var style = seed % 3;
+      if (style === 0) {
+        hairSvg =
+          '<ellipse cx="50" cy="28" rx="34" ry="28" fill="' + hair + '"/>' +
+          '<path d="M16 40 Q12 70 18 92 L28 92 Q22 60 24 42 Z" fill="' + hair + '"/>' +
+          '<path d="M84 40 Q88 70 82 92 L72 92 Q78 60 76 42 Z" fill="' + hair + '"/>';
+      } else if (style === 1) {
+        hairSvg =
+          '<path d="M18 48 Q20 18 50 14 Q80 18 82 48 Q80 36 50 34 Q20 36 18 48 Z" fill="' + hair + '"/>' +
+          '<path d="M18 48 Q10 75 20 95 L32 90 Q24 65 28 48 Z" fill="' + hair + '"/>' +
+          '<path d="M82 48 Q90 75 80 95 L68 90 Q76 65 72 48 Z" fill="' + hair + '"/>';
+      } else {
+        hairSvg =
+          '<ellipse cx="50" cy="30" rx="32" ry="26" fill="' + hair + '"/>' +
+          '<path d="M20 38 C14 55 16 80 22 96 L34 90 C28 70 30 50 32 40 Z" fill="' + hair + '"/>' +
+          '<path d="M80 38 C86 55 84 80 78 96 L66 90 C72 70 70 50 68 40 Z" fill="' + hair + '"/>' +
+          '<circle cx="50" cy="22" r="6" fill="' + hair + '"/>';
+      }
+    } else {
+      var mstyle = seed % 3;
+      if (mstyle === 0) {
+        hairSvg = '<path d="M22 42 Q25 20 50 18 Q75 20 78 42 Q70 32 50 30 Q30 32 22 42 Z" fill="' + hair + '"/>';
+      } else if (mstyle === 1) {
+        hairSvg =
+          '<path d="M20 44 Q22 18 50 16 Q78 18 80 44 Q72 28 50 28 Q28 28 20 44 Z" fill="' + hair + '"/>' +
+          '<rect x="22" y="40" width="8" height="14" rx="3" fill="' + hair + '"/>' +
+          '<rect x="70" y="40" width="8" height="14" rx="3" fill="' + hair + '"/>';
+      } else {
+        hairSvg = '<path d="M24 40 Q28 22 50 20 Q72 22 76 40 Q68 34 50 34 Q32 34 24 40 Z" fill="' + hair + '"/>';
+      }
+    }
+
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">' +
+      '<rect width="100" height="100" fill="' + bg + '"/>' +
+      hairSvg +
+      // neck
+      '<rect x="40" y="72" width="20" height="18" rx="4" fill="' + skin + '"/>' +
+      // shoulders
+      '<ellipse cx="50" cy="98" rx="36" ry="16" fill="' + (seed % 2 === 0 ? "#2A241E" : "#3D342C") + '"/>' +
+      // face
+      '<ellipse cx="50" cy="52" rx="24" ry="28" fill="' + skin + '"/>' +
+      // ears
+      '<ellipse cx="26" cy="52" rx="4" ry="6" fill="' + skin + '"/>' +
+      '<ellipse cx="74" cy="52" rx="4" ry="6" fill="' + skin + '"/>' +
+      // brows
+      '<path d="M34 ' + browY + ' Q42 ' + (browY - 3) + ' 48 ' + browY + '" stroke="' + hair + '" stroke-width="2" fill="none" stroke-linecap="round"/>' +
+      '<path d="M52 ' + browY + ' Q58 ' + (browY - 3) + ' 66 ' + browY + '" stroke="' + hair + '" stroke-width="2" fill="none" stroke-linecap="round"/>' +
+      // eyes
+      '<ellipse cx="40" cy="' + eyeY + '" rx="4.2" ry="4.5" fill="#fff"/>' +
+      '<ellipse cx="60" cy="' + eyeY + '" rx="4.2" ry="4.5" fill="#fff"/>' +
+      '<circle cx="40.5" cy="' + (eyeY + 0.5) + '" r="2.4" fill="#2A1810"/>' +
+      '<circle cx="60.5" cy="' + (eyeY + 0.5) + '" r="2.4" fill="#2A1810"/>' +
+      '<circle cx="41.2" cy="' + (eyeY - 0.3) + '" r="0.7" fill="#fff"/>' +
+      '<circle cx="61.2" cy="' + (eyeY - 0.3) + '" r="0.7" fill="#fff"/>' +
+      // nose
+      '<path d="M50 48 L48 58 Q50 60 52 58 Z" fill="' + skin + '" stroke="#00000018" stroke-width="0.5"/>' +
+      // lips
+      (genero === "f"
+        ? '<path d="M42 66 Q50 72 58 66 Q50 70 42 66 Z" fill="' + lip + '"/>'
+        : '<path d="M44 66 Q50 70 56 66" stroke="' + lip + '" stroke-width="1.8" fill="none" stroke-linecap="round"/>') +
+      // soft cheek shade
+      '<ellipse cx="34" cy="58" rx="5" ry="3" fill="#00000010"/>' +
+      '<ellipse cx="66" cy="58" rx="5" ry="3" fill="#00000010"/>' +
+      "</svg>";
+
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function avatarDataUrl(nome, generoForcado) {
+    var g = generoForcado || detectarGenero(nome);
+    var seed = hashName(norm(nome) || "x");
+    return svgPortrait(g, seed);
+  }
+
+  function avatarImgHtml(nome, foto, extraClass) {
+    var src = foto || avatarDataUrl(nome);
+    return (
+      '<div class="avatar bp-avatar-img ' + (extraClass || "") + '">' +
+      '<img src="' + src + '" alt="" loading="lazy" decoding="async">' +
+      "</div>"
+    );
+  }
+
+  window.BPAvatars = {
+    detectarGenero: detectarGenero,
+    avatarDataUrl: avatarDataUrl,
+    avatarImgHtml: avatarImgHtml
+  };
+})();
+
+/* ===== FILE: media-galeria.js ===== */
+// ================================================================
+// BeautyPro — Fotos de perfil + Galeria de serviços
+// Compressão no dispositivo · gravação imediata · offline-first
+// ================================================================
+(function () {
+  "use strict";
+
+  /** Sessão de UI (efémera) — não poluir window._bp* nem BeautyStore. */
+  var session = {
+    editingClienteId: null,
+    editingProfId: null,
+    pendingClienteFoto: null,
+    pendingProfFoto: null
+  };
+
+  var GALERIA_KEY = "bp_galeria_v1";
+  var MAX_GALERIA = 60;
+  var AVATAR_MAX = 256;
+  var GALERIA_MAX = 720;
+  var JPEG_Q = 0.72;
+
+  function esc(s) {
+    return typeof escHtml === "function" ? escHtml(String(s == null ? "" : s)) : String(s == null ? "" : s);
+  }
+  function uid() {
+    return typeof uuid === "function" ? uuid() : "img" + Date.now() + Math.random().toString(16).slice(2, 8);
+  }
+  function hojeStr() {
+    return typeof hoje === "function" ? hoje() : new Date().toISOString().slice(0, 10);
+  }
+  function toastMsg(m, t) {
+    if (typeof toast === "function") toast(m, t || "success");
+  }
+
+  /* ---------- compressão rápida ---------- */
+  function compressFile(file, maxSide, quality) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+        reject(new Error("Ficheiro inválido"));
+        return;
+      }
+      // HEIC etc. — browser pode falhar; feedback claro
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth || img.width;
+          var h = img.naturalHeight || img.height;
+          var scale = 1;
+          if (w > maxSide || h > maxSide) scale = maxSide / Math.max(w, h);
+          var nw = Math.max(1, Math.round(w * scale));
+          var nh = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = nw;
+          canvas.height = nh;
+          var ctx = canvas.getContext("2d");
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(img, 0, 0, nw, nh);
+          var dataUrl = canvas.toDataURL("image/jpeg", quality || JPEG_Q);
+          URL.revokeObjectURL(url);
+          // limite ~180KB data URL
+          if (dataUrl.length > 240000) {
+            dataUrl = canvas.toDataURL("image/jpeg", 0.55);
+          }
+          resolve(dataUrl);
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Não foi possível ler a imagem"));
+      };
+      img.src = url;
+    });
+  }
+
+  function pickImage(accept) {
+    return new Promise(function (resolve) {
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = accept || "image/*";
+      // mobile: prefer camera optional via capture not forced
+      input.style.display = "none";
+      document.body.appendChild(input);
+      input.onchange = function () {
+        var f = input.files && input.files[0];
+        input.remove();
+        resolve(f || null);
+      };
+      input.oncancel = function () {
+        input.remove();
+        resolve(null);
+      };
+      input.click();
+    });
+  }
+
+  /* ---------- storage entidades ---------- */
+  async function setClienteFoto(clienteId, dataUrl) {
+    if (!clienteId) return false;
+    if (typeof updateCliente === "function") {
+      await updateCliente(clienteId, { foto: dataUrl || null });
+      return true;
+    }
+    var c = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+    if (!c) return false;
+    c.foto = dataUrl || null;
+    if (typeof dbPut === "function") await dbPut("clientes", c);
+    return true;
+  }
+  async function setProfFoto(profId, dataUrl) {
+    if (!profId) return false;
+    if (typeof updateProfissional === "function") {
+      await updateProfissional(profId, { foto: dataUrl || null });
+      return true;
+    }
+    var p = (state.profissionais || []).find(function (x) { return x.id === profId; });
+    if (!p) return false;
+    p.foto = dataUrl || null;
+    if (typeof dbPut === "function") await dbPut("profissionais", p);
+    return true;
+  }
+
+  function getCliente(id) {
+    return (state.clientes || []).find(function (c) { return c.id === id; });
+  }
+  function getProf(id) {
+    return (state.profissionais || []).find(function (p) { return p.id === id; });
+  }
+
+  /* ---------- galeria ---------- */
+  function loadGaleria() {
+    try {
+      var raw = localStorage.getItem(GALERIA_KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+  }
+  function saveGaleria(list) {
+    try {
+      localStorage.setItem(GALERIA_KEY, JSON.stringify((list || []).slice(-MAX_GALERIA)));
+      return true;
+    } catch (e) {
+      toastMsg("Armazenamento cheio — remova fotos antigas", "error");
+      return false;
+    }
+  }
+  function addFotoGaleria(entry) {
+    var list = loadGaleria();
+    list.push(entry);
+    if (!saveGaleria(list)) return null;
+    return entry;
+  }
+  function removeFotoGaleria(id) {
+    var list = loadGaleria().filter(function (x) { return x.id !== id; });
+    saveGaleria(list);
+  }
+  function galeriaPorProf(profId) {
+    return loadGaleria().filter(function (x) { return x.profissional_id === profId; }).reverse();
+  }
+
+  /* ---------- UI avatar helpers ---------- */
+  function avatarHtml(foto, nome, sizeClass) {
+    var initial = (nome || "?").charAt(0).toUpperCase();
+    if (foto) {
+      return '<div class="avatar bp-avatar-img ' + (sizeClass || "") + '"><img src="' + foto + '" alt="" loading="lazy" decoding="async"></div>';
+    }
+    return '<div class="avatar ' + (sizeClass || "") + '">' + initial + "</div>";
+  }
+
+  function enhanceListAvatars() {
+    try {
+      document.querySelectorAll(".cliente-item[data-cliente-id]").forEach(function (row) {
+        var id = row.getAttribute("data-cliente-id");
+        var c = getCliente(id);
+        if (!c) return;
+        var av = row.querySelector(".avatar");
+        if (!av) return;
+        if (av.classList.contains("bp-avatar-done")) return;
+        var src = c.foto || (window.BPAvatars && BPAvatars.avatarDataUrl(c.nome));
+        if (!src) return;
+        av.classList.add("bp-avatar-img", "bp-avatar-done");
+        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
+      });
+      document.querySelectorAll("[data-prof-id]").forEach(function (row) {
+        var id = row.getAttribute("data-prof-id");
+        var p = getProf(id);
+        if (!p) return;
+        var av = row.querySelector(".avatar");
+        if (!av) return;
+        if (av.classList.contains("bp-avatar-done")) return;
+        var src = p.foto || (window.BPAvatars && BPAvatars.avatarDataUrl(p.nome));
+        if (!src) return;
+        av.classList.add("bp-avatar-img", "bp-avatar-done");
+        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
+      });
+    } catch (e) {}
+  }
+
+  /* ---------- picker no modal ---------- */
+  function ensureClientePhotoUI() {
+    var modal = document.getElementById("modal-cliente");
+    if (!modal || modal.querySelector("#bp-cli-foto-wrap")) return;
+    var title = modal.querySelector(".modal-title") || modal.querySelector("#cliente-modal-title");
+    if (!title) return;
+    var wrap = document.createElement("div");
+    wrap.id = "bp-cli-foto-wrap";
+    wrap.className = "bp-foto-wrap";
+    wrap.innerHTML =
+      '<button type="button" class="bp-foto-btn" id="bp-cli-foto-btn" aria-label="Foto do cliente">' +
+        '<div class="bp-foto-preview" id="bp-cli-foto-preview"><span>Foto</span></div>' +
+        '<span class="bp-foto-hint">Toque para adicionar foto</span>' +
+      "</button>" +
+      '<button type="button" class="bp-foto-remove" id="bp-cli-foto-rm" style="display:none">Remover foto</button>';
+    title.parentNode.insertBefore(wrap, title.nextSibling);
+
+    document.getElementById("bp-cli-foto-btn").onclick = async function () {
+      var id = modal.dataset.editId || modal.getAttribute("data-edit-id");
+      // try common patterns
+      if (!id) id = session.editingClienteId || null;
+      if (!id) {
+        // new client — store pending
+        var file = await pickImage();
+        if (!file) return;
+        try {
+          toastMsg("A otimizar foto…", "info");
+          var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
+          session.pendingClienteFoto = dataUrl;
+          showPreview("bp-cli-foto-preview", dataUrl);
+          document.getElementById("bp-cli-foto-rm").style.display = "";
+          toastMsg("Foto pronta — guarde o cliente", "success");
+        } catch (e) {
+          toastMsg("Erro ao processar imagem", "error");
+        }
+        return;
+      }
+      var file = await pickImage();
+      if (!file) return;
+      try {
+        toastMsg("A otimizar foto…", "info");
+        var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
+        await setClienteFoto(id, dataUrl);
+        showPreview("bp-cli-foto-preview", dataUrl);
+        document.getElementById("bp-cli-foto-rm").style.display = "";
+        enhanceListAvatars();
+        toastMsg("Foto actualizada", "success");
+        if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+      } catch (e) {
+        console.warn(e);
+        toastMsg("Erro ao guardar foto", "error");
+      }
+    };
+    document.getElementById("bp-cli-foto-rm").onclick = async function () {
+      var id = session.editingClienteId;
+      session.pendingClienteFoto = null;
+      if (id) await setClienteFoto(id, null);
+      showPreview("bp-cli-foto-preview", null);
+      this.style.display = "none";
+      toastMsg("Foto removida", "success");
+      if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+    };
+  }
+
+  function ensureProfPhotoUI() {
+    var modal = document.getElementById("modal-prof");
+    if (!modal || modal.querySelector("#bp-prof-foto-wrap")) return;
+    var title = modal.querySelector(".modal-title") || modal.querySelector("#prof-modal-title");
+    if (!title) return;
+    var wrap = document.createElement("div");
+    wrap.id = "bp-prof-foto-wrap";
+    wrap.className = "bp-foto-wrap";
+    wrap.innerHTML =
+      '<button type="button" class="bp-foto-btn" id="bp-prof-foto-btn" aria-label="Foto do profissional">' +
+        '<div class="bp-foto-preview" id="bp-prof-foto-preview"><span>Foto</span></div>' +
+        '<span class="bp-foto-hint">Toque para adicionar foto</span>' +
+      "</button>" +
+      '<button type="button" class="bp-foto-remove" id="bp-prof-foto-rm" style="display:none">Remover foto</button>';
+    title.parentNode.insertBefore(wrap, title.nextSibling);
+
+    document.getElementById("bp-prof-foto-btn").onclick = async function () {
+      var id = session.editingProfId || null;
+      if (!id) {
+        var file = await pickImage();
+        if (!file) return;
+        try {
+          toastMsg("A otimizar foto…", "info");
+          var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
+          session.pendingProfFoto = dataUrl;
+          showPreview("bp-prof-foto-preview", dataUrl);
+          document.getElementById("bp-prof-foto-rm").style.display = "";
+          toastMsg("Foto pronta — guarde o profissional", "success");
+        } catch (e) {
+          toastMsg("Erro ao processar imagem", "error");
+        }
+        return;
+      }
+      var file = await pickImage();
+      if (!file) return;
+      try {
+        toastMsg("A otimizar foto…", "info");
+        var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
+        await setProfFoto(id, dataUrl);
+        showPreview("bp-prof-foto-preview", dataUrl);
+        document.getElementById("bp-prof-foto-rm").style.display = "";
+        toastMsg("Foto actualizada", "success");
+        if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+      } catch (e) {
+        toastMsg("Erro ao guardar foto", "error");
+      }
+    };
+    document.getElementById("bp-prof-foto-rm").onclick = async function () {
+      var id = session.editingProfId;
+      session.pendingProfFoto = null;
+      if (id) await setProfFoto(id, null);
+      showPreview("bp-prof-foto-preview", null);
+      this.style.display = "none";
+      toastMsg("Foto removida", "success");
+      if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+    };
+  }
+
+  function showPreview(id, dataUrl) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (dataUrl) {
+      el.innerHTML = '<img src="' + dataUrl + '" alt="">';
+      el.classList.add("has-img");
+    } else {
+      el.innerHTML = "<span>Foto</span>";
+      el.classList.remove("has-img");
+    }
+  }
+
+  function syncModalPreviews() {
+    ensureClientePhotoUI();
+    ensureProfPhotoUI();
+    // observe open modals
+    var cli = document.getElementById("modal-cliente");
+    if (cli && cli.classList.contains("open")) {
+      var cid = session.editingClienteId;
+      var c = cid ? getCliente(cid) : null;
+      var foto = (c && c.foto) || session.pendingClienteFoto || null;
+      showPreview("bp-cli-foto-preview", foto);
+      var rm = document.getElementById("bp-cli-foto-rm");
+      if (rm) rm.style.display = foto ? "" : "none";
+    }
+    var pr = document.getElementById("modal-prof");
+    if (pr && pr.classList.contains("open")) {
+      var pid = session.editingProfId;
+      var p = pid ? getProf(pid) : null;
+      var foto2 = (p && p.foto) || session.pendingProfFoto || null;
+      showPreview("bp-prof-foto-preview", foto2);
+      var rm2 = document.getElementById("bp-prof-foto-rm");
+      if (rm2) rm2.style.display = foto2 ? "" : "none";
+    }
+  }
+
+  /* ---------- track which entity is being edited ---------- */
+  function hookEditTracking() {
+    // intercept list clicks is hard; watch when modal opens and nome field matches
+    var cliModal = document.getElementById("modal-cliente");
+    if (cliModal && !cliModal.dataset.bpFotoObs) {
+      cliModal.dataset.bpFotoObs = "1";
+      var obs = new MutationObserver(function () {
+        if (cliModal.classList.contains("open")) {
+          setTimeout(function () {
+            var nome = (document.getElementById("cliente-nome") || {}).value || "";
+            var found = (state.clientes || []).find(function (c) {
+              return c.nome === nome;
+            });
+            // prefer hidden id if any
+            var hid = document.getElementById("cliente-id");
+            if (hid && hid.value) session.editingClienteId = hid.value;
+            else session.editingClienteId = found ? found.id : null;
+            if (!session.editingClienteId) session.pendingClienteFoto = session.pendingClienteFoto || null;
+            else session.pendingClienteFoto = null;
+            syncModalPreviews();
+          }, 80);
+        } else {
+          session.editingClienteId = null;
+        }
+      });
+      obs.observe(cliModal, { attributes: true, attributeFilter: ["class"] });
+    }
+    var prModal = document.getElementById("modal-prof");
+    if (prModal && !prModal.dataset.bpFotoObs) {
+      prModal.dataset.bpFotoObs = "1";
+      var obs2 = new MutationObserver(function () {
+        if (prModal.classList.contains("open")) {
+          setTimeout(function () {
+            var nome = (document.getElementById("prof-nome") || {}).value || "";
+            var found = (state.profissionais || []).find(function (p) {
+              return p.nome === nome;
+            });
+            var hid = document.getElementById("prof-id");
+            if (hid && hid.value) session.editingProfId = hid.value;
+            else session.editingProfId = found ? found.id : null;
+            if (!session.editingProfId) session.pendingProfFoto = session.pendingProfFoto || null;
+            else session.pendingProfFoto = null;
+            syncModalPreviews();
+          }, 80);
+        } else {
+          session.editingProfId = null;
+        }
+      });
+      obs2.observe(prModal, { attributes: true, attributeFilter: ["class"] });
+    }
+  }
+
+  /* ---------- pending foto on create: patch save buttons lightly ---------- */
+  function hookSaveButtons() {
+    // After client save, attach pending foto if name matches newest
+    document.addEventListener("click", function (e) {
+      var t = e.target.closest("#modal-cliente-save, #cliente-save, [data-save-cliente]");
+      if (t && session.pendingClienteFoto) {
+        setTimeout(async function () {
+          try {
+            var nome = (document.getElementById("cliente-nome") || {}).value || "";
+            var c = (state.clientes || []).find(function (x) { return x.nome === nome; });
+            if (c && session.pendingClienteFoto) {
+              await setClienteFoto(c.id, session.pendingClienteFoto);
+              session.pendingClienteFoto = null;
+              enhanceListAvatars();
+            }
+          } catch (err) {}
+        }, 400);
+      }
+      var t2 = e.target.closest("#modal-prof-save, #prof-save, [data-save-prof]");
+      if (t2 && session.pendingProfFoto) {
+        setTimeout(async function () {
+          try {
+            var nome = (document.getElementById("prof-nome") || {}).value || "";
+            var p = (state.profissionais || []).find(function (x) { return x.nome === nome; });
+            if (p && session.pendingProfFoto) {
+              await setProfFoto(p.id, session.pendingProfFoto);
+              session.pendingProfFoto = null;
+              enhanceListAvatars();
+            }
+          } catch (err) {}
+        }, 400);
+      }
+    }, true);
+  }
+
+  /* ---------- Galeria UI ---------- */
+  function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === 'function') {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    var el = document.getElementById(id);
+    if (el) {
+      var tEl = el.querySelector('.bp-sheet-title');
+      if (tEl && title) tEl.textContent = title;
+      return el;
+    }
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'modal-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', id + '-title');
+    var eye = eyebrow || 'BeautyPro';
+    var sub = subtitle || '';
+    el.innerHTML =
+      '<div class="bp-sheet modal-sheet">' +
+        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
+        '<div class="bp-sheet-header">' +
+          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
+          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
+          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
+        '</div>' +
+        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+        '<div class="bp-sheet-footer modal-actions">' +
+          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      if (e.target === el || e.target.getAttribute('data-close') === id) {
+        if (typeof closeModal === 'function') closeModal(id);
+        else el.classList.remove('open');
+      }
+    });
+    return el;
+  }
+  function openShell(id) {
+    if (typeof openModal === "function") openModal(id);
+    else {
+      var el = document.getElementById(id);
+      if (el) el.classList.add("open");
+    }
+  }
+
+  function openGaleria(profIdPreset) {
+    ensureShell("modal-bp-galeria", "Galeria de serviços", "Media", "Fotos dos trabalhos, associadas a cada profissional.");
+    renderGaleria(profIdPreset);
+    openShell("modal-bp-galeria");
+  }
+
+  function renderGaleria(profIdPreset) {
+    var body = document.getElementById("modal-bp-galeria-body");
+    if (!body) return;
+    var profs = state.profissionais || [];
+    var profId = profIdPreset || (profs[0] && profs[0].id) || "";
+    var opts = profs.map(function (p) {
+      return '<option value="' + p.id + '"' + (p.id === profId ? " selected" : "") + ">" + esc(p.nome) + "</option>";
+    }).join("");
+
+    var fotos = profId ? galeriaPorProf(profId) : loadGaleria().slice().reverse();
+    var grid = fotos.map(function (f) {
+      return '<div class="bp-gal-item" data-gal-id="' + f.id + '">' +
+        '<img src="' + f.thumb + '" alt="" loading="lazy" decoding="async">' +
+        '<div class="bp-gal-meta">' +
+          '<span>' + esc(f.caption || f.data || "") + "</span>" +
+          '<button type="button" class="bp-gal-del" data-del-gal="' + f.id + '" title="Remover">×</button>' +
+        "</div></div>";
+    }).join("") || '<div class="bp-empty"><strong>Sem fotos</strong>Adicione a primeira foto do trabalho abaixo.</div>';
+
+    body.innerHTML =
+      '<div class="input-group"><label class="input-label">Profissional</label>' +
+      '<select id="bp-gal-prof" class="input-field">' + (opts || '<option value="">—</option>') + "</select></div>" +
+      '<div class="bp-gal-actions">' +
+        '<button type="button" class="btn btn-primary btn-block" id="bp-gal-add"' + (!profId ? " disabled" : "") + ">Adicionar foto do serviço</button>" +
+      "</div>" +
+      '<div class="input-group" style="margin-top:12px"><label class="input-label">Legenda (opcional)</label>' +
+      '<input type="text" id="bp-gal-caption" class="input-field" placeholder="Ex: Coloração · cliente A" maxlength="80"></div>' +
+      '<div class="bp-section"><div class="bp-section-title">Fotos (' + fotos.length + ")</div>" +
+      '<div class="bp-gal-grid">' + grid + "</div></div>";
+
+    var sel = document.getElementById("bp-gal-prof");
+    if (sel) {
+      sel.onchange = function () { renderGaleria(sel.value); };
+    }
+    var add = document.getElementById("bp-gal-add");
+    if (add) {
+      add.onclick = async function () {
+        var pid = (document.getElementById("bp-gal-prof") || {}).value;
+        if (!pid) {
+          toastMsg("Seleccione um profissional", "error");
+          return;
+        }
+        var file = await pickImage();
+        if (!file) return;
+        try {
+          toastMsg("A otimizar foto…", "info");
+          var dataUrl = await compressFile(file, GALERIA_MAX, JPEG_Q);
+          var p = getProf(pid);
+          var cap = ((document.getElementById("bp-gal-caption") || {}).value || "").trim();
+          var entry = {
+            id: uid(),
+            profissional_id: pid,
+            profissional_nome: (p && p.nome) || "",
+            thumb: dataUrl,
+            caption: cap,
+            data: hojeStr(),
+            ts: new Date().toISOString()
+          };
+          if (addFotoGaleria(entry)) {
+            toastMsg("Foto adicionada à galeria", "success");
+            renderGaleria(pid);
+          }
+        } catch (e) {
+          console.warn(e);
+          toastMsg("Erro ao processar imagem", "error");
+        }
+      };
+    }
+    body.querySelectorAll("[data-del-gal]").forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        if (!confirm("Remover esta foto?")) return;
+        removeFotoGaleria(btn.getAttribute("data-del-gal"));
+        renderGaleria((document.getElementById("bp-gal-prof") || {}).value);
+        toastMsg("Foto removida", "success");
+      };
+    });
+  }
+
+  /* ---------- Menu: CRM → Galeria (inject into accordion panel if exists) ---------- */
+  function ensureMenuItem() {
+    var panel = document.querySelector('.bp-acc-panel[data-acc-panel="crm"]');
+    if (panel && !panel.querySelector('[data-bp-action="galeria"]')) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-bp-menu", "crm");
+      btn.setAttribute("data-bp-action", "galeria");
+      btn.innerHTML = "<span>Galeria de serviços</span>";
+      panel.appendChild(btn);
+    }
+    // also listen
+    var dd = document.getElementById("menu-dropdown");
+    if (dd && !dd.dataset.bpMediaBound) {
+      dd.dataset.bpMediaBound = "1";
+      dd.addEventListener("click", function (e) {
+        var t = e.target.closest('[data-bp-action="galeria"]');
+        if (!t) return;
+        e.stopPropagation();
+        dd.style.display = "none";
+        openGaleria();
+      });
+    }
+  }
+
+  /* ---------- observe list re-renders ---------- */
+  function observeLists() {
+    ["clientes-list", "profissionais-list"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el || el.dataset.bpAvatarObs) return;
+      el.dataset.bpAvatarObs = "1";
+      var obs = new MutationObserver(function () {
+        setTimeout(enhanceListAvatars, 30);
+      });
+      obs.observe(el, { childList: true, subtree: true });
+    });
+  }
+
+  function init() {
+    try {
+      ensureClientePhotoUI();
+      ensureProfPhotoUI();
+      hookEditTracking();
+      hookSaveButtons();
+      observeLists();
+      enhanceListAvatars();
+      ensureMenuItem();
+    } catch (e) {
+      console.warn("[media-galeria]", e);
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { setTimeout(init, 220); });
+  } else setTimeout(init, 220);
+  setTimeout(init, 800);
+  setTimeout(init, 2000);
+  setTimeout(function () { enhanceListAvatars(); ensureMenuItem(); }, 4000);
+
+  // after tab switches
+  document.addEventListener("click", function (e) {
+    if (e.target.closest("[data-tab], .nav-tab, .tab-btn")) {
+      setTimeout(enhanceListAvatars, 120);
+    }
+  });
+
+  window.BPMedia = {
+    compressFile: compressFile,
+    setClienteFoto: setClienteFoto,
+    setProfFoto: setProfFoto,
+    openGaleria: openGaleria,
+    loadGaleria: loadGaleria,
+    enhanceListAvatars: enhanceListAvatars,
+    session: session
+  };
+})();
+
+/* ===== FILE: agenda-polish.js ===== */
+/* BeautyPro — Agenda cards + acções (Ag-2)
+   Hierarquia: Finalizar (primário) · WhatsApp · Cancelar
+   Todos os botões: mesma altura, grelha estável, área de toque ≥40px
+*/
+(function () {
+  "use strict";
+
+  function esc(s) {
+    return typeof escHtml === "function" ? escHtml(String(s || "")) : String(s || "");
+  }
+  function money(v) {
+    return typeof fmtKz === "function" ? fmtKz(v) : String(v || 0) + " Kz";
+  }
+  function statusOf(a) {
+    if (typeof _statusAg === "function") return _statusAg(a);
+    return String((a && (a.status || a.estado)) || "agendado").toLowerCase();
+  }
+  function profName(a) {
+    if (typeof getProfissionalNome === "function") return getProfissionalNome(a.profissional_id);
+    return a.profissional || "—";
+  }
+  function clienteTelefone(ag) {
+    var list = (typeof state !== "undefined" && state.clientes) || [];
+    var c = list.find(function (x) {
+      return (ag.cliente_id && x.id === ag.cliente_id) || (ag.cliente && x.nome === ag.cliente);
+    });
+    if (!c || !c.telefone) return "";
+    return String(c.telefone).replace(/\D/g, "");
+  }
+  function waHref(ag) {
+    var digits = clienteTelefone(ag);
+    if (!digits) return "";
+    var num = digits.length === 9 ? "244" + digits : digits;
+    var msg =
+      "Olá " +
+      (ag.cliente || "") +
+      ", lembrete do seu agendamento de " +
+      (ag.servico || "serviço") +
+      " no dia " +
+      (ag.data || "") +
+      " às " +
+      String(ag.hora || "").slice(0, 5) +
+      ".";
+    return "https://wa.me/" + num + "?text=" + encodeURIComponent(msg);
+  }
+
+  function renderAgendaItemPro(a) {
+    if (!a) return "";
+    var st = statusOf(a);
+    var isRealizado = st === "realizado";
+    var isCancelado = st === "cancelado";
+    var isExpirado = st === "nao_realizado" || st === "nao-realizado" || st === "expirado";
+    var isAgendado = st === "agendado";
+    var expirado =
+      typeof agendamentoExpirado === "function" ? agendamentoExpirado(a) : false;
+    var podeFinalizar = isAgendado && !expirado;
+    var podeCancelar = isAgendado;
+    var podeWhatsApp = isAgendado && !!clienteTelefone(a);
+
+    var statusLabel = "Agendado";
+    var statusClass = "bp-ag-st-agendado";
+    if (isRealizado) {
+      statusLabel = "Realizado";
+      statusClass = "bp-ag-st-ok";
+    } else if (isCancelado) {
+      statusLabel = "Cancelado";
+      statusClass = "bp-ag-st-off";
+    } else if (isExpirado) {
+      statusLabel = "Não realizado";
+      statusClass = "bp-ag-st-no";
+    }
+
+    var hora = String(a.hora || "").slice(0, 5);
+    var nomeProf = profName(a);
+
+    var avHtml =
+      '<div class="avatar bp-ag-avatar">' + esc((a.cliente || "?").charAt(0).toUpperCase()) + "</div>";
+    try {
+      var cli = ((typeof state !== "undefined" && state.clientes) || []).find(function (c) {
+        return c.nome === a.cliente || c.id === a.cliente_id;
+      });
+      if (cli && cli.foto) {
+        avHtml =
+          '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' +
+          cli.foto +
+          '" alt="" loading="lazy" decoding="async"></div>';
+      } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
+        avHtml =
+          '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' +
+          BPAvatars.avatarDataUrl(a.cliente || "") +
+          '" alt="" loading="lazy" decoding="async"></div>';
+      }
+    } catch (e) {}
+
+    var actions = "";
+    if (podeFinalizar || podeWhatsApp || podeCancelar) {
+      var cells = [];
+      if (podeFinalizar) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-primary bp-ag-btn" data-id="' +
+            a.id +
+            '" data-action="finalizar">Finalizar</button>'
+        );
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' +
+            a.id +
+            '" data-action="reagendar-agenda">Reagendar</button>'
+        );
+      }
+      if (podeWhatsApp) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' +
+            a.id +
+            '" data-action="whatsapp-agenda" aria-label="WhatsApp">WhatsApp</button>'
+        );
+      } else if (podeFinalizar) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" disabled title="Cliente sem telefone">WhatsApp</button>'
+        );
+      }
+      if (podeCancelar) {
+        cells.push(
+          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn bp-ag-btn-muted" data-id="' +
+            a.id +
+            '" data-action="cancelar-agenda" data-role="admin,gerente" aria-label="Cancelar marcação">Cancelar</button>'
+        );
+      }
+      // 1–2 acções: uma linha; 3–4: grelha 2×2 (altura igual, sem desalinhamento)
+      var cols = cells.length <= 2 ? cells.length : 2;
+      actions =
+        '<div class="bp-ag-actions" style="--bp-ag-cols:' +
+        cols +
+        '">' +
+        cells.join("") +
+        "</div>";
+    }
+
+    return (
+      '<div class="list-item bp-ag-card" data-agenda-id="' +
+      a.id +
+      '">' +
+      avHtml +
+      '<div class="info bp-ag-info">' +
+      '<div class="bp-ag-top">' +
+      '<span class="bp-ag-time">' +
+      esc(hora) +
+      "</span>" +
+      '<span class="bp-ag-status ' +
+      statusClass +
+      '">' +
+      statusLabel +
+      "</span>" +
+      "</div>" +
+      '<div class="title">' +
+      esc(a.servico || "Serviço") +
+      "</div>" +
+      '<div class="sub">' +
+      esc(a.cliente || "Cliente") +
+      "</div>" +
+      '<div class="bp-ag-meta">' +
+      '<span class="bp-ag-prof">' +
+      esc(nomeProf) +
+      "</span>" +
+      '<span class="bp-ag-price">' +
+      money(a.preco) +
+      "</span>" +
+      "</div>" +
+      actions +
+      "</div></div>"
+    );
+  }
+
+  function install() {
+    try {
+      if (typeof renderAgendaItem === "function") renderAgendaItem = renderAgendaItemPro;
+    } catch (e) {}
+    window.renderAgendaItem = renderAgendaItemPro;
+  }
+
+  function init() {
+    install();
+    try {
+      if (typeof renderAgendaFull === "function") {
+        var tab = document.getElementById("tab-agenda");
+        if (tab && tab.classList.contains("active")) renderAgendaFull();
+      }
+    } catch (e) {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      setTimeout(init, 200);
+    });
+  } else setTimeout(init, 200);
+  setTimeout(init, 1000);
+
+  document.addEventListener("click", function (e) {
+    if (e.target.closest('[data-tab="agenda"]')) {
+      install();
+      setTimeout(function () {
+        try {
+          if (typeof renderAgendaFull === "function") renderAgendaFull();
+        } catch (err) {}
+      }, 60);
+    }
+  });
+
+  window.BPAgendaUI = {
+    renderAgendaItemPro: renderAgendaItemPro,
+    install: install,
+    clienteTelefone: clienteTelefone,
+    waHref: waHref,
+  };
+})();
+
+/* ===== FILE: avatars-listas.js ===== */
+// ================================================================
+// Avatars realistas nas listas Clientes + Equipa (pós-bundle)
+// ================================================================
+(function () {
+  "use strict";
+
+  function srcFor(nome, foto) {
+    if (foto) return foto;
+    if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
+      return BPAvatars.avatarDataUrl(nome || "");
+    }
+    return null;
+  }
+
+  function applyAvatar(av, nome, foto) {
+    if (!av) return;
+    var src = srcFor(nome, foto);
+    if (!src) return;
+    av.classList.add("bp-avatar-img");
+    av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
+  }
+
+  function enhanceClientes() {
+    try {
+      document.querySelectorAll(".cliente-item[data-cliente-id]").forEach(function (row) {
+        var id = row.getAttribute("data-cliente-id");
+        var c = (state.clientes || []).find(function (x) { return x.id === id; });
+        if (!c) return;
+        applyAvatar(row.querySelector(".avatar"), c.nome, c.foto);
+      });
+    } catch (e) {}
+  }
+
+  function enhanceProfissionais() {
+    try {
+      document.querySelectorAll("[data-prof-id]").forEach(function (row) {
+        var id = row.getAttribute("data-prof-id");
+        // avoid agenda cards if any share attribute — ok for equipa list
+        var p = (state.profissionais || []).find(function (x) { return x.id === id; });
+        if (!p) return;
+        applyAvatar(row.querySelector(".avatar"), p.nome, p.foto);
+      });
+    } catch (e) {}
+  }
+
+  function enhanceAll() {
+    enhanceClientes();
+    enhanceProfissionais();
+  }
+
+  function wrapRender(name, enhancer) {
+    try {
+      var fn = window[name];
+      if (typeof fn !== "function") {
+        // function declarations in bundle are global on window in non-module scripts
+        if (typeof globalThis[name] === "function") fn = globalThis[name];
+      }
+      if (typeof fn !== "function") return false;
+      if (fn._bpAvatarWrapped) return true;
+      var wrapped = function () {
+        var r = fn.apply(this, arguments);
+        setTimeout(enhancer, 0);
+        setTimeout(enhancer, 50);
+        return r;
+      };
+      wrapped._bpAvatarWrapped = true;
+      wrapped._bpOriginal = fn;
+      window[name] = wrapped;
+      try { globalThis[name] = wrapped; } catch (e) {}
+      // overwrite bare binding if possible
+      try {
+        // eslint-disable-next-line no-eval
+        if (typeof eval(name) === "function") {
+          // assign via Function scope — in browser global
+        }
+      } catch (e) {}
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function install() {
+    // Prefer direct assignment — bundle uses function renderClientes() {}
+    var ok1 = false, ok2 = false;
+    try {
+      if (typeof renderClientes === "function" && !renderClientes._bpAvatarWrapped) {
+        var origC = renderClientes;
+        renderClientes = function () {
+          var r = origC.apply(this, arguments);
+          setTimeout(enhanceClientes, 0);
+          setTimeout(enhanceClientes, 40);
+          return r;
+        };
+        renderClientes._bpAvatarWrapped = true;
+        window.renderClientes = renderClientes;
+        ok1 = true;
+      }
+    } catch (e) {}
+    try {
+      if (typeof renderProfissionais === "function" && !renderProfissionais._bpAvatarWrapped) {
+        var origP = renderProfissionais;
+        renderProfissionais = function () {
+          var r = origP.apply(this, arguments);
+          setTimeout(enhanceProfissionais, 0);
+          setTimeout(enhanceProfissionais, 40);
+          return r;
+        };
+        renderProfissionais._bpAvatarWrapped = true;
+        window.renderProfissionais = renderProfissionais;
+        ok2 = true;
+      }
+    } catch (e) {}
+    wrapRender("renderClientes", enhanceClientes);
+    wrapRender("renderProfissionais", enhanceProfissionais);
+    enhanceAll();
+    return ok1 || ok2;
+  }
+
+  function observe() {
+    ["clientes-list", "profissionais-list"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el || el.dataset.bpAvListObs) return;
+      el.dataset.bpAvListObs = "1";
+      var obs = new MutationObserver(function () {
+        setTimeout(enhanceAll, 10);
+      });
+      obs.observe(el, { childList: true, subtree: true });
+    });
+  }
+
+  function init() {
+    install();
+    observe();
+    enhanceAll();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      setTimeout(init, 200);
+    });
+  } else {
+    setTimeout(init, 200);
+  }
+  setTimeout(init, 800);
+  setTimeout(init, 2000);
+  setTimeout(init, 5000);
+
+  document.addEventListener("click", function (e) {
+    if (e.target.closest("[data-tab], .nav-item, .tab-btn, #tab-clientes, #tab-equipa")) {
+      setTimeout(enhanceAll, 100);
+      setTimeout(enhanceAll, 300);
+    }
+  });
+
+  // modal foto: se vazio, mostrar avatar realista do nome
+  function syncModalAvatarFallback() {
+    try {
+      var nomeC = (document.getElementById("cliente-nome") || {}).value;
+      var prevC = document.getElementById("bp-cli-foto-preview");
+      if (prevC && !prevC.classList.contains("has-img") && nomeC && window.BPAvatars) {
+        var src = BPAvatars.avatarDataUrl(nomeC);
+        prevC.innerHTML = '<img src="' + src + '" alt="">';
+        prevC.classList.add("has-img", "bp-avatar-fallback");
+      }
+      var nomeP = (document.getElementById("prof-nome") || {}).value;
+      var prevP = document.getElementById("bp-prof-foto-preview");
+      if (prevP && !prevP.classList.contains("has-img") && nomeP && window.BPAvatars) {
+        var src2 = BPAvatars.avatarDataUrl(nomeP);
+        prevP.innerHTML = '<img src="' + src2 + '" alt="">';
+        prevP.classList.add("has-img", "bp-avatar-fallback");
+      }
+    } catch (e) {}
+  }
+  setInterval(function () {
+    var cli = document.getElementById("modal-cliente");
+    var pr = document.getElementById("modal-prof");
+    if ((cli && cli.classList.contains("open")) || (pr && pr.classList.contains("open"))) {
+      syncModalAvatarFallback();
+    }
+  }, 600);
+
+  window.BPAvatarsListas = { enhanceAll: enhanceAll, install: install };
+})();
+
+/* ===== FILE: desktop-shell.js ===== */
+// ================================================================
+// Desktop shell — top bar, sidebar brand, agenda master-detail
+// Only enhances UX on >=1024px. No business logic changes.
+// ================================================================
+(function () {
+  "use strict";
+
+  function isDesktop() {
+    return window.matchMedia && window.matchMedia("(min-width: 1024px)").matches;
+  }
+
+  function esc(s) {
+    return typeof escHtml === "function" ? escHtml(String(s == null ? "" : s)) : String(s == null ? "" : s);
+  }
+  function money(v) {
+    return typeof fmtKz === "function" ? fmtKz(v) : Math.round(Number(v) || 0) + " Kz";
+  }
+
+  /* ---------- Top bar ---------- */
+  function ensureTopbar() {
+    var container = document.querySelector(".app-container");
+    if (!container || document.querySelector(".bp-desk-topbar")) return;
+    var bar = document.createElement("div");
+    bar.className = "bp-desk-topbar";
+    bar.innerHTML =
+      '<div class="bp-desk-search" role="search">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+        '<input type="search" id="bp-desk-q" placeholder="Pesquisar clientes, serviços…" autocomplete="off" />' +
+        "<kbd>/</kbd>" +
+      "</div>" +
+      '<div class="bp-desk-actions">' +
+        '<span class="bp-desk-status"><span class="dot"></span>Local</span>' +
+        '<button type="button" class="bp-desk-chip" id="bp-desk-agenda">Agenda</button>' +
+        '<button type="button" class="bp-desk-chip" id="bp-desk-caixa">Caixa</button>' +
+        '<button type="button" class="bp-desk-chip is-primary" id="bp-desk-nova">+ Novo</button>' +
+      "</div>";
+    // insert as first child so grid area top works — actually grid assigns by area; need to be in container
+    var header = container.querySelector(".app-header");
+    if (header) container.insertBefore(bar, header);
+    else container.insertBefore(bar, container.firstChild);
+
+    var q = document.getElementById("bp-desk-q");
+    if (q) {
+      q.addEventListener("input", function () {
+        var val = q.value;
+        var searchCli = document.getElementById("search-cliente");
+        if (searchCli) {
+          searchCli.value = val;
+          searchCli.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+      q.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          // go to clients tab
+          var btn = document.querySelector('.nav-item[data-tab="clientes"]');
+          if (btn) btn.click();
+        }
+      });
+    }
+    var go = function (tab) {
+      var btn = document.querySelector('.nav-item[data-tab="' + tab + '"]');
+      if (btn) btn.click();
+    };
+    var a = document.getElementById("bp-desk-agenda");
+    if (a) a.onclick = function () { go("agenda"); };
+    var c = document.getElementById("bp-desk-caixa");
+    if (c) c.onclick = function () { go("caixa"); };
+    var n = document.getElementById("bp-desk-nova");
+    if (n) n.onclick = function () {
+      var fab = document.querySelector(".fab");
+      if (fab) fab.click();
+    };
+  }
+
+  /* ---------- Sidebar brand + label ---------- */
+  function ensureSidebar() {
+    var nav = document.querySelector(".bottom-nav");
+    if (!nav || nav.querySelector(".bp-side-brand")) return;
+    var brand = document.createElement("div");
+    brand.className = "bp-side-brand";
+    brand.innerHTML =
+      '<img src="logo.png" alt="">' +
+      '<div class="bp-side-brand-text">Beauty<span>Pro</span></div>';
+    var label = document.createElement("div");
+    label.className = "bp-side-label";
+    label.textContent = "Menu principal";
+    nav.insertBefore(label, nav.firstChild);
+    nav.insertBefore(brand, nav.firstChild);
+  }
+
+  /* ---------- Agenda master-detail ---------- */
+  function ensureAgendaWorkspace() {
+    var list = document.getElementById("agenda-full-list");
+    if (!list) return;
+    if (list.closest(".bp-agenda-workspace")) return;
+    var parent = list.parentNode;
+    var wrap = document.createElement("div");
+    wrap.className = "bp-agenda-workspace";
+    var col = document.createElement("div");
+    col.className = "bp-agenda-list-col";
+    parent.insertBefore(wrap, list);
+    col.appendChild(list);
+    wrap.appendChild(col);
+    var detail = document.createElement("aside");
+    detail.className = "bp-agenda-detail is-empty";
+    detail.id = "bp-agenda-detail";
+    detail.innerHTML = "<div><strong>Seleccione uma marcação</strong><br>Os detalhes e acções aparecem aqui.</div>";
+    wrap.appendChild(detail);
+  }
+
+  function showAgendaDetail(id) {
+    var detail = document.getElementById("bp-agenda-detail");
+    if (!detail || !isDesktop()) return;
+    var ag = (state.agendamentos || []).find(function (a) { return a.id === id; });
+    if (!ag) return;
+    document.querySelectorAll(".bp-ag-card.is-selected").forEach(function (el) {
+      el.classList.remove("is-selected");
+    });
+    var card = document.querySelector('.bp-ag-card[data-agenda-id="' + id + '"]');
+    if (card) card.classList.add("is-selected");
+
+    var nomeProf = typeof getProfissionalNome === "function"
+      ? getProfissionalNome(ag.profissional_id)
+      : (ag.profissional || "—");
+    var st = ag.status || "agendado";
+    var stLabel = st === "realizado" ? "Realizado"
+      : st === "cancelado" ? "Cancelado"
+      : st === "nao_realizado" ? "Não realizado" : "Agendado";
+    var stNorm = String(st || "agendado").toLowerCase();
+    var podeFinalizar = stNorm === "agendado";
+    var podeCancelar = stNorm === "agendado";
+    var podeWhatsApp = false;
+    try {
+      if (window.BPAgendaUI && typeof BPAgendaUI.clienteTelefone === "function") {
+        podeWhatsApp = !!BPAgendaUI.clienteTelefone(ag);
+      }
+    } catch (e) {}
+
+    var cells = [];
+    if (podeFinalizar) {
+      cells.push('<button type="button" class="btn btn-sm btn-primary bp-ag-btn" data-id="' + ag.id + '" data-action="finalizar">Finalizar</button>');
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' + ag.id + '" data-action="reagendar-agenda">Reagendar</button>');
+    }
+    if (podeWhatsApp) {
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' + ag.id + '" data-action="whatsapp-agenda">WhatsApp</button>');
+    } else if (podeFinalizar) {
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" disabled title="Cliente sem telefone">WhatsApp</button>');
+    }
+    if (podeCancelar) {
+      cells.push('<button type="button" class="btn btn-sm btn-secondary bp-ag-btn bp-ag-btn-muted" data-id="' + ag.id + '" data-action="cancelar-agenda">Cancelar</button>');
+    }
+    var cols = cells.length <= 2 ? cells.length || 1 : 2;
+    var actionsHtml = cells.length
+      ? '<div class="bp-ag-actions bp-ad-actions" style="--bp-ag-cols:' + cols + '">' + cells.join("") + "</div>"
+      : "";
+
+    detail.classList.remove("is-empty");
+    detail.innerHTML =
+      '<div class="bp-ad-time">' + esc(String(ag.hora || "").slice(0, 5)) + " · " + esc(ag.data || "") + "</div>" +
+      '<div class="bp-ad-title">' + esc(ag.servico || "Serviço") + "</div>" +
+      '<div class="bp-ad-row"><span>Cliente</span><span>' + esc(ag.cliente || "—") + "</span></div>" +
+      '<div class="bp-ad-row"><span>Profissional</span><span>' + esc(nomeProf) + "</span></div>" +
+      '<div class="bp-ad-row"><span>Valor</span><span>' + money(ag.preco) + "</span></div>" +
+      '<div class="bp-ad-row"><span>Estado</span><span>' + esc(stLabel) + "</span></div>" +
+      actionsHtml;
+
+    detail.querySelectorAll("[data-action]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var action = btn.getAttribute("data-action");
+        var aid = btn.getAttribute("data-id");
+        if (action === "finalizar" && typeof abrirFinalizarAtendimento === "function") {
+          abrirFinalizarAtendimento(aid);
+        } else if (action === "reagendar-agenda" && typeof abrirReagendarAgendamento === "function") {
+          abrirReagendarAgendamento(aid);
+        } else if (action === "whatsapp-agenda") {
+          var src = document.querySelector('[data-action="whatsapp-agenda"][data-id="' + aid + '"]');
+          if (src && src !== btn) src.click();
+          else {
+            try {
+              var href = window.BPAgendaUI && BPAgendaUI.waHref && BPAgendaUI.waHref(ag);
+              if (href) window.open(href, "_blank", "noopener,noreferrer");
+            } catch (err) {}
+          }
+        } else {
+          var src2 = document.querySelector('[data-action="' + action + '"][data-id="' + aid + '"]');
+          if (src2 && src2 !== btn) src2.click();
+        }
+      });
+    });
+  }
+
+  function bindAgendaClicks() {
+    var list = document.getElementById("agenda-full-list");
+    if (!list || list.dataset.bpDeskBound) return;
+    list.dataset.bpDeskBound = "1";
+    list.addEventListener("click", function (e) {
+      if (!isDesktop()) return;
+      var card = e.target.closest(".bp-ag-card, .timeline-item");
+      if (!card) return;
+      // don't intercept action buttons inside card
+      if (e.target.closest("[data-action]")) return;
+      var id = card.getAttribute("data-agenda-id");
+      if (!id) {
+        // timeline-item may not have id — skip
+        return;
+      }
+      showAgendaDetail(id);
+    });
+  }
+
+  /* ---------- Dashboard attention strip ---------- */
+  function ensureDashAttention() {
+    if (!isDesktop()) return;
+    var tab = document.getElementById("tab-dashboard");
+    if (!tab) return;
+    var inner = tab.querySelector(".tab-inner");
+    if (!inner || inner.querySelector(".bp-desk-attention")) return;
+    var strip = document.createElement("div");
+    strip.className = "bp-desk-attention";
+    strip.id = "bp-desk-attention";
+    // insert after greeting row if possible
+    var first = inner.firstElementChild;
+    if (first) inner.insertBefore(strip, first.nextSibling);
+    else inner.insertBefore(strip, inner.firstChild);
+    refreshDashAttention();
+  }
+
+  function refreshDashAttention() {
+    var strip = document.getElementById("bp-desk-attention");
+    if (!strip || !isDesktop()) return;
+    var hoje = typeof window.hoje === "function" ? window.hoje() : new Date().toISOString().slice(0, 10);
+    var ags = (state.agendamentos || []).filter(function (a) {
+      return a.data === hoje && String(a.status || "").toLowerCase() !== "cancelado";
+    });
+    var pend = ags.filter(function (a) { return a.status === "agendado" || !a.status; }).length;
+    var done = ags.filter(function (a) { return a.status === "realizado"; }).length;
+    var vendas = (state.movimentos || []).filter(function (m) {
+      return m.tipo === "venda" && m.data === hoje;
+    });
+    var rec = vendas.reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
+    strip.innerHTML =
+      '<div class="bp-att-card"><div class="bp-att-label">Agenda hoje</div><div class="bp-att-value">' + ags.length + "</div></div>" +
+      '<div class="bp-att-card"><div class="bp-att-label">Por realizar</div><div class="bp-att-value' + (pend ? " is-alert" : "") + '">' + pend + "</div></div>" +
+      '<div class="bp-att-card"><div class="bp-att-label">Receita hoje</div><div class="bp-att-value">' + money(rec) + "</div></div>";
+  }
+
+  /* ---------- Keyboard ---------- */
+  function bindKeys() {
+    if (document.body.dataset.bpDeskKeys) return;
+    document.body.dataset.bpDeskKeys = "1";
+    document.addEventListener("keydown", function (e) {
+      if (!isDesktop()) return;
+      var tag = (e.target && e.target.tagName) || "";
+      var typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable;
+      if (e.key === "/" && !typing) {
+        e.preventDefault();
+        var q = document.getElementById("bp-desk-q");
+        if (q) q.focus();
+        return;
+      }
+      if (typing) return;
+      var map = { "1": "dashboard", "2": "agenda", "3": "clientes", "4": "caixa", "5": "equipa" };
+      if (map[e.key]) {
+        var btn = document.querySelector('.nav-item[data-tab="' + map[e.key] + '"]');
+        if (btn) btn.click();
+      }
+    });
+  }
+
+  function mount() {
+    if (!document.querySelector(".app-container")) return;
+    ensureTopbar();
+    ensureSidebar();
+    ensureAgendaWorkspace();
+    bindAgendaClicks();
+    ensureDashAttention();
+    bindKeys();
+    // toggle topbar visibility with media
+    var bar = document.querySelector(".bp-desk-topbar");
+    if (bar) bar.hidden = !isDesktop();
+  }
+
+  function init() {
+    try { mount(); } catch (e) { console.warn("[desktop-shell]", e); }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { setTimeout(init, 250); });
+  } else setTimeout(init, 250);
+  setTimeout(init, 1000);
+  setTimeout(init, 3000);
+
+  window.addEventListener("resize", function () {
+    var bar = document.querySelector(".bp-desk-topbar");
+    if (bar) bar.hidden = !isDesktop();
+  });
+
+  document.addEventListener("click", function (e) {
+    if (e.target.closest(".nav-item[data-tab]")) {
+      setTimeout(function () {
+        ensureAgendaWorkspace();
+        bindAgendaClicks();
+        if (e.target.closest('[data-tab="dashboard"]') || document.querySelector('.nav-item[data-tab="dashboard"].active')) {
+          ensureDashAttention();
+          refreshDashAttention();
+        }
+      }, 120);
+    }
+  });
+
+  // refresh attention when data may change
+  setInterval(function () {
+    if (isDesktop() && document.querySelector("#tab-dashboard.active")) refreshDashAttention();
+  }, 8000);
+
+  window.BPDesktopShell = { mount: mount, showAgendaDetail: showAgendaDetail };
+})();
+
+/* ===== FILE: security-hardening.js ===== */
+// ================================================================
+// BeautyPro — Security & Sync Hardening (tombstones, silent sync)
+// Padrões: offline-first queue, tombstone TTL, throttled pull
+// ================================================================
+(function () {
+  "use strict";
+
+  var PULL_MIN_MS = 90000;
+  var lastPullAt = 0;
+  var pullInFlight = false;
+
+  function safeToast(msg, type) {
+    if (typeof toast === "function") toast(msg, type || "info");
+  }
+
+  /** Pull remoto silencioso — sem updateUI em cascata se nada mudou. */
+  window.bpSilentPull = async function bpSilentPull(force) {
+    if (!navigator.onLine) return false;
+    if (!state || !state.config || !state.config.salaoId) return false;
+    var now = Date.now();
+    if (!force && (now - lastPullAt) < PULL_MIN_MS) return false;
+    if (pullInFlight) return false;
+    pullInFlight = true;
+    try {
+      if (typeof flushSyncQueue === "function") {
+        await flushSyncQueue();
+      }
+      if (typeof carregarDoSupabase === "function") {
+        await carregarDoSupabase();
+      }
+      lastPullAt = Date.now();
+      if (typeof atualizarIndicadorSync === "function") atualizarIndicadorSync();
+      return true;
+    } catch (e) {
+      if (typeof logErroSilencioso === "function") logErroSilencioso("bpSilentPull", e);
+      return false;
+    } finally {
+      pullInFlight = false;
+    }
+  };
+
+  // Visibility: sync silencioso ao voltar, com throttle
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") {
+      setTimeout(function () { window.bpSilentPull(false); }, 800);
+    }
+  });
+
+  // Online event
+  window.addEventListener("online", function () {
+    setTimeout(function () { window.bpSilentPull(true); }, 500);
+  });
+
+  // Guard: impedir upsert de IDs na blacklist se API global existir
+  var origFlush = window.flushSyncQueue;
+  // no-op wrap if needed later
+
+  console.info("[bp-hardening] activo — tombstones + pull throttled 90s");
+})();

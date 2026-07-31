@@ -133,14 +133,18 @@
             </div>
           </div>
           <div class="header-actions" style="position:absolute;top:8px;right:8px;">
+            <div id="sync-status-container" class="sync-status" title="Estado de sincronização" role="status" aria-live="polite">
+              <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
+              <span id="sync-text">…</span>
+            </div>
             <div style="position:relative;">
               <button id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false" style="width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:6px;color:var(--text-secondary);cursor:pointer;transition:background .15s ease;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
               </button>
-              <div id="menu-dropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--bg-card, #fff);border-radius:var(--radius-sm,8px);box-shadow:0 4px 16px rgba(0,0,0,.15);min-width:220px;max-height:min(70vh,420px);overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;z-index:50;">
-                <button id="logout-btn" style="width:100%;display:flex;align-items:center;gap:8px;padding:10px 14px;background:none;border:none;font-size:.85rem;color:var(--text-primary,#333);cursor:pointer;text-align:left;">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                  Sair
+              <div id="menu-dropdown" style="display:none">
+                <button type="button" id="logout-btn">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  <span>Sair</span>
                 </button>
               </div>
             </div>
@@ -148,7 +152,7 @@
         </div>
       </header>
 
-      <div class="offline-banner" id="offline-banner"><span></span> Modo offline — todas as funcionalidades disponíveis</div>
+      <div class="offline-banner" id="offline-banner" role="status"><span class="offline-banner-dot" aria-hidden="true"></span><span id="offline-banner-text">Modo offline — dados guardados neste dispositivo</span></div>
 
       <!-- CTA VENDA -->
       <button class="venda-cta-bar" id="nova-venda-hero-btn" aria-label="Registar nova venda">
@@ -187,7 +191,7 @@
               <div class="kpi-card gold-accent" id="kpi-revenue-card" data-role="admin,gerente">
                 <div class="kpi-label">Faturamento</div>
                 <div class="kpi-value" style="color:var(--gold-dark);" id="kpi-revenue">0 Kz</div>
-                <div class="kpi-sub" id="kpi-revenue-count">0 serviços</div>
+                <div class="kpi-sub" id="kpi-revenue-count">0 vendas</div>
               </div>
 
               <!-- Card 2: Agendamentos -->
@@ -203,7 +207,7 @@
                   <div class="kpi-left">
                     <div class="kpi-label">Ticket Médio</div>
                     <div class="kpi-value" id="kpi-ticket">0 Kz</div>
-                    <div class="kpi-sub" id="kpi-ticket-sub">por cliente</div>
+                    <div class="kpi-sub" id="kpi-ticket-sub">por venda</div>
                   </div>
                   <div class="kpi-right">
                     <div class="sparkline-wrapper">
@@ -211,14 +215,30 @@
                     </div>
                     <div class="kpi-trend">
                       <span class="trend-up" id="ticket-trend-percent">—</span>
-                      <span class="trend-period" id="ticket-trend-period">Últimos 7 dias</span>
+                      <span class="trend-period" id="ticket-trend-period">vs período anterior</span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Próximos Atendimentos -->
+            
+            <!-- Meta mensal + caixa hoje (admin) -->
+            <div id="dash-meta-wrap" class="dash-meta-wrap" hidden>
+              <div class="dash-meta-head">
+                <span class="dash-meta-title">Meta do mês</span>
+                <span id="dash-meta-label" class="dash-meta-label">—</span>
+              </div>
+              <div class="dash-meta-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                <div id="dash-meta-fill" class="dash-meta-fill" style="width:0%"></div>
+              </div>
+            </div>
+            <div class="dash-caixa-row" data-role="admin,gerente">
+              <span class="dash-caixa-label">Saldo em caixa (hoje)</span>
+              <span id="dash-caixa-saldo" class="dash-caixa-value">0 Kz</span>
+            </div>
+
+<!-- Próximos Atendimentos -->
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
               <span class="section-title">Próximos Atendimentos</span>
               <span style="font-size:.7rem;color:var(--text-muted);" id="agenda-count">0 pendentes</span>
@@ -315,7 +335,7 @@
               <button class="btn btn-sm btn-primary" id="add-cliente-btn">+ Novo</button>
             </div>
             <div class="input-group">
-              <input type="text" id="search-cliente" class="input-field" placeholder="Pesquisar cliente...">
+              <input type="text" id="search-cliente" class="input-field" placeholder="Nome ou telefone...">
             </div>
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-secondary filtro-frequencia active" data-filtro="todos" style="padding:4px 12px;min-height:30px;font-size:.7rem;">Todos</button>
@@ -637,6 +657,7 @@
     <div class="modal-sheet">
       <div class="handle"></div>
       <div id="agenda-title" class="modal-title">Novo Agendamento</div>
+      <input type="hidden" id="agenda-edit-id" value="">
       <div class="input-group">
         <label class="input-label">Serviço</label>
         <select id="agenda-servico" class="input-field"></select>
@@ -644,7 +665,7 @@
       <div class="input-group">
         <label class="input-label">Cliente</label>
         <select id="agenda-cliente" class="input-field"><option value="">Selecionar cliente</option></select>
-        <button class="btn btn-sm btn-secondary mt-2" id="agenda-add-cliente-rapido" style="width:100%;">+ Cliente rápido</button>
+        <button type="button" class="btn btn-sm btn-secondary btn-block mt-2" id="agenda-add-cliente-rapido">+ Cliente rápido</button>
       </div>
       <div class="input-group">
         <label class="input-label">Profissional</label>
@@ -658,9 +679,9 @@
         <label class="input-label">Preço (Kz)</label>
         <input type="number" id="agenda-preco" class="input-field" placeholder="0" value="5000" min="0" step="500">
       </div>
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-agenda-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:2;" id="modal-agenda-save">Agendar</button>
+      <div class="modal-actions modal-actions--primary-emphasis">
+        <button type="button" class="btn btn-secondary" id="modal-agenda-cancel">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="modal-agenda-save">Agendar</button>
       </div>
     </div>
   </div>
@@ -686,27 +707,40 @@
   </div>
 
   <!-- CLIENTE -->
-  <div id="modal-cliente" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cliente-modal-title">
-    <div class="modal-sheet">
+  <div id="modal-cliente" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cliente-modal-title" data-mode="edit">
+    <div class="modal-sheet" id="modal-cliente-sheet">
       <div class="handle"></div>
       <div id="cliente-modal-title" class="modal-title">Cliente</div>
-      <div id="cliente-perfil-stats" class="cliente-perfil-stats" style="display:none;"></div>
-      <div class="input-group">
-        <label class="input-label">Cliente</label>
-        <input type="text" id="cliente-nome" class="input-field" placeholder="Nome do cliente">
+
+      <!-- MODO VISUALIZAR -->
+      <div id="cliente-view-panel" class="bp-view-panel" hidden>
+        <div id="cliente-perfil-stats" class="cliente-perfil-stats bp-view-stats" hidden></div>
+        <div id="cliente-view-body" class="bp-view-body"></div>
+        <div class="modal-actions modal-actions--primary-emphasis">
+          <button type="button" class="btn btn-secondary" id="cliente-view-fechar">Fechar</button>
+          <button type="button" class="btn btn-primary" id="cliente-view-editar">Editar</button>
+        </div>
       </div>
-      <div class="input-group">
-        <label class="input-label">Celular</label>
-        <input type="tel" id="cliente-telefone" class="input-field" placeholder="Ex: 923 456 789">
-      </div>
-      <div class="input-group">
-        <label class="input-label">Preferências</label>
-        <input type="text" id="cliente-notas" class="input-field" placeholder="Ex: Gosta de cores quentes">
-      </div>
-      <input type="hidden" id="cliente-id">
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-cliente-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:2;" id="modal-cliente-save">Guardar</button>
+
+      <!-- MODO EDITAR / CRIAR -->
+      <div id="cliente-form-panel" class="bp-form-panel">
+        <div class="input-group">
+          <label class="input-label" for="cliente-nome">Nome</label>
+          <input type="text" id="cliente-nome" class="input-field" placeholder="Nome do cliente" autocomplete="name">
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="cliente-telefone">Celular</label>
+          <input type="tel" id="cliente-telefone" class="input-field" placeholder="9 dígitos · Ex: 923456789" inputmode="numeric" maxlength="9">
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="cliente-notas">Preferências</label>
+          <input type="text" id="cliente-notas" class="input-field" placeholder="Ex: Gosta de cores quentes">
+        </div>
+        <input type="hidden" id="cliente-id">
+        <div class="modal-actions modal-actions--primary-emphasis">
+          <button type="button" class="btn btn-secondary" id="modal-cliente-cancel">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="modal-cliente-save">Guardar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -715,75 +749,105 @@
   <div id="modal-despesa" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="despesa-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="despesa-title" class="modal-title">Registar Despesa</div>
+      <div id="despesa-title" class="modal-title">Registar despesa</div>
+      <p class="venda-modal-sub">Saída de caixa — reduz o saldo do dia.</p>
       <div class="input-group">
-        <label class="input-label">Descrição</label>
-        <input type="text" id="desp-desc" class="input-field" placeholder="Ex: Compra de produtos">
+        <label class="input-label" for="desp-desc">Descrição</label>
+        <input type="text" id="desp-desc" class="input-field" placeholder="Ex: Compra de produtos" autocomplete="off">
       </div>
-      <div class="input-group">
-        <label class="input-label">Valor (Kz)</label>
-        <input type="number" id="desp-valor" class="input-field" placeholder="0" min="0" step="500">
+      <div class="prof-form-row">
+        <div class="input-group">
+          <label class="input-label" for="desp-valor">Valor (Kz)</label>
+          <input type="number" id="desp-valor" class="input-field" placeholder="0" min="0" step="100" inputmode="numeric">
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="desp-categoria">Categoria</label>
+          <select id="desp-categoria" class="input-field">
+            <option value="operacional">Operacional</option>
+            <option value="produtos">Produtos</option>
+            <option value="salarios">Salários</option>
+            <option value="renda">Renda / aluguer</option>
+            <option value="utilidades">Água / luz / net</option>
+            <option value="marketing">Marketing</option>
+            <option value="manutencao">Manutenção</option>
+            <option value="outro">Outro</option>
+          </select>
+        </div>
       </div>
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-despesa-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:2;" id="modal-despesa-save">Registar</button>
+      <div class="modal-actions modal-actions--primary-emphasis">
+        <button type="button" class="btn btn-secondary" id="modal-despesa-cancel">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="modal-despesa-save">Registar despesa</button>
       </div>
     </div>
   </div>
 
   <!-- VENDA -->
   <div id="modal-venda" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="venda-title">
-    <div class="modal-sheet">
+    <div class="modal-sheet modal-sheet--venda">
       <div class="handle"></div>
-      <div id="venda-title" class="modal-title">Nova Venda</div>
+      <header class="venda-modal-head">
+        <div id="venda-title" class="modal-title">Registar venda</div>
+        <p class="venda-modal-sub" id="venda-modal-sub">Quem comprou, o quê, quanto — e como pagou.</p>
+      </header>
 
-      <div class="input-group">
-        <label class="input-label">Cliente</label>
-        <select id="venda-cliente" class="input-field"></select>
-        <button class="btn btn-sm btn-secondary mt-2" id="venda-add-cliente-rapido" style="width:100%;">+ Cliente rápido</button>
-      </div>
-
-      <div class="venda-add-item-box">
-        <div class="venda-add-item-titulo">Adicionar Serviço / Produto</div>
-        <div class="input-group">
-          <label class="input-label">Serviço</label>
-          <select id="ci-servico-sel" class="input-field">
-            <option value="">Selecionar serviço</option>
+      <section class="venda-section" aria-label="Cliente">
+        <div class="venda-section-label">Cliente</div>
+        <div class="input-group venda-field-tight">
+          <select id="venda-cliente" class="input-field" aria-label="Cliente da venda">
+            <option value="">Cliente avulso (sem ficha)</option>
           </select>
         </div>
-        <div class="input-group">
-          <label class="input-label">Valor</label>
-          <div class="venda-valor-wrap">
-            <input type="number" id="ci-valor" class="input-field" placeholder="0" min="0" step="500">
-            <span class="venda-valor-sufixo">Kz</span>
+        <button type="button" class="btn btn-sm btn-secondary btn-block" id="venda-add-cliente-rapido">+ Novo cliente</button>
+      </section>
+
+      <section class="venda-section" aria-label="Itens da venda">
+        <div class="venda-section-label">Itens</div>
+        <div id="cart-items-list" class="venda-cart-list"></div>
+        <div id="cart-total-area" class="venda-cart-total" hidden></div>
+      </section>
+
+      <section class="venda-section venda-section--add" aria-label="Adicionar item">
+        <div class="venda-section-label">Adicionar serviço</div>
+        <div class="venda-add-grid">
+          <div class="input-group venda-field-tight">
+            <label class="input-label" for="ci-servico-sel">Serviço</label>
+            <select id="ci-servico-sel" class="input-field">
+              <option value="">Escolher…</option>
+            </select>
+          </div>
+          <div class="input-group venda-field-tight">
+            <label class="input-label" for="ci-valor">Valor (Kz)</label>
+            <div class="venda-valor-wrap">
+              <input type="number" id="ci-valor" class="input-field" placeholder="0" min="0" step="500" inputmode="numeric">
+              <span class="venda-valor-sufixo">Kz</span>
+            </div>
+          </div>
+          <div class="input-group venda-field-tight venda-add-grid-full">
+            <label class="input-label" for="venda-profissional">Profissional</label>
+            <select id="venda-profissional" class="input-field">
+              <option value="">Opcional</option>
+            </select>
           </div>
         </div>
-        <div class="input-group">
-          <label class="input-label">Profissional</label>
-          <select id="venda-profissional" class="input-field">
-            <option value="">Selecionar profissional</option>
+        <button type="button" class="btn btn-secondary btn-block" id="btn-add-item">Adicionar à venda</button>
+      </section>
+
+      <section class="venda-section" aria-label="Pagamento">
+        <div class="venda-section-label">Pagamento</div>
+        <div class="input-group venda-field-tight">
+          <select id="venda-pagamento" class="input-field" aria-label="Forma de pagamento">
+            <option value="Numerário">Numerário</option>
+            <option value="Multicaixa Express">Multicaixa Express</option>
+            <option value="Transferência Bancária">Transferência</option>
+            <option value="Cartão">Cartão</option>
+            <option value="Outro">Outro</option>
           </select>
         </div>
-        <button class="btn btn-success btn-block" id="btn-add-item">+ Adicionar ao carrinho</button>
-      </div>
+      </section>
 
-      <div id="cart-items-list"></div>
-      <div id="cart-total-area"></div>
-
-      <div class="input-group mt-3">
-        <label class="input-label">Forma de Pagamento</label>
-        <select id="venda-pagamento" class="input-field">
-          <option value="Numerário">Numerário</option>
-          <option value="Multicaixa Express">Multicaixa Express</option>
-          <option value="Transferência Bancária">Transferência Bancária</option>
-          <option value="Cartão">Cartão</option>
-          <option value="Outro">Outro</option>
-        </select>
-      </div>
-
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-venda-cancel">Cancelar</button>
-        <button class="btn btn-success" style="flex:1;" id="modal-venda-save">Confirmar Venda</button>
+      <div class="modal-actions modal-actions--primary-emphasis venda-modal-footer">
+        <button type="button" class="btn btn-secondary" id="modal-venda-cancel">Fechar</button>
+        <button type="button" class="btn btn-primary" id="modal-venda-save" disabled>Cobrar</button>
       </div>
     </div>
   </div>
@@ -792,30 +856,29 @@
   <div id="modal-fundo" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fundo-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="fundo-title" class="modal-title">Fundo de Maneio</div>
+      <div id="fundo-title" class="modal-title">Fundo de maneio</div>
+      <p class="venda-modal-sub" id="fundo-modal-sub">Valor de abertura do caixa (não é uma despesa).</p>
       <div class="input-group">
-        <label class="input-label">Novo Fundo (Kz)</label>
-        <input type="number" id="fundo-valor" class="input-field" placeholder="0" min="0" step="1000">
+        <label class="input-label" for="fundo-valor">Fundo actual (Kz)</label>
+        <input type="number" id="fundo-valor" class="input-field" placeholder="0" min="0" step="1000" inputmode="numeric">
       </div>
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-fundo-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:2;" id="modal-fundo-save">Actualizar</button>
+      <div class="modal-actions modal-actions--primary-emphasis">
+        <button type="button" class="btn btn-secondary" id="modal-fundo-cancel">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="modal-fundo-save">Guardar fundo</button>
       </div>
     </div>
   </div>
 
   <!-- DETALHE VENDA -->
   <div id="modal-detalhe-venda" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="detalhe-venda-titulo">
-    <div class="modal-sheet">
+    <div class="modal-sheet modal-sheet--view">
       <div class="handle"></div>
-      <div id="detalhe-venda-titulo" class="modal-title">Detalhe da Venda</div>
-      <div id="detalhe-venda-conteudo"></div>
-      <div style="display:flex;gap:12px;margin-top:16px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-detalhe-fechar">Fechar</button>
-        <button class="btn btn-primary" style="flex:1;" id="btn-imprimir-recibo">
-          <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="6" y="9" width="12" height="8" rx="1"/><path d="M6 9V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v4"/><path d="M6 17H4a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/></svg>
-          Imprimir Recibo
-        </button>
+      <div class="bp-view-kicker">Venda registada</div>
+      <div id="detalhe-venda-titulo" class="modal-title bp-view-title">Detalhe da venda</div>
+      <div id="detalhe-venda-conteudo" class="bp-view-body"></div>
+      <div class="modal-actions modal-actions--primary-emphasis">
+        <button type="button" class="btn btn-secondary" id="modal-detalhe-fechar">Fechar</button>
+        <button type="button" class="btn btn-primary" id="btn-imprimir-recibo">Imprimir recibo</button>
       </div>
     </div>
   </div>
@@ -826,81 +889,92 @@
       <div class="handle"></div>
       <div id="fecho-title" class="modal-title">Fecho de Caixa</div>
       <div id="fecho-conteudo"></div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px;">
-        <button class="btn btn-success btn-block" id="confirmar-fecho-btn">Realizar fecho</button>
-        <div style="display:flex;gap:10px;">
-          <button class="btn btn-secondary" style="flex:1;" id="modal-fecho-fechar">Regressar</button>
-          <button class="btn btn-secondary" style="flex:1;" id="btn-imprimir-fecho">Imprimir</button>
-        </div>
+      <div class="modal-actions modal-actions--primary-emphasis" style="margin-top:16px;">
+        <button type="button" class="btn btn-secondary" id="modal-fecho-fechar">Voltar</button>
+        <button type="button" class="btn btn-primary" id="confirmar-fecho-btn">Fechar caixa</button>
       </div>
+      <button type="button" class="btn btn-secondary btn-block mt-2" id="btn-imprimir-fecho">Imprimir resumo</button>
     </div>
   </div>
 
   <!-- PROFISSIONAL -->
-  <div id="modal-prof" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="prof-modal-title">
-    <div class="modal-sheet">
+  <div id="modal-prof" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="prof-modal-title" data-mode="edit">
+    <div class="modal-sheet" id="modal-prof-sheet">
       <div class="handle"></div>
       <div id="prof-modal-title" class="modal-title">Profissional</div>
-      <div class="input-group">
-        <label class="input-label">Nome *</label>
-        <input type="text" id="prof-nome" class="input-field" placeholder="Ex: Maria">
-      </div>
-      <div class="prof-form-row">
-        <div class="input-group">
-          <label class="input-label">Idade *</label>
-          <input type="number" id="prof-idade" class="input-field" placeholder="Ex: 28" min="16" max="99" required>
-        </div>
-        <div class="input-group">
-          <label class="input-label">Data contratual *</label>
-          <input type="text" id="prof-data-contratual" class="input-field" placeholder="AAAA-MM-DD ou DD/MM/AAAA" inputmode="numeric" autocomplete="off">
+
+      <!-- MODO VISUALIZAR -->
+      <div id="prof-view-panel" class="bp-view-panel" hidden>
+        <div id="prof-view-body" class="bp-view-body"></div>
+        <div class="modal-actions modal-actions--primary-emphasis">
+          <button type="button" class="btn btn-secondary" id="prof-view-fechar">Fechar</button>
+          <button type="button" class="btn btn-primary" id="prof-view-editar" data-role="admin">Editar</button>
         </div>
       </div>
-      <div class="input-group">
-        <label class="input-label">Especialidade (serviço) *</label>
-        <select id="prof-esp" class="input-field">
-          <option value="">Seleccionar serviço / especialidade</option>
-          <option value="__criar">Criar seu serviço</option>
-        </select>
-        <div id="prof-criar-servico-box" style="display:none;margin-top:10px;padding:12px;background:var(--bg-soft);border-radius:var(--radius-md);border:1px solid var(--border-soft);">
-          <div class="input-group" style="margin-bottom:8px;">
-            <label class="input-label">Nome do novo serviço *</label>
-            <input type="text" id="prof-novo-servico-nome" class="input-field" placeholder="Ex: Hidratação Capilar">
+
+      <!-- MODO EDITAR / CRIAR -->
+      <div id="prof-form-panel" class="bp-form-panel">
+        <div class="input-group">
+          <label class="input-label" for="prof-nome">Nome *</label>
+          <input type="text" id="prof-nome" class="input-field" placeholder="Ex: Maria" autocomplete="name">
+        </div>
+        <div class="prof-form-row">
+          <div class="input-group">
+            <label class="input-label" for="prof-idade">Idade *</label>
+            <input type="number" id="prof-idade" class="input-field" placeholder="Ex: 28" min="16" max="99">
           </div>
-          <div class="input-group" style="margin-bottom:8px;">
-            <label class="input-label">Preço (Kz) *</label>
-            <input type="number" id="prof-novo-servico-preco" class="input-field" placeholder="Ex: 5000" min="1">
+          <div class="input-group">
+            <label class="input-label" for="prof-data-contratual">Data contratual *</label>
+            <input type="text" id="prof-data-contratual" class="input-field" placeholder="AAAA-MM-DD ou DD/MM/AAAA" inputmode="numeric" autocomplete="off">
           </div>
-          <button type="button" id="prof-criar-servico-btn" class="btn btn-secondary btn-sm btn-block">Criar serviço</button>
-        </div>
-      </div>
-      <div class="prof-form-separador">Dados adicionais <span>(opcional)</span></div>
-      <div class="input-group">
-        <label class="input-label">Número do BI</label>
-        <input type="text" id="prof-bi" class="input-field" placeholder="Ex: 006543210LA045" maxlength="20">
-      </div>
-      <div class="input-group">
-        <label class="input-label">Morada</label>
-        <input type="text" id="prof-morada" class="input-field" placeholder="Ex: Talatona, Luanda">
-      </div>
-      <div class="input-group">
-        <label class="input-label">Contacto (9 dígitos)</label>
-        <input type="tel" id="prof-contacto" class="input-field" placeholder="Ex: 923456789" maxlength="9" inputmode="numeric">
-      </div>
-      <div class="prof-form-separador">Comissões e metas</div>
-      <div class="prof-form-row">
-        <div class="input-group">
-          <label class="input-label">Taxa de comissão (%)</label>
-          <input type="number" id="prof-taxa" class="input-field" min="0" max="100" step="0.5" placeholder="ex: 30" value="0" inputmode="decimal">
         </div>
         <div class="input-group">
-          <label class="input-label">Meta mensal (Kz)</label>
-          <input type="number" id="prof-meta" class="input-field" min="0" step="1000" placeholder="ex: 200000" inputmode="numeric">
+          <label class="input-label" for="prof-esp">Especialidade (serviço) *</label>
+          <select id="prof-esp" class="input-field">
+            <option value="">Seleccionar serviço / especialidade</option>
+            <option value="__criar">Criar seu serviço</option>
+          </select>
+          <div id="prof-criar-servico-box" style="display:none;margin-top:10px;padding:12px;background:var(--bg-soft);border-radius:var(--radius-md);border:1px solid var(--border-soft);">
+            <div class="input-group" style="margin-bottom:8px;">
+              <label class="input-label" for="prof-novo-servico-nome">Nome do novo serviço *</label>
+              <input type="text" id="prof-novo-servico-nome" class="input-field" placeholder="Ex: Hidratação Capilar">
+            </div>
+            <div class="input-group" style="margin-bottom:8px;">
+              <label class="input-label" for="prof-novo-servico-preco">Preço (Kz) *</label>
+              <input type="number" id="prof-novo-servico-preco" class="input-field" placeholder="Ex: 5000" min="1">
+            </div>
+            <button type="button" id="prof-criar-servico-btn" class="btn btn-secondary btn-sm btn-block">Criar serviço</button>
+          </div>
         </div>
-      </div>
-      <input type="hidden" id="prof-id">
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-prof-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:1;" id="modal-prof-save">Guardar</button>
+        <div class="prof-form-separador">Dados adicionais <span>(opcional)</span></div>
+        <div class="input-group">
+          <label class="input-label" for="prof-bi">Número do BI</label>
+          <input type="text" id="prof-bi" class="input-field" placeholder="Ex: 006543210LA045" maxlength="20">
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="prof-morada">Morada</label>
+          <input type="text" id="prof-morada" class="input-field" placeholder="Ex: Talatona, Luanda">
+        </div>
+        <div class="input-group">
+          <label class="input-label" for="prof-contacto">Contacto (9 dígitos)</label>
+          <input type="tel" id="prof-contacto" class="input-field" placeholder="Ex: 923456789" maxlength="9" inputmode="numeric">
+        </div>
+        <div class="prof-form-separador">Comissões e metas</div>
+        <div class="prof-form-row">
+          <div class="input-group">
+            <label class="input-label" for="prof-taxa">Taxa de comissão (%)</label>
+            <input type="number" id="prof-taxa" class="input-field" min="0" max="100" step="0.5" placeholder="ex: 30" value="0" inputmode="decimal">
+          </div>
+          <div class="input-group">
+            <label class="input-label" for="prof-meta">Meta mensal (Kz)</label>
+            <input type="number" id="prof-meta" class="input-field" min="0" step="1000" placeholder="ex: 200000" inputmode="numeric">
+          </div>
+        </div>
+        <input type="hidden" id="prof-id">
+        <div class="modal-actions modal-actions--primary-emphasis">
+          <button type="button" class="btn btn-secondary" id="modal-prof-cancel">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="modal-prof-save">Guardar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -922,9 +996,9 @@
         </select>
       </div>
       <input type="hidden" id="finalizar-ag-id">
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-finalizar-cancel">Cancelar</button>
-        <button class="btn btn-success" style="flex:2;" id="modal-finalizar-save">Confirmar e Registar</button>
+      <div class="modal-actions modal-actions--primary-emphasis">
+        <button type="button" class="btn btn-secondary" id="modal-finalizar-cancel">Cancelar</button>
+        <button type="button" class="btn btn-success" id="modal-finalizar-save">Confirmar e Registar</button>
       </div>
     </div>
   </div>
@@ -933,7 +1007,7 @@
   <div id="modal-upgrade" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="upgrade-title" class="modal-title"> Upgrade do Plano</div>
+      <div id="upgrade-title" class="modal-title">Upgrade do Plano</div>
       <div id="upgrade-mensagem" style="margin-bottom:16px;color:var(--text-secondary);font-size:.9rem;">
         Atingiu o limite do seu plano actual. Escolha um plano para continuar.
       </div>
@@ -944,7 +1018,7 @@
             <span class="preco">12.500 Kz/mês</span>
           </div>
           <div style="font-size:.8rem;color:var(--text-secondary);">Ilimitado + 5 perguntas IA/dia</div>
-          <button class="btn btn-primary btn-block mt-2 btn-sm" onclick="upgradePara('pro')" data-role="admin" data-role-mode="disable">Assinar Pro</button>
+          <button type="button" class="btn btn-primary btn-block mt-2 btn-sm" data-upgrade-plano="pro" data-role="admin" data-role-mode="disable">Assinar Pro</button>
         </div>
         <div class="plano-card">
           <div class="flex-between">
@@ -952,7 +1026,7 @@
             <span class="preco">25.000 Kz/mês</span>
           </div>
           <div style="font-size:.8rem;color:var(--text-secondary);">IA Ilimitada + Suporte prioritário</div>
-          <button class="btn btn-primary btn-block mt-2 btn-sm" onclick="upgradePara('premium')" data-role="admin" data-role-mode="disable">Assinar Premium</button>
+          <button type="button" class="btn btn-primary btn-block mt-2 btn-sm" data-upgrade-plano="premium" data-role="admin" data-role-mode="disable">Assinar Premium</button>
         </div>
         <div class="plano-card" style="border-color:var(--border-soft);">
           <div class="flex-between">
@@ -960,34 +1034,52 @@
             <span class="preco" style="color:var(--text-secondary);">5.000 Kz/mês</span>
           </div>
           <div style="font-size:.8rem;color:var(--text-secondary);">200 agendamentos, 150 clientes, 2 profissionais</div>
-          <button class="btn btn-secondary btn-block mt-2 btn-sm" onclick="upgradePara('starter')" data-role="admin" data-role-mode="disable">Assinar Starter</button>
+          <button type="button" class="btn btn-secondary btn-block mt-2 btn-sm" data-upgrade-plano="starter" data-role="admin" data-role-mode="disable">Assinar Starter</button>
         </div>
       </div>
-      <button class="btn btn-secondary btn-block mt-3" id="modal-upgrade-contato" data-role="admin" data-role-mode="disable">Contactar via WhatsApp</button>
+      <button type="button" class="btn btn-secondary btn-block mt-3" id="modal-upgrade-contato" data-role="admin" data-role-mode="disable">Contactar via WhatsApp</button>
     </div>
   </div>
 
   <!-- SERVIÇO -->
-  <div id="modal-servico" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="servico-modal-title">
-    <div class="modal-sheet">
+  <div id="modal-servico" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="servico-modal-title" data-mode="edit">
+    <div class="modal-sheet" id="modal-servico-sheet">
       <div class="handle"></div>
-      <div id="servico-modal-title" class="modal-title">Novo Serviço</div>
-      <div class="input-group">
-        <label class="input-label">Nome do Serviço</label>
-        <input type="text" id="servico-nome" class="input-field" placeholder="Ex: Corte de Cabelo">
+      <div id="servico-modal-title" class="modal-title">Novo serviço</div>
+
+      <div id="servico-view-panel" class="bp-view-panel" hidden>
+        <div id="servico-view-body" class="bp-view-body"></div>
+        <div class="modal-actions modal-actions--primary-emphasis">
+          <button type="button" class="btn btn-secondary" id="servico-view-fechar">Fechar</button>
+          <button type="button" class="btn btn-primary" id="servico-view-editar" data-role="admin">Editar</button>
+        </div>
       </div>
-      <div class="input-group">
-        <label class="input-label">Preço Base (Kz)</label>
-        <input type="number" id="servico-preco" class="input-field" placeholder="0" min="0" step="100">
-      </div>
-      <div class="input-group">
-        <label class="input-label">Profissionais</label>
-        <div id="servico-profissionais-container" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
-      </div>
-      <input type="hidden" id="servico-id">
-      <div style="display:flex;gap:12px;margin-top:12px;">
-        <button class="btn btn-secondary" style="flex:1;" id="modal-servico-cancel">Cancelar</button>
-        <button class="btn btn-primary" style="flex:1;" id="modal-servico-save">Guardar Serviço</button>
+
+      <div id="servico-form-panel" class="bp-form-panel">
+        <div class="input-group">
+          <label class="input-label" for="servico-nome">Nome</label>
+          <input type="text" id="servico-nome" class="input-field" placeholder="Ex: Corte de Cabelo" autocomplete="off">
+        </div>
+        <div class="prof-form-row">
+          <div class="input-group">
+            <label class="input-label" for="servico-preco">Preço base (Kz)</label>
+            <input type="number" id="servico-preco" class="input-field" placeholder="0" min="0" step="100" inputmode="numeric">
+          </div>
+          <div class="input-group">
+            <label class="input-label" for="servico-duracao">Duração (min)</label>
+            <input type="number" id="servico-duracao" class="input-field" placeholder="60" min="5" max="480" step="5" inputmode="numeric" value="60">
+          </div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">Profissionais</label>
+          <p class="venda-modal-sub" style="margin-bottom:8px;">Vazio = disponível para toda a equipa.</p>
+          <div id="servico-profissionais-container" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
+        </div>
+        <input type="hidden" id="servico-id">
+        <div class="modal-actions modal-actions--primary-emphasis">
+          <button type="button" class="btn btn-secondary" id="modal-servico-cancel">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="modal-servico-save">Guardar serviço</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1129,22 +1221,8 @@
     </button>
   </div>
 
-  <!-- SCRIPTS -->
-  <!-- Entry único (ordem de deps em build-bundle.js). Scripts individuais mantidos no repo para debug. -->
-  <script src="finance-comissoes.js"></script>
-  <script src="finance-fase1-extra.js"></script>
-  <script src="marketing-fase2.js"></script>
-  <script src="equipa-fase3.js"></script>
-  <script src="ops-crm-comercial.js"></script>
-  <script src="gestao-fase78.js"></script>
-  <script src="menu-accordion.js"></script>
-  <script src="avatars-realistas.js"></script>
-  <script src="media-galeria.js"></script>
+  <!-- SCRIPTS — runtime único (Fase 1.4). Fontes individuais ficam no repo para edição; ordem em build-bundle.js. -->
   <script src="app.bundle.js"></script>
-  <script src="agenda-polish.js"></script>
-  <script src="avatars-listas.js"></script>
-  <script src="desktop-shell.js"></script>
-  <script src="security-hardening.js"></script>
 
 
   <!-- Modal limpo: cliente não encontrado -->
@@ -1156,6 +1234,25 @@
       </div>
       <div class="confirm-actions" style="margin-top:20px;">
         <button type="button" class="btn btn-primary btn-block" id="modal-cliente-nao-encontrado-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Dashboard executivo (Gestão) — shell HTML + body preenchido em JS -->
+  <div id="modal-bp-dash" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-bp-dash-title">
+    <div class="bp-sheet modal-sheet">
+      <div class="bp-sheet-handle handle" aria-hidden="true"></div>
+      <div class="bp-sheet-header">
+        <div class="bp-sheet-eyebrow">Gestão</div>
+        <h2 class="bp-sheet-title modal-title" id="modal-bp-dash-title">Dashboard executivo</h2>
+        <p class="bp-sheet-subtitle">KPIs, gráfico diário e tabelas do mês corrente.</p>
+      </div>
+      <div class="bp-sheet-body" id="modal-bp-dash-body">
+        <!-- conteúdo injectado por gestao-fase78.js -->
+      </div>
+      <div class="bp-sheet-footer modal-actions">
+        <button type="button" class="btn btn-secondary" data-close="modal-bp-dash">Fechar</button>
       </div>
     </div>
   </div>

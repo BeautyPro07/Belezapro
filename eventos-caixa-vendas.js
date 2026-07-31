@@ -7,44 +7,61 @@
 // ====================================================================
 
 // Despesa
-document.getElementById('add-despesa-btn').addEventListener('click', () => openModal('modal-despesa'));
+document.getElementById('add-despesa-btn').addEventListener('click', () => {
+  const d = document.getElementById('desp-desc');
+  const v = document.getElementById('desp-valor');
+  const c = document.getElementById('desp-categoria');
+  if (d) d.value = '';
+  if (v) v.value = '';
+  if (c) c.value = 'operacional';
+  openModal('modal-despesa');
+  setTimeout(function () { if (d) try { d.focus(); } catch (e) {} }, 100);
+});
 document.getElementById('modal-despesa-save').addEventListener('click', async () => {
   const desc = document.getElementById('desp-desc').value.trim();
-  const valor = parseFloat(document.getElementById('desp-valor').value);
-  if (!desc || !valor || valor <= 0) { toast('Preencha descrição e valor válido', 'error'); return; }
-  await addMovimento({ tipo: 'despesa', descricao: desc, valor });
+  const valor = Number(document.getElementById('desp-valor').value);
+  const categoria = (document.getElementById('desp-categoria') || {}).value || 'outro';
+  if (!desc) { toast('Indique a descrição da despesa', 'error'); return; }
+  if (!valor || valor <= 0 || isNaN(valor)) { toast('Indique um valor válido', 'error'); return; }
+  await addMovimento({
+    tipo: 'despesa',
+    descricao: desc,
+    valor: valor,
+    categoria: categoria
+  });
   closeModal('modal-despesa');
   document.getElementById('desp-desc').value = '';
   document.getElementById('desp-valor').value = '';
-  toast('Despesa registada no caixa', 'success');
+  toast('Despesa registada', 'success');
+  if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
 // Fundo
 document.getElementById('ajustar-fundo-btn').addEventListener('click', () => {
-  document.getElementById('fundo-valor').value = state.config.fundo;
+  const el = document.getElementById('fundo-valor');
+  const atual = Number(state.config && state.config.fundo) || 0;
+  if (el) el.value = atual;
+  const sub = document.getElementById('fundo-modal-sub');
+  if (sub && typeof fmtKz === 'function') {
+    sub.textContent = 'Actual: ' + fmtKz(atual) + ' — define o valor de abertura do caixa.';
+  }
   openModal('modal-fundo');
+  setTimeout(function () { if (el) try { el.focus(); el.select(); } catch (e) {} }, 100);
 });
 document.getElementById('modal-fundo-save').addEventListener('click', async () => {
-  const v = parseFloat(document.getElementById('fundo-valor').value);
+  const v = Number(document.getElementById('fundo-valor').value);
   if (isNaN(v) || v < 0) { toast('Valor inválido', 'error'); return; }
   state.config.fundo = v;
   await saveConfig();
   closeModal('modal-fundo');
-  toast('Fundo de caixa actualizado', 'success');
-  updateUI();
+  toast('Fundo actualizado', 'success');
+  if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-fundo-cancel').addEventListener('click', () => closeModal('modal-fundo'));
 
 // Venda – Adicionar item ao carrinho (profissional único/global)
 document.getElementById('btn-add-item').addEventListener('click', () => {
-  // VALIDAÇÃO: profissional obrigatório (global)
-  const profissionalId = document.getElementById('venda-profissional').value;
-  if (!profissionalId || profissionalId.trim() === '') {
-    toast('Selecione um profissional antes de adicionar ao carrinho.', 'error');
-    return;
-  }
-
   const catSel = document.getElementById('ci-servico-sel');
   const ciValor = document.getElementById('ci-valor');
   let nome = catSel.value;
@@ -76,14 +93,18 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
     }
     renderCart();
   }
+  // Preparar próximo item (velocidade no balcão)
+  if (catSel) catSel.value = '';
+  if (ciValor) { ciValor.value = ''; }
+  if (typeof updateVendaSaveButton === 'function') updateVendaSaveButton();
 });
 
 // CORREÇÃO: modal-venda-save com profissional único
 const vendaSaveBtn = document.getElementById('modal-venda-save');
 if (vendaSaveBtn) {
   vendaSaveBtn.onclick = async function(e) {
-    if (cartItems.length === 0) { toast('Adicione pelo menos um serviço', 'error'); return; }
-    const cliente = document.getElementById('venda-cliente').value || 'Anónimo';
+    if (!cartItems.length) { toast('Adicione pelo menos um serviço à venda', 'error'); return; }
+    const cliente = document.getElementById('venda-cliente').value || 'Avulso';
     const profissionalId = document.getElementById('venda-profissional').value;
     const metodoPagamento = document.getElementById('venda-pagamento').value;
     
@@ -91,18 +112,22 @@ if (vendaSaveBtn) {
     const profObj = state.profissionais.find(p => p.id === profissionalId);
     const profissionalNome = profObj ? profObj.nome : '';
     
-    // Validação antecipada do profissional
-    if (!profissionalId || String(profissionalId).trim() === '') {
-      toast('Selecione um profissional antes de registar a venda.', 'error');
-      return;
-    }
-
+    // Profissional opcional (comissões); venda walk-in não bloqueia
     setButtonLoading(this, true);
     try {
+      let clienteId = null;
+      try {
+        if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
+        else {
+          const hit = (state.clientes || []).find(c => c.nome === cliente);
+          if (hit) clienteId = hit.id;
+        }
+      } catch (e) {}
       const idVenda = await registarVenda({
         cliente,
+        cliente_id: clienteId,
         profissional: profissionalNome,
-        profissional_id: profissionalId,
+        profissional_id: profissionalId || null,
         itens: [...cartItems],
         metodoPagamento
       });
@@ -191,12 +216,17 @@ document.getElementById('modal-finalizar-save').addEventListener('click', async 
   
   // Registar a venda com profissional_id
   const itens = [{ nome: ag.servico, quantidade: 1, precoUnit: ag.preco, subtotal: ag.preco }];
-  await registarVenda({ 
-    cliente: ag.cliente, 
-    profissional: ag.profissional, 
-    profissional_id: ag.profissional_id, // <- CORREÇÃO
-    itens, 
-    metodoPagamento: metodo 
+  let cliId = ag.cliente_id || null;
+  if (!cliId && typeof resolverClienteIdPorNome === 'function') {
+    cliId = resolverClienteIdPorNome(ag.cliente);
+  }
+  await registarVenda({
+    cliente: ag.cliente || 'Avulso',
+    cliente_id: cliId,
+    profissional: ag.profissional,
+    profissional_id: ag.profissional_id || null,
+    itens,
+    metodoPagamento: metodo
   });
   
   closeModal('modal-finalizar');
@@ -227,12 +257,12 @@ async function confirmarFechoCaixa() {
   const detalhePagamento = {};
   vendas.forEach(v => {
     const mp = v.metodoPagamento || 'Numerário';
-    detalhePagamento[mp] = (detalhePagamento[mp] || 0) + v.valor;
+    detalhePagamento[mp] = (detalhePagamento[mp] || 0) + (Number(v.valor) || 0);
   });
 
-  const totalVendas = vendas.reduce((s, v) => s + v.valor, 0);
-  const totalDespesas = despesas.reduce((s, d) => s + d.valor, 0);
-  const saldoFinal = state.config.fundo + totalVendas - totalDespesas;
+  const totalVendas = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+  const totalDespesas = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
+  const saldoFinal = (Number(state.config.fundo) || 0) + totalVendas - totalDespesas;
 
   const registro = {
     id: uuid(),
@@ -249,7 +279,7 @@ async function confirmarFechoCaixa() {
   await dbPut('fechos_caixa', registro);
   // Atualizar o estado local
   state.fechos_caixa.push(registro);
-  toast('Caixa fechado e registado com sucesso!', 'success');
+  toast('Caixa fechado com sucesso', 'success');
   closeModal('modal-fecho');
   updateUI();
 }
@@ -263,11 +293,11 @@ document.getElementById('btn-imprimir-fecho').addEventListener('click', () => {
   const hojeStr = hoje();
   const vendas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
   const despesas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa');
-  const tv = vendas.reduce((s, v) => s + v.valor, 0);
-  const td = despesas.reduce((s, d) => s + d.valor, 0);
+  const tv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+  const td = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const byPag = {};
   vendas.forEach(v => { const k = v.metodoPagamento || 'Numerário';
-    byPag[k] = (byPag[k] || 0) + v.valor; });
+    byPag[k] = (byPag[k] || 0) + (Number(v.valor) || 0); });
   document.getElementById('recibo-print').innerHTML = `
     <div class="r-store">${escHtml(state.config.storeName)}</div>
     <div class="r-sub">FECHO DE CAIXA</div>

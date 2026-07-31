@@ -73,24 +73,75 @@ function saveSyncQueue(q) {
   } catch (e) { logErroSilencioso('saveSyncQueue', e); }
 }
 
+function actualizarBannerOffline() {
+  const banner = document.getElementById('offline-banner');
+  const txt = document.getElementById('offline-banner-text');
+  if (!banner) return;
+  if (navigator.onLine) {
+    banner.classList.remove('show');
+    return;
+  }
+  banner.classList.add('show');
+  if (txt) {
+    const fila = getSyncQueue();
+    const n = fila.filter(function (op) { return op.failed !== true; }).length;
+    txt.textContent = n > 0
+      ? ('Modo offline — ' + n + (n === 1 ? ' alteração' : ' alterações') + ' serão enviadas ao reconectar')
+      : 'Modo offline — dados guardados neste dispositivo';
+  }
+}
+
 function atualizarIndicadorSync() {
   const dot  = document.getElementById('sync-dot');
   const text = document.getElementById('sync-text');
-  if (!dot || !text) return;
-  if (!navigator.onLine) { dot.classList.remove('online'); text.textContent = 'Offline'; return; }
+  const container = document.getElementById('sync-status-container');
   const fila = getSyncQueue();
-  const pendentes = fila.filter(op => op.failed !== true).length;
-  const falhados = fila.length - pendentes;
-  dot.classList.add('online');
-  text.textContent = pendentes > 0
-    ? `Online (${pendentes} pendente${pendentes > 1 ? 's' : ''})`
-    : (falhados > 0 ? `Online (${falhados} com falha)` : 'Online');
+  const pendentes = fila.filter(function (op) { return op.failed !== true; }).length;
+  const falhados = fila.filter(function (op) { return op.failed === true; }).length;
+
+  if (dot && text) {
+    if (!navigator.onLine) {
+      dot.classList.remove('online');
+      text.textContent = pendentes > 0
+        ? ('Offline · ' + pendentes + ' pend.')
+        : 'Offline';
+    } else {
+      dot.classList.add('online');
+      if (pendentes > 0) {
+        text.textContent = pendentes + (pendentes === 1 ? ' pendente' : ' pendentes');
+      } else if (falhados > 0) {
+        text.textContent = falhados + (falhados === 1 ? ' falha' : ' falhas');
+      } else {
+        text.textContent = 'Sincronizado';
+      }
+    }
+  }
+
+  if (container) {
+    container.style.display = 'flex';
+    container.setAttribute('data-state',
+      !navigator.onLine ? 'offline' : (pendentes > 0 ? 'pending' : (falhados > 0 ? 'error' : 'ok'))
+    );
+  }
+
+  actualizarBannerOffline();
 }
 
 function addToSyncQueue(tabela, operacao, payload) {
-  const q = getSyncQueue().filter(item => !(item.tabela === tabela && item.payload?.id === payload?.id));
-  q.push({ id: uuid(), tabela, operacao, payload, ts: Date.now(), attempts: 0 });
+  const q = getSyncQueue().filter(function (item) {
+    return !(item.tabela === tabela && item.payload && payload && item.payload.id === payload.id);
+  });
+  q.push({
+    id: typeof uuid === 'function' ? uuid() : String(Date.now()),
+    tabela: tabela,
+    operacao: operacao,
+    payload: payload,
+    ts: Date.now(),
+    attempts: 0,
+    failed: false
+  });
   saveSyncQueue(q);
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 async function flushSyncQueue() {
@@ -178,6 +229,7 @@ async function flushSyncQueue() {
     const msg = `Falha ao sincronizar ${itensFalhos.length} operação(ões) após ${MAX_ATTEMPTS} tentativas. Contacte o suporte.`;
     toast(msg, 'error');
   }
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 // ====================================================================
@@ -196,19 +248,21 @@ dbPut = async function(store, item) {
   if (navigator.onLine) {
     try {
       await supabaseUpsert(tabela, item);
+      const rest = getSyncQueue().filter(function (op) {
+        return !(op.tabela === tabela && op.payload && op.payload.id === item.id);
+      });
+      if (rest.length !== getSyncQueue().length) saveSyncQueue(rest);
     } catch (err) {
-      // Se for erro de limite de plano, reverter a escrita local e relançar
       if (err.message === 'LIMITE_PLANO_ATINGIDO') {
         await _dbDeleteOriginal(store, item.id);
-        // Remover do estado local (será feito pelo chamador)
         throw err;
       }
-      // Outros erros: enfileirar para tentar depois
       addToSyncQueue(tabela, 'upsert', item);
     }
   } else {
     addToSyncQueue(tabela, 'upsert', item);
   }
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
   return item;
 };
 

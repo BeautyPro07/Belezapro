@@ -7,7 +7,7 @@
 /* Tokens: ver base-variaveis.css (fonte única) */
 
 body {
-  background: var(--bg-soft) !important;
+  background: var(--bg-soft);
   color: var(--text-primary);
   font-size: var(--fs-base);
 }
@@ -101,19 +101,27 @@ body {
   padding: 0 14px;
   font-size: var(--fs-sm);
 }
-.btn-block { width: 100%; }
-
-/* Remover variantes excessivas */
-.btn-xs, .btn-lg, .btn-xl {
-  height: 48px;
-  min-height: 48px;
-  font-size: var(--fs-md);
-  padding: 0 var(--s2);
+/* Escala oficial: default 48px · sm 40px. Variantes xs/lg/xl removidas (zero uso no produto). */
+.btn-block {
+  width: 100%;
+  justify-content: center;
 }
 .btn-success {
   background: var(--green);
   color: var(--card-white);
-  box-shadow: none;
+  box-shadow: 0 4px 12px rgba(44, 122, 77, 0.2);
+}
+.btn-success:hover {
+  filter: brightness(0.94);
+}
+.btn-success:active {
+  filter: brightness(0.88);
+}
+.btn-success.is-loading::after {
+  border-top-color: var(--card-white);
+}
+.btn-danger:active {
+  filter: brightness(0.92);
 }
 
 /* ===== INPUTS ===== */
