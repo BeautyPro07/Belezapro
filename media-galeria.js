@@ -167,28 +167,70 @@
   function withTimeout(promise, ms) {
     return new Promise(function (resolve) {
       var done = false;
-      var t = setTimeout(function () {
+      var timer = setTimeout(function () {
         if (done) return;
         done = true;
-        resolve(null);
+        resolve({ url: null, error: "timeout" });
       }, ms || UPLOAD_MS);
       Promise.resolve(promise).then(
-        function (v) { if (!done) { done = true; clearTimeout(t); resolve(v); } },
-        function () { if (!done) { done = true; clearTimeout(t); resolve(null); } }
+        function (v) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(v);
+        },
+        function (err) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve({ url: null, error: (err && err.message) ? String(err.message) : "network" });
+        }
       );
     });
   }
 
-    /** Upload para Supabase Storage (bucket `fotos`). Offline → null. */
+  function classifyStorageError(err) {
+    var s = String(err && err.message ? err.message : err || "").toLowerCase();
+    if (!s || s === "timeout") return "timeout";
+    if (s.indexOf("offline") >= 0) return "offline";
+    if (s.indexOf("403") >= 0 || s.indexOf("unauthorized") >= 0 || s.indexOf("row-level security") >= 0 || s.indexOf("policy") >= 0 || s.indexOf("jwt") >= 0)
+      return "forbidden";
+    if (s.indexOf("401") >= 0 || s.indexOf("session") >= 0) return "auth";
+    if (s.indexOf("bucket") >= 0 || s.indexOf("not found") >= 0) return "bucket";
+    if (s.indexOf("network") >= 0 || s.indexOf("fetch") >= 0) return "network";
+    return "upload";
+  }
+
+  function toastUploadOutcome(result, opts) {
+    opts = opts || {};
+    if (result && result.url) {
+      if (opts.silentOk) return;
+      toastMsg(opts.okMsg || "Foto sincronizada na cloud", "success");
+      return;
+    }
+    var code = (result && result.error) ? classifyStorageError({ message: result.error }) : "upload";
+    var map = {
+      timeout: "Foto guardada neste dispositivo. Cloud: tempo esgotado — tente com melhor rede.",
+      offline: "Foto guardada neste dispositivo. Sem internet para a cloud.",
+      forbidden: "Foto local OK. Cloud recusou (permissões Storage / RLS). Verifique políticas do bucket fotos.",
+      auth: "Foto local OK. Sessão expirada — volte a entrar para sincronizar.",
+      bucket: "Foto local OK. Bucket «fotos» em falta ou inacessível no Supabase.",
+      network: "Foto local OK. Falha de rede ao enviar para a cloud.",
+      upload: "Foto local OK. Falha ao enviar para a cloud."
+    };
+    toastMsg(map[code] || map.upload, "warning");
+  }
+
+  /** Upload Storage. Devolve { url, error }. Offline / falha → url null + error. */
   async function uploadFotoStorage(kind, entityId, dataUrl) {
-    if (!dataUrl || !entityId) return null;
-    if (typeof navigator !== "undefined" && !navigator.onLine) return null;
-    if (typeof supabaseClient === "undefined" || !supabaseClient) return null;
+    if (!dataUrl || !entityId) return { url: null, error: "upload" };
+    if (typeof navigator !== "undefined" && !navigator.onLine) return { url: null, error: "offline" };
+    if (typeof supabaseClient === "undefined" || !supabaseClient) return { url: null, error: "bucket" };
     var salaoId = (typeof state !== "undefined" && state.config && state.config.salaoId) ? state.config.salaoId : null;
-    if (!salaoId) return null;
+    if (!salaoId) return { url: null, error: "auth" };
     try {
       var blob = dataUrlToBlob(dataUrl);
-      if (!blob) return null;
+      if (!blob) return { url: null, error: "upload" };
       var path = String(salaoId) + "/" + kind + "/" + String(entityId) + ".jpg";
       var res = await supabaseClient.storage.from("fotos").upload(path, blob, {
         contentType: "image/jpeg",
@@ -197,13 +239,15 @@
       });
       if (res.error) {
         console.warn("[BPMedia] storage upload:", res.error.message || res.error);
-        return null;
+        return { url: null, error: res.error.message || "upload" };
       }
       var pub = supabaseClient.storage.from("fotos").getPublicUrl(path);
-      return (pub && pub.data && pub.data.publicUrl) ? pub.data.publicUrl : null;
+      var u = (pub && pub.data && pub.data.publicUrl) ? pub.data.publicUrl : null;
+      if (!u) return { url: null, error: "upload" };
+      return { url: u, error: null };
     } catch (e) {
       console.warn("[BPMedia] storage:", e && e.message ? e.message : e);
-      return null;
+      return { url: null, error: (e && e.message) ? String(e.message) : "network" };
     }
   }
 
@@ -319,22 +363,29 @@
     if (!entityId || !dataUrl) return;
     var token = String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8);
     _uploadToken[kind + ":" + entityId] = token;
-    withTimeout(uploadFotoStorage(kind, entityId, dataUrl), UPLOAD_MS).then(function (url) {
-      if (!url) return;
+    withTimeout(uploadFotoStorage(kind, entityId, dataUrl), UPLOAD_MS).then(function (result) {
       if (_uploadToken[kind + ":" + entityId] !== token) return;
-      // Após URL remota: largar base64 local (menos memória / IDB) e actualizar só a linha
+      var url = result && result.url ? result.url : null;
+      if (!url) {
+        toastUploadOutcome(result || { url: null, error: "upload" }, { silentOk: true });
+        return;
+      }
       var patch = { foto_url: url, foto: null, updated_at: new Date().toISOString() };
       if (kind === "clientes") {
         var c = (state.clientes || []).find(function (x) { return x.id === entityId; });
-        if (!c || (c.foto && c.foto !== dataUrl)) return;
+        if (!c || (c.foto && c.foto !== dataUrl && c.foto_url !== url)) {
+          // entidade mudou de foto entretanto — não sobrescrever
+          if (c && c.foto && c.foto !== dataUrl) return;
+        }
         if (typeof updateCliente === "function") updateCliente(entityId, patch);
         patchRowAvatar("clientes", entityId);
       } else if (kind === "profissionais") {
         var p = (state.profissionais || []).find(function (x) { return x.id === entityId; });
-        if (!p || (p.foto && p.foto !== dataUrl)) return;
+        if (p && p.foto && p.foto !== dataUrl) return;
         if (typeof updateProfissional === "function") updateProfissional(entityId, patch);
         patchRowAvatar("profissionais", entityId);
       }
+      // Silencioso no sucesso cloud: UI já mostrou "Foto actualizada" no local
     });
   }
 
@@ -812,8 +863,12 @@
           if (addFotoGaleria(entry)) {
             toastMsg("Foto adicionada à galeria", "success");
             renderGaleria(pid);
-            withTimeout(uploadFotoStorage("galeria/" + pid, galId, dataUrl), UPLOAD_MS).then(function (remoteUrl) {
-              if (!remoteUrl) return;
+            withTimeout(uploadFotoStorage("galeria/" + pid, galId, dataUrl), UPLOAD_MS).then(function (result) {
+              var remoteUrl = result && result.url ? result.url : null;
+              if (!remoteUrl) {
+                toastUploadOutcome(result || { url: null, error: "upload" });
+                return;
+              }
               var list = loadGaleria();
               var hit = list.find(function (x) { return x.id === galId; });
               if (!hit || hit.profissional_id !== pid) return;
