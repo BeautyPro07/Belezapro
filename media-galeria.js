@@ -19,9 +19,11 @@
 
   var GALERIA_KEY = "bp_galeria_v1";
   var MAX_GALERIA = 60;
-  var AVATAR_MAX = 256;
-  var GALERIA_MAX = 720;
-  var JPEG_Q = 0.72;
+  var AVATAR_MAX = 160;      // lista/modal: thumb leve
+  var GALERIA_MAX = 720;     // upload original galeria
+  var GALERIA_THUMB = 240;   // thumb local/galeria
+  var JPEG_Q = 0.62;         // perfil
+  var JPEG_Q_GAL = 0.72;
 
   function esc(s) {
     return typeof escHtml === "function" ? escHtml(String(s == null ? "" : s)) : String(s == null ? "" : s);
@@ -320,20 +322,40 @@
     withTimeout(uploadFotoStorage(kind, entityId, dataUrl), UPLOAD_MS).then(function (url) {
       if (!url) return;
       if (_uploadToken[kind + ":" + entityId] !== token) return;
+      // Após URL remota: largar base64 local (menos memória / IDB) e actualizar só a linha
+      var patch = { foto_url: url, foto: null, updated_at: new Date().toISOString() };
       if (kind === "clientes") {
         var c = (state.clientes || []).find(function (x) { return x.id === entityId; });
-        if (!c || c.foto !== dataUrl) return;
-        if (typeof updateCliente === "function") {
-          updateCliente(entityId, { foto_url: url, updated_at: new Date().toISOString() });
-        }
+        if (!c || (c.foto && c.foto !== dataUrl)) return;
+        if (typeof updateCliente === "function") updateCliente(entityId, patch);
+        patchRowAvatar("clientes", entityId);
       } else if (kind === "profissionais") {
         var p = (state.profissionais || []).find(function (x) { return x.id === entityId; });
-        if (!p || p.foto !== dataUrl) return;
-        if (typeof updateProfissional === "function") {
-          updateProfissional(entityId, { foto_url: url, updated_at: new Date().toISOString() });
-        }
+        if (!p || (p.foto && p.foto !== dataUrl)) return;
+        if (typeof updateProfissional === "function") updateProfissional(entityId, patch);
+        patchRowAvatar("profissionais", entityId);
       }
     });
+  }
+
+  /** Actualiza só a linha da lista (evita renderClientes/Profissionais completo). */
+  function patchRowAvatar(kind, entityId) {
+    if (!entityId) return;
+    try {
+      var row = kind === "clientes"
+        ? document.querySelector('.cliente-item[data-cliente-id="' + entityId + '"]')
+        : document.querySelector('.list-item[data-prof-id="' + entityId + '"]');
+      if (!row) return;
+      var ent = kind === "clientes" ? getCliente(entityId) : getProf(entityId);
+      if (!ent) return;
+      var av = row.querySelector(".avatar");
+      if (!av) return;
+      var src = resolveFotoSrc(ent) || (window.BPAvatars && BPAvatars.avatarDataUrl(ent.nome));
+      if (!src) return;
+      av.setAttribute("data-avatar-entity", String(entityId));
+      av.classList.add("bp-avatar-img", "bp-avatar-done");
+      av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async" data-avatar-entity="' + entityId + '">';
+    } catch (e) {}
   }
 
   function getCliente(id) {
@@ -353,7 +375,24 @@
   }
   function saveGaleria(list) {
     try {
-      localStorage.setItem(GALERIA_KEY, JSON.stringify((list || []).slice(-MAX_GALERIA)));
+      var slim = (list || []).slice(-MAX_GALERIA).map(function (f) {
+        var o = {
+          id: f.id,
+          profissional_id: f.profissional_id,
+          profissional_nome: f.profissional_nome || "",
+          caption: f.caption || "",
+          data: f.data || "",
+          ts: f.ts || "",
+          url: f.url || null,
+          thumb: f.thumb || null
+        };
+        // Se há URL remota, não guardar data URL (quota / parse)
+        if (o.url && o.thumb && String(o.thumb).indexOf("data:") === 0) {
+          o.thumb = o.url;
+        }
+        return o;
+      });
+      localStorage.setItem(GALERIA_KEY, JSON.stringify(slim));
       return true;
     } catch (e) {
       toastMsg("Armazenamento cheio — remova fotos antigas", "error");
@@ -447,7 +486,7 @@
           if (id) {
             clearClientePending();
             await setClienteFoto(id, dataUrl);
-            if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+            patchRowAvatar("clientes", id);
             toastMsg("Foto guardada no cliente correcto", "success");
           }
           return;
@@ -467,7 +506,7 @@
         document.getElementById("bp-cli-foto-rm").style.display = "";
         enhanceListAvatars();
         toastMsg("Foto actualizada", "success");
-        if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+        patchRowAvatar("clientes", id);
       } catch (e) {
         console.warn(e);
         toastMsg("Erro ao processar imagem", "error");
@@ -482,7 +521,7 @@
         this.style.display = "none";
       }
       toastMsg("Foto removida", "success");
-      if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+      patchRowAvatar("clientes", id);
     };
   }
 
@@ -513,7 +552,7 @@
           if (id) {
             clearProfPending();
             await setProfFoto(id, dataUrl);
-            if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+            patchRowAvatar("profissionais", id);
             toastMsg("Foto guardada no profissional correcto", "success");
           }
           return;
@@ -533,7 +572,7 @@
         document.getElementById("bp-prof-foto-rm").style.display = "";
         enhanceListAvatars();
         toastMsg("Foto actualizada", "success");
-        if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+        patchRowAvatar("profissionais", id);
       } catch (e) {
         console.warn(e);
         toastMsg("Erro ao processar imagem", "error");
@@ -548,7 +587,7 @@
         this.style.display = "none";
       }
       toastMsg("Foto removida", "success");
-      if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+      patchRowAvatar("profissionais", id);
     };
   }
 
@@ -677,7 +716,7 @@
           var c = matches[0];
           if (c) {
             await setClienteFoto(c.id, foto);
-            enhanceListAvatars();
+            patchRowAvatar("clientes", c.id);
           }
         }, 500);
       }
@@ -696,7 +735,7 @@
           var p = matches[0];
           if (p) {
             await setProfFoto(p.id, foto2);
-            enhanceListAvatars();
+            patchRowAvatar("profissionais", p.id);
           }
         }, 500);
       }
@@ -721,7 +760,7 @@
     var fotos = profId ? galeriaPorProf(profId) : loadGaleria().slice().reverse();
     var grid = fotos.map(function (f) {
       return '<div class="bp-gal-item" data-gal-id="' + f.id + '">' +
-        '<img src="' + f.thumb + '" alt="" loading="lazy" decoding="async">' +
+        '<img src="' + (f.url || f.thumb || '') + '" alt="" loading="lazy" decoding="async">' +
         '<div class="bp-gal-meta">' +
           '<span>' + esc(f.caption || f.data || "") + "</span>" +
           '<button type="button" class="bp-gal-del" data-del-gal="' + f.id + '" title="Remover">×</button>' +
@@ -755,7 +794,8 @@
         if (!file) return;
         try {
           toastMsg("A processar foto…", "success");
-          var dataUrl = await compressFile(file, GALERIA_MAX, JPEG_Q);
+          var dataUrl = await compressFile(file, GALERIA_MAX, JPEG_Q_GAL);
+          var thumbUrl = await compressFile(file, GALERIA_THUMB, JPEG_Q);
           var p = getProf(pid);
           var cap = ((document.getElementById("bp-gal-caption") || {}).value || "").trim();
           var galId = uid();
@@ -763,7 +803,7 @@
             id: galId,
             profissional_id: pid,
             profissional_nome: (p && p.nome) || "",
-            thumb: dataUrl,
+            thumb: thumbUrl,
             url: null,
             caption: cap,
             data: hojeStr(),
@@ -876,6 +916,7 @@
     openGaleria: openGaleria,
     loadGaleria: loadGaleria,
     enhanceListAvatars: enhanceListAvatars,
+    patchRowAvatar: patchRowAvatar,
     resolveFotoSrc: resolveFotoSrc,
     uploadFotoStorage: uploadFotoStorage,
     session: session
