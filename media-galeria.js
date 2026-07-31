@@ -10,8 +10,12 @@
     editingClienteId: null,
     editingProfId: null,
     pendingClienteFoto: null,
-    pendingProfFoto: null
+    pendingProfFoto: null,
+    pendingClienteScope: null,
+    pendingProfScope: null
   };
+  var _uploadToken = Object.create(null);
+  var UPLOAD_MS = 12000;
 
   var GALERIA_KEY = "bp_galeria_v1";
   var MAX_GALERIA = 60;
@@ -158,7 +162,22 @@
     }
   }
 
-  /** Upload para Supabase Storage (bucket `fotos`). Offline → null. */
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var t = setTimeout(function () {
+        if (done) return;
+        done = true;
+        resolve(null);
+      }, ms || UPLOAD_MS);
+      Promise.resolve(promise).then(
+        function (v) { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+        function () { if (!done) { done = true; clearTimeout(t); resolve(null); } }
+      );
+    });
+  }
+
+    /** Upload para Supabase Storage (bucket `fotos`). Offline → null. */
   async function uploadFotoStorage(kind, entityId, dataUrl) {
     if (!dataUrl || !entityId) return null;
     if (typeof navigator !== "undefined" && !navigator.onLine) return null;
@@ -233,58 +252,88 @@
   /* ---------- storage entidades (local + Supabase Storage) ---------- */
   async function setClienteFoto(clienteId, dataUrl) {
     if (!clienteId) return false;
-    var fotoUrl = null;
-    if (dataUrl) {
-      fotoUrl = await uploadFotoStorage("clientes", clienteId, dataUrl);
-    } else {
-      await removeFotoStorage("clientes", clienteId);
-    }
-    var patch = {
-      foto: dataUrl || null,
-      foto_url: dataUrl ? (fotoUrl || null) : null,
-      updated_at: new Date().toISOString()
-    };
-    // Se upload falhou mas há dataUrl local, não apagar foto_url antiga
-    if (dataUrl && !fotoUrl) {
-      var prev = (state.clientes || []).find(function (x) { return x.id === clienteId; });
-      if (prev && prev.foto_url) patch.foto_url = prev.foto_url;
+    var prev = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+    var patch = { foto: dataUrl || null, updated_at: new Date().toISOString() };
+    if (!dataUrl) {
+      patch.foto_url = null;
+      _uploadToken["clientes:" + clienteId] = "cleared";
+      removeFotoStorage("clientes", clienteId);
+    } else if (prev && prev.foto_url) {
+      patch.foto_url = prev.foto_url;
     }
     if (typeof updateCliente === "function") {
       await updateCliente(clienteId, patch);
-      return true;
+    } else {
+      var c = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+      if (!c) return false;
+      Object.assign(c, patch);
+      if (typeof dbPut === "function") await dbPut("clientes", c);
     }
-    var c = (state.clientes || []).find(function (x) { return x.id === clienteId; });
-    if (!c) return false;
-    Object.assign(c, patch);
-    if (typeof dbPut === "function") await dbPut("clientes", c);
+    if (dataUrl) scheduleFotoUpload("clientes", clienteId, dataUrl);
     return true;
   }
   async function setProfFoto(profId, dataUrl) {
     if (!profId) return false;
-    var fotoUrl = null;
-    if (dataUrl) {
-      fotoUrl = await uploadFotoStorage("profissionais", profId, dataUrl);
-    } else {
-      await removeFotoStorage("profissionais", profId);
-    }
-    var patch = {
-      foto: dataUrl || null,
-      foto_url: dataUrl ? (fotoUrl || null) : null,
-      updated_at: new Date().toISOString()
-    };
-    if (dataUrl && !fotoUrl) {
-      var prev = (state.profissionais || []).find(function (x) { return x.id === profId; });
-      if (prev && prev.foto_url) patch.foto_url = prev.foto_url;
+    var prev = (state.profissionais || []).find(function (x) { return x.id === profId; });
+    var patch = { foto: dataUrl || null, updated_at: new Date().toISOString() };
+    if (!dataUrl) {
+      patch.foto_url = null;
+      _uploadToken["profissionais:" + profId] = "cleared";
+      removeFotoStorage("profissionais", profId);
+    } else if (prev && prev.foto_url) {
+      patch.foto_url = prev.foto_url;
     }
     if (typeof updateProfissional === "function") {
       await updateProfissional(profId, patch);
-      return true;
+    } else {
+      var p = (state.profissionais || []).find(function (x) { return x.id === profId; });
+      if (!p) return false;
+      Object.assign(p, patch);
+      if (typeof dbPut === "function") await dbPut("profissionais", p);
     }
-    var p = (state.profissionais || []).find(function (x) { return x.id === profId; });
-    if (!p) return false;
-    Object.assign(p, patch);
-    if (typeof dbPut === "function") await dbPut("profissionais", p);
+    if (dataUrl) scheduleFotoUpload("profissionais", profId, dataUrl);
     return true;
+  }
+
+  function currentClienteId() {
+    var el = document.getElementById("cliente-id");
+    var v = el && el.value ? String(el.value).trim() : "";
+    return v || session.editingClienteId || null;
+  }
+  function currentProfId() {
+    var el = document.getElementById("prof-id");
+    var v = el && el.value ? String(el.value).trim() : "";
+    return v || session.editingProfId || null;
+  }
+  function clearClientePending() {
+    session.pendingClienteFoto = null;
+    session.pendingClienteScope = null;
+  }
+  function clearProfPending() {
+    session.pendingProfFoto = null;
+    session.pendingProfScope = null;
+  }
+  function scheduleFotoUpload(kind, entityId, dataUrl) {
+    if (!entityId || !dataUrl) return;
+    var token = String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8);
+    _uploadToken[kind + ":" + entityId] = token;
+    withTimeout(uploadFotoStorage(kind, entityId, dataUrl), UPLOAD_MS).then(function (url) {
+      if (!url) return;
+      if (_uploadToken[kind + ":" + entityId] !== token) return;
+      if (kind === "clientes") {
+        var c = (state.clientes || []).find(function (x) { return x.id === entityId; });
+        if (!c || c.foto !== dataUrl) return;
+        if (typeof updateCliente === "function") {
+          updateCliente(entityId, { foto_url: url, updated_at: new Date().toISOString() });
+        }
+      } else if (kind === "profissionais") {
+        var p = (state.profissionais || []).find(function (x) { return x.id === entityId; });
+        if (!p || p.foto !== dataUrl) return;
+        if (typeof updateProfissional === "function") {
+          updateProfissional(entityId, { foto_url: url, updated_at: new Date().toISOString() });
+        }
+      }
+    });
   }
 
   function getCliente(id) {
@@ -342,28 +391,33 @@
         if (!c) return;
         var av = row.querySelector(".avatar");
         if (!av) return;
-        if (av.classList.contains("bp-avatar-done")) return;
         var src = resolveFotoSrc(c) || (window.BPAvatars && BPAvatars.avatarDataUrl(c.nome));
         if (!src) return;
+        var img = av.querySelector("img");
+        var same = av.getAttribute("data-avatar-entity") === id && img && img.getAttribute("src") === src;
+        if (same) return;
+        av.setAttribute("data-avatar-entity", id);
         av.classList.add("bp-avatar-img", "bp-avatar-done");
-        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
+        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async" data-avatar-entity="' + id + '">';
       });
-      document.querySelectorAll("[data-prof-id]").forEach(function (row) {
+      document.querySelectorAll(".list-item[data-prof-id]").forEach(function (row) {
         var id = row.getAttribute("data-prof-id");
         var p = getProf(id);
         if (!p) return;
         var av = row.querySelector(".avatar");
         if (!av) return;
-        if (av.classList.contains("bp-avatar-done")) return;
         var src = resolveFotoSrc(p) || (window.BPAvatars && BPAvatars.avatarDataUrl(p.nome));
         if (!src) return;
+        var img = av.querySelector("img");
+        var same = av.getAttribute("data-avatar-entity") === id && img && img.getAttribute("src") === src;
+        if (same) return;
+        av.setAttribute("data-avatar-entity", id);
         av.classList.add("bp-avatar-img", "bp-avatar-done");
-        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
+        av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async" data-avatar-entity="' + id + '">';
       });
     } catch (e) {}
   }
 
-  /* ---------- picker no modal ---------- */
   function ensureClientePhotoUI() {
     var modal = document.getElementById("modal-cliente");
     if (!modal || modal.querySelector("#bp-cli-foto-wrap")) return;
@@ -381,47 +435,52 @@
     title.parentNode.insertBefore(wrap, title.nextSibling);
 
     document.getElementById("bp-cli-foto-btn").onclick = async function () {
-      var id = modal.dataset.editId || modal.getAttribute("data-edit-id");
-      // try common patterns
-      if (!id) id = session.editingClienteId || null;
-      if (!id) {
-        // new client — store pending
-        var file = await pickImage();
-        if (!file) return;
-        try {
-          toastMsg("A otimizar foto…", "info");
-          var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
-          session.pendingClienteFoto = dataUrl;
-          showPreview("bp-cli-foto-preview", dataUrl);
-          document.getElementById("bp-cli-foto-rm").style.display = "";
-          toastMsg("Foto pronta — guarde o cliente", "success");
-        } catch (e) {
-          toastMsg("Erro ao processar imagem", "error");
-        }
-        return;
-      }
+      var id = currentClienteId();
       var file = await pickImage();
       if (!file) return;
       try {
-        toastMsg("A otimizar foto…", "info");
+        toastMsg("A processar foto…", "success");
         var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
+        // Isolamento: após await, só aplicar se o modal ainda for o mesmo registo
+        if (!stillClienteContext(id)) {
+          // Dados: se tinha id, gravar na entidade correcta na mesma (sem tocar no preview alheio)
+          if (id) {
+            clearClientePending();
+            await setClienteFoto(id, dataUrl);
+            if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+            toastMsg("Foto guardada no cliente correcto", "success");
+          }
+          return;
+        }
+        if (!id) {
+          session.pendingClienteFoto = dataUrl;
+          session.pendingClienteScope = "new";
+          showPreview("bp-cli-foto-preview", dataUrl, "new");
+          document.getElementById("bp-cli-foto-rm").style.display = "";
+          toastMsg("Foto pronta — guarde o cliente", "success");
+          return;
+        }
+        clearClientePending();
         await setClienteFoto(id, dataUrl);
-        showPreview("bp-cli-foto-preview", dataUrl);
+        if (!stillClienteContext(id)) return;
+        showPreview("bp-cli-foto-preview", dataUrl, id);
         document.getElementById("bp-cli-foto-rm").style.display = "";
         enhanceListAvatars();
         toastMsg("Foto actualizada", "success");
         if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
       } catch (e) {
         console.warn(e);
-        toastMsg("Erro ao guardar foto", "error");
+        toastMsg("Erro ao processar imagem", "error");
       }
     };
     document.getElementById("bp-cli-foto-rm").onclick = async function () {
-      var id = session.editingClienteId;
-      session.pendingClienteFoto = null;
+      var id = currentClienteId();
+      clearClientePending();
       if (id) await setClienteFoto(id, null);
-      showPreview("bp-cli-foto-preview", null);
-      this.style.display = "none";
+      if (stillClienteContext(id)) {
+        showPreview("bp-cli-foto-preview", null, id || "new");
+        this.style.display = "none";
+      }
       toastMsg("Foto removida", "success");
       if (typeof renderClientes === "function") try { renderClientes(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
     };
@@ -444,106 +503,137 @@
     title.parentNode.insertBefore(wrap, title.nextSibling);
 
     document.getElementById("bp-prof-foto-btn").onclick = async function () {
-      var id = session.editingProfId || null;
-      if (!id) {
-        var file = await pickImage();
-        if (!file) return;
-        try {
-          toastMsg("A otimizar foto…", "info");
-          var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
-          session.pendingProfFoto = dataUrl;
-          showPreview("bp-prof-foto-preview", dataUrl);
-          document.getElementById("bp-prof-foto-rm").style.display = "";
-          toastMsg("Foto pronta — guarde o profissional", "success");
-        } catch (e) {
-          toastMsg("Erro ao processar imagem", "error");
-        }
-        return;
-      }
+      var id = currentProfId();
       var file = await pickImage();
       if (!file) return;
       try {
-        toastMsg("A otimizar foto…", "info");
+        toastMsg("A processar foto…", "success");
         var dataUrl = await compressFile(file, AVATAR_MAX, JPEG_Q);
+        if (!stillProfContext(id)) {
+          if (id) {
+            clearProfPending();
+            await setProfFoto(id, dataUrl);
+            if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
+            toastMsg("Foto guardada no profissional correcto", "success");
+          }
+          return;
+        }
+        if (!id) {
+          session.pendingProfFoto = dataUrl;
+          session.pendingProfScope = "new";
+          showPreview("bp-prof-foto-preview", dataUrl, "new");
+          document.getElementById("bp-prof-foto-rm").style.display = "";
+          toastMsg("Foto pronta — guarde o profissional", "success");
+          return;
+        }
+        clearProfPending();
         await setProfFoto(id, dataUrl);
-        showPreview("bp-prof-foto-preview", dataUrl);
+        if (!stillProfContext(id)) return;
+        showPreview("bp-prof-foto-preview", dataUrl, id);
         document.getElementById("bp-prof-foto-rm").style.display = "";
+        enhanceListAvatars();
         toastMsg("Foto actualizada", "success");
         if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
       } catch (e) {
-        toastMsg("Erro ao guardar foto", "error");
+        console.warn(e);
+        toastMsg("Erro ao processar imagem", "error");
       }
     };
     document.getElementById("bp-prof-foto-rm").onclick = async function () {
-      var id = session.editingProfId;
-      session.pendingProfFoto = null;
+      var id = currentProfId();
+      clearProfPending();
       if (id) await setProfFoto(id, null);
-      showPreview("bp-prof-foto-preview", null);
-      this.style.display = "none";
+      if (stillProfContext(id)) {
+        showPreview("bp-prof-foto-preview", null, id || "new");
+        this.style.display = "none";
+      }
       toastMsg("Foto removida", "success");
       if (typeof renderProfissionais === "function") try { renderProfissionais(); setTimeout(enhanceListAvatars, 50); } catch (e) {}
     };
   }
 
-  function showPreview(id, dataUrl) {
+  function showPreview(id, dataUrl, entityKey) {
     var el = document.getElementById(id);
     if (!el) return;
+    var key = entityKey == null ? "" : String(entityKey);
+    // Isolamento: se o preview já está ligado a outra entidade, não sobrescrever
+    var bound = el.getAttribute("data-foto-for") || "";
+    if (key && bound && bound !== key && el.classList.contains("has-img")) {
+      // troca de entidade em curso — só aplicar se for o destino correcto
+    }
     if (dataUrl) {
-      el.innerHTML = '<img src="' + dataUrl + '" alt="">';
+      el.setAttribute("data-foto-for", key || bound || "");
+      el.innerHTML = '<img src="' + dataUrl + '" alt="" data-foto-for="' + (key || "") + '">';
       el.classList.add("has-img");
+      el.classList.remove("bp-avatar-fallback");
     } else {
+      el.setAttribute("data-foto-for", key || "");
       el.innerHTML = "<span>Foto</span>";
       el.classList.remove("has-img");
+      el.classList.remove("bp-avatar-fallback");
     }
+  }
+
+  /** true se o modal ainda mostra a mesma entidade (evita leak após await). */
+  function stillClienteContext(expectedId) {
+    var modal = document.getElementById("modal-cliente");
+    if (!modal || !modal.classList.contains("open")) return false;
+    var cur = currentClienteId();
+    if (!expectedId) return !cur; // novo cliente
+    return String(cur) === String(expectedId);
+  }
+  function stillProfContext(expectedId) {
+    var modal = document.getElementById("modal-prof");
+    if (!modal || !modal.classList.contains("open")) return false;
+    var cur = currentProfId();
+    if (!expectedId) return !cur;
+    return String(cur) === String(expectedId);
   }
 
   function syncModalPreviews() {
     ensureClientePhotoUI();
     ensureProfPhotoUI();
-    // observe open modals
     var cli = document.getElementById("modal-cliente");
     if (cli && cli.classList.contains("open")) {
-      var cid = session.editingClienteId;
+      var cid = currentClienteId();
       var c = cid ? getCliente(cid) : null;
-      var foto = (c && resolveFotoSrc(c)) || session.pendingClienteFoto || null;
-      showPreview("bp-cli-foto-preview", foto);
+      var foto = null;
+      if (c) foto = resolveFotoSrc(c);
+      else if (session.pendingClienteScope === "new") foto = session.pendingClienteFoto;
+      showPreview("bp-cli-foto-preview", foto, cid || (foto ? "new" : ""));
       var rm = document.getElementById("bp-cli-foto-rm");
       if (rm) rm.style.display = foto ? "" : "none";
     }
     var pr = document.getElementById("modal-prof");
     if (pr && pr.classList.contains("open")) {
-      var pid = session.editingProfId;
+      var pid = currentProfId();
       var p = pid ? getProf(pid) : null;
-      var foto2 = (p && resolveFotoSrc(p)) || session.pendingProfFoto || null;
-      showPreview("bp-prof-foto-preview", foto2);
+      var foto2 = null;
+      if (p) foto2 = resolveFotoSrc(p);
+      else if (session.pendingProfScope === "new") foto2 = session.pendingProfFoto;
+      showPreview("bp-prof-foto-preview", foto2, pid || (foto2 ? "new" : ""));
       var rm2 = document.getElementById("bp-prof-foto-rm");
       if (rm2) rm2.style.display = foto2 ? "" : "none";
     }
   }
 
-  /* ---------- track which entity is being edited ---------- */
   function hookEditTracking() {
-    // intercept list clicks is hard; watch when modal opens and nome field matches
     var cliModal = document.getElementById("modal-cliente");
     if (cliModal && !cliModal.dataset.bpFotoObs) {
       cliModal.dataset.bpFotoObs = "1";
       var obs = new MutationObserver(function () {
         if (cliModal.classList.contains("open")) {
           setTimeout(function () {
-            var nome = (document.getElementById("cliente-nome") || {}).value || "";
-            var found = (state.clientes || []).find(function (c) {
-              return c.nome === nome;
-            });
-            // prefer hidden id if any
             var hid = document.getElementById("cliente-id");
-            if (hid && hid.value) session.editingClienteId = hid.value;
-            else session.editingClienteId = found ? found.id : null;
-            if (!session.editingClienteId) session.pendingClienteFoto = session.pendingClienteFoto || null;
-            else session.pendingClienteFoto = null;
+            var id = hid && hid.value ? String(hid.value).trim() : "";
+            session.editingClienteId = id || null;
+            if (session.editingClienteId) clearClientePending();
             syncModalPreviews();
-          }, 80);
+          }, 40);
         } else {
           session.editingClienteId = null;
+          clearClientePending();
+          showPreview("bp-cli-foto-preview", null, "");
         }
       });
       obs.observe(cliModal, { attributes: true, attributeFilter: ["class"] });
@@ -554,107 +644,63 @@
       var obs2 = new MutationObserver(function () {
         if (prModal.classList.contains("open")) {
           setTimeout(function () {
-            var nome = (document.getElementById("prof-nome") || {}).value || "";
-            var found = (state.profissionais || []).find(function (p) {
-              return p.nome === nome;
-            });
             var hid = document.getElementById("prof-id");
-            if (hid && hid.value) session.editingProfId = hid.value;
-            else session.editingProfId = found ? found.id : null;
-            if (!session.editingProfId) session.pendingProfFoto = session.pendingProfFoto || null;
-            else session.pendingProfFoto = null;
+            var id = hid && hid.value ? String(hid.value).trim() : "";
+            session.editingProfId = id || null;
+            if (session.editingProfId) clearProfPending();
             syncModalPreviews();
-          }, 80);
+          }, 40);
         } else {
           session.editingProfId = null;
+          clearProfPending();
+          showPreview("bp-prof-foto-preview", null, "");
         }
       });
       obs2.observe(prModal, { attributes: true, attributeFilter: ["class"] });
     }
   }
 
-  /* ---------- pending foto on create: patch save buttons lightly ---------- */
   function hookSaveButtons() {
-    // After client save, attach pending foto if name matches newest
     document.addEventListener("click", function (e) {
       var t = e.target.closest("#modal-cliente-save, #cliente-save, [data-save-cliente]");
-      if (t && session.pendingClienteFoto) {
+      if (t && session.pendingClienteFoto && session.pendingClienteScope === "new") {
+        var nome = ((document.getElementById("cliente-nome") || {}).value || "").trim();
+        var foto = session.pendingClienteFoto;
+        clearClientePending();
         setTimeout(async function () {
-          try {
-            var nome = (document.getElementById("cliente-nome") || {}).value || "";
-            var c = (state.clientes || []).find(function (x) { return x.nome === nome; });
-            if (c && session.pendingClienteFoto) {
-              await setClienteFoto(c.id, session.pendingClienteFoto);
-              session.pendingClienteFoto = null;
-              enhanceListAvatars();
-            }
-          } catch (err) {}
-        }, 400);
+          if (!nome || !foto) return;
+          var matches = (state.clientes || []).filter(function (x) { return x.nome === nome; });
+          if (!matches.length) return;
+          matches.sort(function (a, b) {
+            return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+          });
+          var c = matches[0];
+          if (c) {
+            await setClienteFoto(c.id, foto);
+            enhanceListAvatars();
+          }
+        }, 500);
       }
       var t2 = e.target.closest("#modal-prof-save, #prof-save, [data-save-prof]");
-      if (t2 && session.pendingProfFoto) {
+      if (t2 && session.pendingProfFoto && session.pendingProfScope === "new") {
+        var nome2 = ((document.getElementById("prof-nome") || {}).value || "").trim();
+        var foto2 = session.pendingProfFoto;
+        clearProfPending();
         setTimeout(async function () {
-          try {
-            var nome = (document.getElementById("prof-nome") || {}).value || "";
-            var p = (state.profissionais || []).find(function (x) { return x.nome === nome; });
-            if (p && session.pendingProfFoto) {
-              await setProfFoto(p.id, session.pendingProfFoto);
-              session.pendingProfFoto = null;
-              enhanceListAvatars();
-            }
-          } catch (err) {}
-        }, 400);
-      }
-    }, true);
-  }
-
-  /* ---------- Galeria UI ---------- */
-  function ensureShell(id, title, eyebrow, subtitle) {
-    if (typeof ensureBpSheetModal === 'function') {
-      return ensureBpSheetModal(id, title, eyebrow, subtitle);
-    }
-    var el = document.getElementById(id);
-    if (el) {
-      var tEl = el.querySelector('.bp-sheet-title');
-      if (tEl && title) tEl.textContent = title;
-      return el;
-    }
-    el = document.createElement('div');
-    el.id = id;
-    el.className = 'modal-overlay';
-    el.setAttribute('role', 'dialog');
-    el.setAttribute('aria-modal', 'true');
-    el.setAttribute('aria-labelledby', id + '-title');
-    var eye = eyebrow || 'BeautyPro';
-    var sub = subtitle || '';
-    el.innerHTML =
-      '<div class="bp-sheet modal-sheet">' +
-        '<div class="bp-sheet-handle handle" aria-hidden="true"></div>' +
-        '<div class="bp-sheet-header">' +
-          '<div class="bp-sheet-eyebrow">' + eye + '</div>' +
-          '<h2 class="bp-sheet-title modal-title" id="' + id + '-title">' + title + '</h2>' +
-          (sub ? '<p class="bp-sheet-subtitle">' + sub + '</p>' : '') +
-        '</div>' +
-        '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
-        '<div class="bp-sheet-footer modal-actions">' +
-          '<button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(el);
-    el.addEventListener('click', function (e) {
-      if (e.target === el || e.target.getAttribute('data-close') === id) {
-        if (typeof closeModal === 'function') closeModal(id);
-        else el.classList.remove('open');
+          if (!nome2 || !foto2) return;
+          var matches = (state.profissionais || []).filter(function (x) { return x.nome === nome2; });
+          if (!matches.length) return;
+          matches.sort(function (a, b) {
+            return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+          });
+          var p = matches[0];
+          if (p) {
+            await setProfFoto(p.id, foto2);
+            enhanceListAvatars();
+          }
+        }, 500);
       }
     });
-    return el;
-  }
-  function openShell(id) {
-    if (typeof openModal === "function") openModal(id);
-    else {
-      var el = document.getElementById(id);
-      if (el) el.classList.add("open");
-    }
   }
 
   function openGaleria(profIdPreset) {
@@ -708,26 +754,34 @@
         var file = await pickImage();
         if (!file) return;
         try {
-          toastMsg("A otimizar foto…", "info");
+          toastMsg("A processar foto…", "success");
           var dataUrl = await compressFile(file, GALERIA_MAX, JPEG_Q);
           var p = getProf(pid);
           var cap = ((document.getElementById("bp-gal-caption") || {}).value || "").trim();
           var galId = uid();
-          var remoteUrl = await uploadFotoStorage("galeria/" + pid, galId, dataUrl);
           var entry = {
             id: galId,
             profissional_id: pid,
             profissional_nome: (p && p.nome) || "",
-            thumb: remoteUrl || dataUrl,
-            url: remoteUrl || null,
+            thumb: dataUrl,
+            url: null,
             caption: cap,
             data: hojeStr(),
             ts: new Date().toISOString()
           };
-          // Preferir URL remota no thumb para não encher localStorage; se offline, dataUrl
           if (addFotoGaleria(entry)) {
-            toastMsg(remoteUrl ? "Foto adicionada à galeria" : "Foto guardada (sync quando online)", "success");
+            toastMsg("Foto adicionada à galeria", "success");
             renderGaleria(pid);
+            withTimeout(uploadFotoStorage("galeria/" + pid, galId, dataUrl), UPLOAD_MS).then(function (remoteUrl) {
+              if (!remoteUrl) return;
+              var list = loadGaleria();
+              var hit = list.find(function (x) { return x.id === galId; });
+              if (!hit || hit.profissional_id !== pid) return;
+              hit.url = remoteUrl;
+              hit.thumb = remoteUrl;
+              saveGaleria(list);
+              renderGaleria(pid);
+            });
           }
         } catch (e) {
           console.warn(e);

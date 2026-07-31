@@ -19,10 +19,17 @@
 
   function applyAvatar(av, nome, foto, entity) {
     if (!av) return;
+    var id = entity && entity.id != null ? String(entity.id) : "";
     var src = srcFor(nome, foto, entity);
     if (!src) return;
+    var img = av.querySelector("img");
+    // Isolamento: só reutilizar DOM se for a MESMA entidade e o MESMO src
+    if (id && av.getAttribute("data-avatar-entity") === id && img && img.getAttribute("src") === src) return;
+    if (id) av.setAttribute("data-avatar-entity", id);
+    else av.removeAttribute("data-avatar-entity");
     av.classList.add("bp-avatar-img");
-    av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
+    av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async"' +
+      (id ? ' data-avatar-entity="' + id + '"' : '') + '>';
   }
 
   function enhanceClientes() {
@@ -38,7 +45,7 @@
 
   function enhanceProfissionais() {
     try {
-      document.querySelectorAll("[data-prof-id]").forEach(function (row) {
+      document.querySelectorAll(".list-item[data-prof-id]").forEach(function (row) {
         var id = row.getAttribute("data-prof-id");
         // avoid agenda cards if any share attribute — ok for equipa list
         var p = (state.profissionais || []).find(function (x) { return x.id === id; });
@@ -51,6 +58,7 @@
   function enhanceAll() {
     enhanceClientes();
     enhanceProfissionais();
+    syncModalAvatarFallback();
   }
 
   function wrapRender(name, enhancer) {
@@ -158,32 +166,43 @@
     }
   });
 
-  // modal foto: se vazio, mostrar avatar realista do nome
+  // Fallback de avatar no modal: SÓ quando BPMedia não preencheu foto real.
+  // Sem setInterval — evita race e vazamento visual entre registos.
   function syncModalAvatarFallback() {
     try {
-      var nomeC = (document.getElementById("cliente-nome") || {}).value;
-      var prevC = document.getElementById("bp-cli-foto-preview");
-      if (prevC && !prevC.classList.contains("has-img") && nomeC && window.BPAvatars) {
-        var src = BPAvatars.avatarDataUrl(nomeC);
-        prevC.innerHTML = '<img src="' + src + '" alt="">';
-        prevC.classList.add("has-img", "bp-avatar-fallback");
+      var cli = document.getElementById("modal-cliente");
+      if (cli && cli.classList.contains("open")) {
+        var prevC = document.getElementById("bp-cli-foto-preview");
+        var hid = document.getElementById("cliente-id");
+        var cid = hid && hid.value ? String(hid.value).trim() : "";
+        var nomeC = (document.getElementById("cliente-nome") || {}).value;
+        if (prevC && !prevC.classList.contains("has-img") && nomeC && window.BPAvatars) {
+          // Não injectar se já há foto real no state
+          var ent = cid && (state.clientes || []).find(function (x) { return String(x.id) === cid; });
+          if (ent && window.BPMedia && BPMedia.resolveFotoSrc && BPMedia.resolveFotoSrc(ent)) return;
+          var src = BPAvatars.avatarDataUrl(nomeC);
+          prevC.setAttribute("data-foto-for", cid || "new");
+          prevC.innerHTML = '<img src="' + src + '" alt="" data-foto-for="' + (cid || "new") + '">';
+          prevC.classList.add("has-img", "bp-avatar-fallback");
+        }
       }
-      var nomeP = (document.getElementById("prof-nome") || {}).value;
-      var prevP = document.getElementById("bp-prof-foto-preview");
-      if (prevP && !prevP.classList.contains("has-img") && nomeP && window.BPAvatars) {
-        var src2 = BPAvatars.avatarDataUrl(nomeP);
-        prevP.innerHTML = '<img src="' + src2 + '" alt="">';
-        prevP.classList.add("has-img", "bp-avatar-fallback");
+      var pr = document.getElementById("modal-prof");
+      if (pr && pr.classList.contains("open")) {
+        var prevP = document.getElementById("bp-prof-foto-preview");
+        var hidP = document.getElementById("prof-id");
+        var pid = hidP && hidP.value ? String(hidP.value).trim() : "";
+        var nomeP = (document.getElementById("prof-nome") || {}).value;
+        if (prevP && !prevP.classList.contains("has-img") && nomeP && window.BPAvatars) {
+          var entP = pid && (state.profissionais || []).find(function (x) { return String(x.id) === pid; });
+          if (entP && window.BPMedia && BPMedia.resolveFotoSrc && BPMedia.resolveFotoSrc(entP)) return;
+          var src2 = BPAvatars.avatarDataUrl(nomeP);
+          prevP.setAttribute("data-foto-for", pid || "new");
+          prevP.innerHTML = '<img src="' + src2 + '" alt="" data-foto-for="' + (pid || "new") + '">';
+          prevP.classList.add("has-img", "bp-avatar-fallback");
+        }
       }
     } catch (e) {}
   }
-  setInterval(function () {
-    var cli = document.getElementById("modal-cliente");
-    var pr = document.getElementById("modal-prof");
-    if ((cli && cli.classList.contains("open")) || (pr && pr.classList.contains("open"))) {
-      syncModalAvatarFallback();
-    }
-  }, 600);
 
   window.BPAvatarsListas = { enhanceAll: enhanceAll, install: install };
 })();

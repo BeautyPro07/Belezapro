@@ -271,7 +271,9 @@ async function sincronizarConfigDoServidor() {
     if (rows.length > 0) {
       state.config.plano       = rows[0].plano || 'trial';
       state.config.trialInicio = rows[0].trial_inicio || state.config.trialInicio;
+      try { localStorage.setItem('bp_plano_cache', state.config.plano); } catch (_) {}
       await saveConfig();
+      if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
     } else {
       await fetch(`${SUPABASE_URL}/rest/v1/salao_config`, {
         method: 'POST',

@@ -35,7 +35,9 @@ async function loadState(trocouDeSalao = false) {
   // Mutação directa mantida por compatibilidade; Store notifica se existir
   state.config.storeName = cfg ? cfg.value : 'Glamour Beauty';
   state.config.fundo = fund ? Number(fund.value) : 0;
-  state.config.plano = plano ? plano.value : 'trial';
+  state.config.plano = plano ? plano.value : (function () {
+    try { return localStorage.getItem('bp_plano_cache') || 'trial'; } catch (_) { return 'trial'; }
+  })();
   state.config.trialInicio = trialInicio ? trialInicio.value : null;
 
   let clientes, agendamentos, movimentos, profs, servicos, fechos;
@@ -122,6 +124,7 @@ async function saveConfig() {
   await dbPut('config', { id: 'storeName', key: 'storeName', value: state.config.storeName });
   await dbPut('config', { id: 'fundo', key: 'fundo', value: state.config.fundo });
   await dbPut('config', { id: 'plano', key: 'plano', value: state.config.plano });
+  try { if (state.config.plano) localStorage.setItem('bp_plano_cache', state.config.plano); } catch (_) {}
   await dbPut('config', { id: 'trialInicio', key: 'trialInicio', value: state.config.trialInicio });
   if (state.config.salaoId) {
     await dbPut('config', { id: 'salaoId', key: 'salaoId', value: state.config.salaoId });

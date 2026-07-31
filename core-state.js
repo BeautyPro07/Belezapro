@@ -6,7 +6,7 @@ let state = {
   config: {
     storeName: 'Glamour Beauty',
     fundo: 0,
-    plano: 'trial',
+    plano: (function () { try { return localStorage.getItem('bp_plano_cache') || 'trial'; } catch (_) { return 'trial'; } })(),
     trialInicio: null,
     salaoId: null,
     userRole: null,

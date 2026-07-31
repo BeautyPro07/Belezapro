@@ -50,11 +50,15 @@ function toast(msg, type) {
   const el = document.getElementById('toast');
   if (!el) return;
   const icons = { success: '', error: '', warning: '' };
+  // Reset imediato para o browser pintar o novo estado sem esperar o timer anterior
+  clearTimeout(toastTimer);
+  el.classList.remove('show');
   el.textContent = (icons[type] || '') + msg;
   el.className = 'toast' + (type ? ' ' + type : '');
+  // Forçar reflow → a transição .show aplica-se de imediato (feedback determinístico)
+  void el.offsetWidth;
   el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2800);
 }
 
 function animateKpi(id, txt) {
