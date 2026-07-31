@@ -79,10 +79,13 @@
       var cli = ((typeof state !== "undefined" && state.clientes) || []).find(function (c) {
         return c.nome === a.cliente || c.id === a.cliente_id;
       });
-      if (cli && cli.foto) {
+      var fotoSrc = cli && (window.BPMedia && BPMedia.resolveFotoSrc
+        ? BPMedia.resolveFotoSrc(cli)
+        : (cli.foto || cli.foto_url));
+      if (fotoSrc) {
         avHtml =
           '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' +
-          cli.foto +
+          fotoSrc +
           '" alt="" loading="lazy" decoding="async"></div>';
       } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
         avHtml =

@@ -4,17 +4,22 @@
 (function () {
   "use strict";
 
-  function srcFor(nome, foto) {
+  function srcFor(nome, foto, entity) {
+    if (entity && window.BPMedia && typeof BPMedia.resolveFotoSrc === "function") {
+      var r = BPMedia.resolveFotoSrc(entity);
+      if (r) return r;
+    }
     if (foto) return foto;
+    if (entity && entity.foto_url) return entity.foto_url;
     if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
       return BPAvatars.avatarDataUrl(nome || "");
     }
     return null;
   }
 
-  function applyAvatar(av, nome, foto) {
+  function applyAvatar(av, nome, foto, entity) {
     if (!av) return;
-    var src = srcFor(nome, foto);
+    var src = srcFor(nome, foto, entity);
     if (!src) return;
     av.classList.add("bp-avatar-img");
     av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
@@ -26,7 +31,7 @@
         var id = row.getAttribute("data-cliente-id");
         var c = (state.clientes || []).find(function (x) { return x.id === id; });
         if (!c) return;
-        applyAvatar(row.querySelector(".avatar"), c.nome, c.foto);
+        applyAvatar(row.querySelector(".avatar"), c.nome, c.foto, c);
       });
     } catch (e) {}
   }
@@ -38,7 +43,7 @@
         // avoid agenda cards if any share attribute — ok for equipa list
         var p = (state.profissionais || []).find(function (x) { return x.id === id; });
         if (!p) return;
-        applyAvatar(row.querySelector(".avatar"), p.nome, p.foto);
+        applyAvatar(row.querySelector(".avatar"), p.nome, p.foto, p);
       });
     } catch (e) {}
   }

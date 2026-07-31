@@ -397,8 +397,11 @@ function renderDashboard() {
         let avHtml = `<div class="avatar">${escHtml(inicial)}</div>`;
         try {
           const cli = (state.clientes || []).find(c => c.nome === a.cliente || c.id === a.cliente_id);
-          if (cli && cli.foto) {
-            avHtml = `<div class="avatar bp-avatar-img"><img src="${cli.foto}" alt="" loading="lazy" decoding="async"></div>`;
+          const fotoSrc = cli && (window.BPMedia && BPMedia.resolveFotoSrc
+            ? BPMedia.resolveFotoSrc(cli)
+            : (cli.foto || cli.foto_url));
+          if (fotoSrc) {
+            avHtml = `<div class="avatar bp-avatar-img"><img src="${fotoSrc}" alt="" loading="lazy" decoding="async"></div>`;
           } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === 'function') {
             avHtml = `<div class="avatar bp-avatar-img"><img src="${BPAvatars.avatarDataUrl(a.cliente || '')}" alt="" loading="lazy" decoding="async"></div>`;
           }

@@ -1474,6 +1474,54 @@ function isValidUUID(uuid) {
 }
 
 // ====================================================================
+//  TOLERÂNCIA: coluna foto_url pode ainda não existir no Supabase
+//  null = desconhecido | true = confirmada | false = ausente no schema
+// ====================================================================
+let _bpSchemaFotoUrl = (function () {
+  try {
+    const v = localStorage.getItem('bp_schema_foto_url');
+    if (v === '0') return false;
+    if (v === '1') return true;
+  } catch (_) {}
+  return null;
+})();
+
+function _bpSetSchemaFotoUrl(ok) {
+  _bpSchemaFotoUrl = !!ok;
+  try { localStorage.setItem('bp_schema_foto_url', ok ? '1' : '0'); } catch (_) {}
+}
+
+function _bpIsFotoUrlSchemaError(msg) {
+  const s = String(msg || '').toLowerCase();
+  if (!s) return false;
+  if (s.includes('foto_url')) return true;
+  // PostgREST: PGRST204 — column not in schema cache
+  if (s.includes('pgrst204')) return true;
+  if (s.includes('schema cache') && s.includes('column')) return true;
+  if (s.includes('could not find') && s.includes('column')) return true;
+  if (s.includes('unexpected') && s.includes('foto')) return true;
+  return false;
+}
+
+function _bpStripFotoUrl(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const out = Object.assign({}, payload);
+  delete out.foto_url;
+  return out;
+}
+
+function _bpAttachFotoUrl(payload, item) {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (_bpSchemaFotoUrl === false) return payload;
+  // Só enviar quando há URL (evita forçar null em massa antes da coluna existir).
+  // Para limpar foto no servidor: foto_url explicitamente '' ou null no item com flag.
+  if (item && Object.prototype.hasOwnProperty.call(item, 'foto_url')) {
+    payload.foto_url = item.foto_url || null;
+  }
+  return payload;
+}
+
+// ====================================================================
 //  VALIDAÇÃO DE DUPLICADOS NO SUPABASE (consulta prévia)
 // ====================================================================
 async function existeRegistroDuplicado(tabela, nome, salaoId, idIgnorar = null) {
@@ -1514,16 +1562,26 @@ async function supabaseUpsert(tabela, item) {
       }
     }
 
-    const payload = toSupabaseFormat(tabela, item);
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-        'Prefer': 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify(payload),
-    });
+    let payload = toSupabaseFormat(tabela, item);
+    // Se já sabemos que a coluna não existe, nunca enviar foto_url
+    if (_bpSchemaFotoUrl === false && payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url')) {
+      payload = _bpStripFotoUrl(payload);
+    }
+
+    async function postPayload(bodyObj) {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify(bodyObj),
+      });
+      return resp;
+    }
+
+    let resp = await postPayload(payload);
     if (resp.status === 401) {
       throw new Error('SESSION_EXPIRED');
     }
@@ -1534,7 +1592,26 @@ async function supabaseUpsert(tabela, item) {
       } catch (_) {
         errorBody = '(corpo da resposta não disponível)';
       }
+      // Tolerância: coluna foto_url em falta → retry uma vez sem o campo
+      const hadFotoUrl = payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url');
+      if (hadFotoUrl && _bpIsFotoUrlSchemaError(errorBody)) {
+        console.warn('[sync-rest] Coluna foto_url indisponível no schema — a sincronizar sem ela. Execute SUPABASE_FOTOS.sql quando possível.');
+        _bpSetSchemaFotoUrl(false);
+        payload = _bpStripFotoUrl(payload);
+        resp = await postPayload(payload);
+        if (resp.status === 401) throw new Error('SESSION_EXPIRED');
+        if (!resp.ok) {
+          let errorBody2 = '';
+          try { errorBody2 = await resp.text(); } catch (_) { errorBody2 = errorBody; }
+          throw new Error(`Supabase upsert ${tabela}: ${resp.status} - ${errorBody2}`);
+        }
+        return;
+      }
       throw new Error(`Supabase upsert ${tabela}: ${resp.status} - ${errorBody}`);
+    }
+    // Sucesso com foto_url → confirmar schema
+    if (payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url') && _bpSchemaFotoUrl !== true) {
+      _bpSetSchemaFotoUrl(true);
     }
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') throw err;
@@ -1548,6 +1625,28 @@ async function supabaseUpsert(tabela, item) {
         mostrarModalUpgrade('Limite do plano atingido. Faça upgrade para continuar.');
       }
       throw new Error('LIMITE_PLANO_ATINGIDO');
+    }
+    // Última rede de segurança: erro de schema no catch (rede/parse)
+    if (_bpIsFotoUrlSchemaError(errorMsg) && item && (tabela === 'clientes' || tabela === 'profissionais')) {
+      try {
+        console.warn('[sync-rest] Retry de emergência sem foto_url após erro de schema.');
+        _bpSetSchemaFotoUrl(false);
+        const authHeaders2 = await getAuthHeaders();
+        const payload2 = _bpStripFotoUrl(toSupabaseFormat(tabela, item));
+        const resp2 = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders2,
+            'Prefer': 'resolution=merge-duplicates',
+          },
+          body: JSON.stringify(payload2),
+        });
+        if (resp2.status === 401) throw new Error('SESSION_EXPIRED');
+        if (resp2.ok) return;
+      } catch (e2) {
+        if (e2.message === 'SESSION_EXPIRED') throw e2;
+      }
     }
     console.error(`[sync-rest] Falha ao fazer upsert em ${tabela} (id: ${item?.id || 'desconhecido'}):`, errorMsg);
     throw new Error(`Falha na sincronização de ${tabela}: ${errorMsg}`);
@@ -1679,7 +1778,7 @@ function toSupabaseFormat(tabela, item) {
         updated_at: item.updated_at,
       };
     case 'clientes':
-      return {
+      return _bpAttachFotoUrl({
         id: item.id,
         salao_id: salaoId,
         nome: item.nome || '',
@@ -1688,16 +1787,16 @@ function toSupabaseFormat(tabela, item) {
         ultima_visita: item.ultimaVisita || null,
         total_visitas: item.visitas || 0,
         updated_at: item.updated_at,
-      };
+      }, item);
     case 'profissionais':
-      return {
+      return _bpAttachFotoUrl({
         id: item.id,
         salao_id: salaoId,
         nome: item.nome || '',
         especialidade: item.especialidade || null,
         ativo: item.ativo !== false,
         updated_at: item.updated_at,
-      };
+      }, item);
     case 'servicos':
       return {
         id: item.id,
@@ -1755,6 +1854,7 @@ function fromSupabaseFormat(tabela, row) {
         notas:        row.notas,
         ultimaVisita: row.ultima_visita,
         visitas:      row.total_visitas,
+        foto_url:     row.foto_url || null,
         updated_at:   row.updated_at,
       };
     case 'profissionais':
@@ -1764,6 +1864,7 @@ function fromSupabaseFormat(tabela, row) {
         especialidade: row.especialidade,
         ativo:         row.ativo !== false && row.ativo !== 0,
         data_desativacao: row.data_desativacao || null,
+        foto_url:      row.foto_url || null,
         updated_at:    row.updated_at,
       };
     case 'servicos':
@@ -3387,8 +3488,11 @@ function renderDashboard() {
         let avHtml = `<div class="avatar">${escHtml(inicial)}</div>`;
         try {
           const cli = (state.clientes || []).find(c => c.nome === a.cliente || c.id === a.cliente_id);
-          if (cli && cli.foto) {
-            avHtml = `<div class="avatar bp-avatar-img"><img src="${cli.foto}" alt="" loading="lazy" decoding="async"></div>`;
+          const fotoSrc = cli && (window.BPMedia && BPMedia.resolveFotoSrc
+            ? BPMedia.resolveFotoSrc(cli)
+            : (cli.foto || cli.foto_url));
+          if (fotoSrc) {
+            avHtml = `<div class="avatar bp-avatar-img"><img src="${fotoSrc}" alt="" loading="lazy" decoding="async"></div>`;
           } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === 'function') {
             avHtml = `<div class="avatar bp-avatar-img"><img src="${BPAvatars.avatarDataUrl(a.cliente || '')}" alt="" loading="lazy" decoding="async"></div>`;
           }
@@ -12315,36 +12419,104 @@ window.renderBarraMeta = renderBarraMeta;
   }
 
   /* ---------- compressão rápida ---------- */
+  /* ---------- compressão robusta (CSP-safe: data: + createImageBitmap; blob: opcional) ---------- */
+  function encodeCanvas(imgLike, w, h, maxSide, quality) {
+    var scale = 1;
+    if (w > maxSide || h > maxSide) scale = maxSide / Math.max(w, h);
+    var nw = Math.max(1, Math.round(w * scale));
+    var nh = Math.max(1, Math.round(h * scale));
+    var canvas = document.createElement("canvas");
+    canvas.width = nw;
+    canvas.height = nh;
+    var ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(imgLike, 0, 0, nw, nh);
+    var dataUrl = canvas.toDataURL("image/jpeg", quality || JPEG_Q);
+    if (dataUrl.length > 240000) {
+      dataUrl = canvas.toDataURL("image/jpeg", 0.55);
+    }
+    return dataUrl;
+  }
+
   function compressFile(file, maxSide, quality) {
     return new Promise(function (resolve, reject) {
-      if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+      if (!file) {
         reject(new Error("Ficheiro inválido"));
         return;
       }
-      // HEIC etc. — browser pode falhar; feedback claro
+      // Aceitar image/*; type vazio (alguns Android) tenta na mesma
+      var t = String(file.type || "");
+      if (t && t.indexOf("image/") !== 0) {
+        reject(new Error("Ficheiro inválido"));
+        return;
+      }
+
+      function fail(msg) {
+        reject(new Error(msg || "Não foi possível ler a imagem"));
+      }
+
+      // 1) createImageBitmap — não depende de blob: no <img>
+      if (typeof createImageBitmap === "function") {
+        createImageBitmap(file)
+          .then(function (bmp) {
+            try {
+              var dataUrl = encodeCanvas(bmp, bmp.width, bmp.height, maxSide, quality);
+              if (bmp.close) try { bmp.close(); } catch (_) {}
+              resolve(dataUrl);
+            } catch (e) {
+              if (bmp.close) try { bmp.close(); } catch (_) {}
+              // fallback abaixo
+              compressViaFileReader(file, maxSide, quality).then(resolve, reject);
+            }
+          })
+          .catch(function () {
+            compressViaFileReader(file, maxSide, quality).then(resolve, reject);
+          });
+        return;
+      }
+
+      compressViaFileReader(file, maxSide, quality).then(resolve, reject);
+    });
+  }
+
+  function compressViaFileReader(file, maxSide, quality) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = function () {
+        // último recurso: blob URL (requer CSP img-src blob:)
+        compressViaBlobUrl(file, maxSide, quality).then(resolve, reject);
+      };
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            resolve(encodeCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height, maxSide, quality));
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.onerror = function () {
+          compressViaBlobUrl(file, maxSide, quality).then(resolve, reject);
+        };
+        img.src = reader.result; // data: — permitido pelo CSP
+      };
+      try {
+        reader.readAsDataURL(file);
+      } catch (e) {
+        compressViaBlobUrl(file, maxSide, quality).then(resolve, reject);
+      }
+    });
+  }
+
+  function compressViaBlobUrl(file, maxSide, quality) {
+    return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(file);
       var img = new Image();
       img.onload = function () {
         try {
-          var w = img.naturalWidth || img.width;
-          var h = img.naturalHeight || img.height;
-          var scale = 1;
-          if (w > maxSide || h > maxSide) scale = maxSide / Math.max(w, h);
-          var nw = Math.max(1, Math.round(w * scale));
-          var nh = Math.max(1, Math.round(h * scale));
-          var canvas = document.createElement("canvas");
-          canvas.width = nw;
-          canvas.height = nh;
-          var ctx = canvas.getContext("2d");
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(img, 0, 0, nw, nh);
-          var dataUrl = canvas.toDataURL("image/jpeg", quality || JPEG_Q);
+          var dataUrl = encodeCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height, maxSide, quality);
           URL.revokeObjectURL(url);
-          // limite ~180KB data URL
-          if (dataUrl.length > 240000) {
-            dataUrl = canvas.toDataURL("image/jpeg", 0.55);
-          }
           resolve(dataUrl);
         } catch (e) {
           URL.revokeObjectURL(url);
@@ -12357,6 +12529,70 @@ window.renderBarraMeta = renderBarraMeta;
       };
       img.src = url;
     });
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    try {
+      var parts = String(dataUrl).split(",");
+      var mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/jpeg";
+      var bin = atob(parts[1] || "");
+      var arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new Blob([arr], { type: mime });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Upload para Supabase Storage (bucket `fotos`). Offline → null. */
+  async function uploadFotoStorage(kind, entityId, dataUrl) {
+    if (!dataUrl || !entityId) return null;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return null;
+    if (typeof supabaseClient === "undefined" || !supabaseClient) return null;
+    var salaoId = (typeof state !== "undefined" && state.config && state.config.salaoId) ? state.config.salaoId : null;
+    if (!salaoId) return null;
+    try {
+      var blob = dataUrlToBlob(dataUrl);
+      if (!blob) return null;
+      var path = String(salaoId) + "/" + kind + "/" + String(entityId) + ".jpg";
+      var res = await supabaseClient.storage.from("fotos").upload(path, blob, {
+        contentType: "image/jpeg",
+        upsert: true,
+        cacheControl: "3600"
+      });
+      if (res.error) {
+        console.warn("[BPMedia] storage upload:", res.error.message || res.error);
+        return null;
+      }
+      var pub = supabaseClient.storage.from("fotos").getPublicUrl(path);
+      return (pub && pub.data && pub.data.publicUrl) ? pub.data.publicUrl : null;
+    } catch (e) {
+      console.warn("[BPMedia] storage:", e && e.message ? e.message : e);
+      return null;
+    }
+  }
+
+  async function removeFotoStorage(kind, entityId) {
+    if (!entityId) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    if (typeof supabaseClient === "undefined" || !supabaseClient) return;
+    var salaoId = (typeof state !== "undefined" && state.config && state.config.salaoId) ? state.config.salaoId : null;
+    if (!salaoId) return;
+    try {
+      var path = String(salaoId) + "/" + kind + "/" + String(entityId) + ".jpg";
+      await supabaseClient.storage.from("fotos").remove([path]);
+    } catch (e) {
+      console.warn("[BPMedia] storage remove:", e && e.message ? e.message : e);
+    }
+  }
+
+  /** Preferir cache local (data:) depois URL remota. */
+  function resolveFotoSrc(entity) {
+    if (!entity) return null;
+    if (entity.foto && String(entity.foto).indexOf("data:") === 0) return entity.foto;
+    if (entity.foto_url) return entity.foto_url;
+    if (entity.foto) return entity.foto;
+    return null;
   }
 
   function pickImage(accept) {
@@ -12380,28 +12616,59 @@ window.renderBarraMeta = renderBarraMeta;
     });
   }
 
-  /* ---------- storage entidades ---------- */
+  /* ---------- storage entidades (local + Supabase Storage) ---------- */
   async function setClienteFoto(clienteId, dataUrl) {
     if (!clienteId) return false;
+    var fotoUrl = null;
+    if (dataUrl) {
+      fotoUrl = await uploadFotoStorage("clientes", clienteId, dataUrl);
+    } else {
+      await removeFotoStorage("clientes", clienteId);
+    }
+    var patch = {
+      foto: dataUrl || null,
+      foto_url: dataUrl ? (fotoUrl || null) : null,
+      updated_at: new Date().toISOString()
+    };
+    // Se upload falhou mas há dataUrl local, não apagar foto_url antiga
+    if (dataUrl && !fotoUrl) {
+      var prev = (state.clientes || []).find(function (x) { return x.id === clienteId; });
+      if (prev && prev.foto_url) patch.foto_url = prev.foto_url;
+    }
     if (typeof updateCliente === "function") {
-      await updateCliente(clienteId, { foto: dataUrl || null });
+      await updateCliente(clienteId, patch);
       return true;
     }
     var c = (state.clientes || []).find(function (x) { return x.id === clienteId; });
     if (!c) return false;
-    c.foto = dataUrl || null;
+    Object.assign(c, patch);
     if (typeof dbPut === "function") await dbPut("clientes", c);
     return true;
   }
   async function setProfFoto(profId, dataUrl) {
     if (!profId) return false;
+    var fotoUrl = null;
+    if (dataUrl) {
+      fotoUrl = await uploadFotoStorage("profissionais", profId, dataUrl);
+    } else {
+      await removeFotoStorage("profissionais", profId);
+    }
+    var patch = {
+      foto: dataUrl || null,
+      foto_url: dataUrl ? (fotoUrl || null) : null,
+      updated_at: new Date().toISOString()
+    };
+    if (dataUrl && !fotoUrl) {
+      var prev = (state.profissionais || []).find(function (x) { return x.id === profId; });
+      if (prev && prev.foto_url) patch.foto_url = prev.foto_url;
+    }
     if (typeof updateProfissional === "function") {
-      await updateProfissional(profId, { foto: dataUrl || null });
+      await updateProfissional(profId, patch);
       return true;
     }
     var p = (state.profissionais || []).find(function (x) { return x.id === profId; });
     if (!p) return false;
-    p.foto = dataUrl || null;
+    Object.assign(p, patch);
     if (typeof dbPut === "function") await dbPut("profissionais", p);
     return true;
   }
@@ -12462,7 +12729,7 @@ window.renderBarraMeta = renderBarraMeta;
         var av = row.querySelector(".avatar");
         if (!av) return;
         if (av.classList.contains("bp-avatar-done")) return;
-        var src = c.foto || (window.BPAvatars && BPAvatars.avatarDataUrl(c.nome));
+        var src = resolveFotoSrc(c) || (window.BPAvatars && BPAvatars.avatarDataUrl(c.nome));
         if (!src) return;
         av.classList.add("bp-avatar-img", "bp-avatar-done");
         av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
@@ -12474,7 +12741,7 @@ window.renderBarraMeta = renderBarraMeta;
         var av = row.querySelector(".avatar");
         if (!av) return;
         if (av.classList.contains("bp-avatar-done")) return;
-        var src = p.foto || (window.BPAvatars && BPAvatars.avatarDataUrl(p.nome));
+        var src = resolveFotoSrc(p) || (window.BPAvatars && BPAvatars.avatarDataUrl(p.nome));
         if (!src) return;
         av.classList.add("bp-avatar-img", "bp-avatar-done");
         av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
@@ -12624,7 +12891,7 @@ window.renderBarraMeta = renderBarraMeta;
     if (cli && cli.classList.contains("open")) {
       var cid = session.editingClienteId;
       var c = cid ? getCliente(cid) : null;
-      var foto = (c && c.foto) || session.pendingClienteFoto || null;
+      var foto = (c && resolveFotoSrc(c)) || session.pendingClienteFoto || null;
       showPreview("bp-cli-foto-preview", foto);
       var rm = document.getElementById("bp-cli-foto-rm");
       if (rm) rm.style.display = foto ? "" : "none";
@@ -12633,7 +12900,7 @@ window.renderBarraMeta = renderBarraMeta;
     if (pr && pr.classList.contains("open")) {
       var pid = session.editingProfId;
       var p = pid ? getProf(pid) : null;
-      var foto2 = (p && p.foto) || session.pendingProfFoto || null;
+      var foto2 = (p && resolveFotoSrc(p)) || session.pendingProfFoto || null;
       showPreview("bp-prof-foto-preview", foto2);
       var rm2 = document.getElementById("bp-prof-foto-rm");
       if (rm2) rm2.style.display = foto2 ? "" : "none";
@@ -12831,17 +13098,21 @@ window.renderBarraMeta = renderBarraMeta;
           var dataUrl = await compressFile(file, GALERIA_MAX, JPEG_Q);
           var p = getProf(pid);
           var cap = ((document.getElementById("bp-gal-caption") || {}).value || "").trim();
+          var galId = uid();
+          var remoteUrl = await uploadFotoStorage("galeria/" + pid, galId, dataUrl);
           var entry = {
-            id: uid(),
+            id: galId,
             profissional_id: pid,
             profissional_nome: (p && p.nome) || "",
-            thumb: dataUrl,
+            thumb: remoteUrl || dataUrl,
+            url: remoteUrl || null,
             caption: cap,
             data: hojeStr(),
             ts: new Date().toISOString()
           };
+          // Preferir URL remota no thumb para não encher localStorage; se offline, dataUrl
           if (addFotoGaleria(entry)) {
-            toastMsg("Foto adicionada à galeria", "success");
+            toastMsg(remoteUrl ? "Foto adicionada à galeria" : "Foto guardada (sync quando online)", "success");
             renderGaleria(pid);
           }
         } catch (e) {
@@ -12854,8 +13125,11 @@ window.renderBarraMeta = renderBarraMeta;
       btn.onclick = function (e) {
         e.stopPropagation();
         if (!confirm("Remover esta foto?")) return;
-        removeFotoGaleria(btn.getAttribute("data-del-gal"));
-        renderGaleria((document.getElementById("bp-gal-prof") || {}).value);
+        var delId = btn.getAttribute("data-del-gal");
+        var pidDel = (document.getElementById("bp-gal-prof") || {}).value;
+        if (pidDel && delId) removeFotoStorage("galeria/" + pidDel, delId);
+        removeFotoGaleria(delId);
+        renderGaleria(pidDel);
         toastMsg("Foto removida", "success");
       };
     });
@@ -12934,6 +13208,8 @@ window.renderBarraMeta = renderBarraMeta;
     openGaleria: openGaleria,
     loadGaleria: loadGaleria,
     enhanceListAvatars: enhanceListAvatars,
+    resolveFotoSrc: resolveFotoSrc,
+    uploadFotoStorage: uploadFotoStorage,
     session: session
   };
 })();
@@ -13020,10 +13296,13 @@ window.renderBarraMeta = renderBarraMeta;
       var cli = ((typeof state !== "undefined" && state.clientes) || []).find(function (c) {
         return c.nome === a.cliente || c.id === a.cliente_id;
       });
-      if (cli && cli.foto) {
+      var fotoSrc = cli && (window.BPMedia && BPMedia.resolveFotoSrc
+        ? BPMedia.resolveFotoSrc(cli)
+        : (cli.foto || cli.foto_url));
+      if (fotoSrc) {
         avHtml =
           '<div class="avatar bp-avatar-img bp-ag-avatar"><img src="' +
-          cli.foto +
+          fotoSrc +
           '" alt="" loading="lazy" decoding="async"></div>';
       } else if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
         avHtml =
@@ -13161,17 +13440,22 @@ window.renderBarraMeta = renderBarraMeta;
 (function () {
   "use strict";
 
-  function srcFor(nome, foto) {
+  function srcFor(nome, foto, entity) {
+    if (entity && window.BPMedia && typeof BPMedia.resolveFotoSrc === "function") {
+      var r = BPMedia.resolveFotoSrc(entity);
+      if (r) return r;
+    }
     if (foto) return foto;
+    if (entity && entity.foto_url) return entity.foto_url;
     if (window.BPAvatars && typeof BPAvatars.avatarDataUrl === "function") {
       return BPAvatars.avatarDataUrl(nome || "");
     }
     return null;
   }
 
-  function applyAvatar(av, nome, foto) {
+  function applyAvatar(av, nome, foto, entity) {
     if (!av) return;
-    var src = srcFor(nome, foto);
+    var src = srcFor(nome, foto, entity);
     if (!src) return;
     av.classList.add("bp-avatar-img");
     av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async">';
@@ -13183,7 +13467,7 @@ window.renderBarraMeta = renderBarraMeta;
         var id = row.getAttribute("data-cliente-id");
         var c = (state.clientes || []).find(function (x) { return x.id === id; });
         if (!c) return;
-        applyAvatar(row.querySelector(".avatar"), c.nome, c.foto);
+        applyAvatar(row.querySelector(".avatar"), c.nome, c.foto, c);
       });
     } catch (e) {}
   }
@@ -13195,7 +13479,7 @@ window.renderBarraMeta = renderBarraMeta;
         // avoid agenda cards if any share attribute — ok for equipa list
         var p = (state.profissionais || []).find(function (x) { return x.id === id; });
         if (!p) return;
-        applyAvatar(row.querySelector(".avatar"), p.nome, p.foto);
+        applyAvatar(row.querySelector(".avatar"), p.nome, p.foto, p);
       });
     } catch (e) {}
   }

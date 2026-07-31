@@ -22,6 +22,54 @@ function isValidUUID(uuid) {
 }
 
 // ====================================================================
+//  TOLERÂNCIA: coluna foto_url pode ainda não existir no Supabase
+//  null = desconhecido | true = confirmada | false = ausente no schema
+// ====================================================================
+let _bpSchemaFotoUrl = (function () {
+  try {
+    const v = localStorage.getItem('bp_schema_foto_url');
+    if (v === '0') return false;
+    if (v === '1') return true;
+  } catch (_) {}
+  return null;
+})();
+
+function _bpSetSchemaFotoUrl(ok) {
+  _bpSchemaFotoUrl = !!ok;
+  try { localStorage.setItem('bp_schema_foto_url', ok ? '1' : '0'); } catch (_) {}
+}
+
+function _bpIsFotoUrlSchemaError(msg) {
+  const s = String(msg || '').toLowerCase();
+  if (!s) return false;
+  if (s.includes('foto_url')) return true;
+  // PostgREST: PGRST204 — column not in schema cache
+  if (s.includes('pgrst204')) return true;
+  if (s.includes('schema cache') && s.includes('column')) return true;
+  if (s.includes('could not find') && s.includes('column')) return true;
+  if (s.includes('unexpected') && s.includes('foto')) return true;
+  return false;
+}
+
+function _bpStripFotoUrl(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const out = Object.assign({}, payload);
+  delete out.foto_url;
+  return out;
+}
+
+function _bpAttachFotoUrl(payload, item) {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (_bpSchemaFotoUrl === false) return payload;
+  // Só enviar quando há URL (evita forçar null em massa antes da coluna existir).
+  // Para limpar foto no servidor: foto_url explicitamente '' ou null no item com flag.
+  if (item && Object.prototype.hasOwnProperty.call(item, 'foto_url')) {
+    payload.foto_url = item.foto_url || null;
+  }
+  return payload;
+}
+
+// ====================================================================
 //  VALIDAÇÃO DE DUPLICADOS NO SUPABASE (consulta prévia)
 // ====================================================================
 async function existeRegistroDuplicado(tabela, nome, salaoId, idIgnorar = null) {
@@ -62,16 +110,26 @@ async function supabaseUpsert(tabela, item) {
       }
     }
 
-    const payload = toSupabaseFormat(tabela, item);
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-        'Prefer': 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify(payload),
-    });
+    let payload = toSupabaseFormat(tabela, item);
+    // Se já sabemos que a coluna não existe, nunca enviar foto_url
+    if (_bpSchemaFotoUrl === false && payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url')) {
+      payload = _bpStripFotoUrl(payload);
+    }
+
+    async function postPayload(bodyObj) {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify(bodyObj),
+      });
+      return resp;
+    }
+
+    let resp = await postPayload(payload);
     if (resp.status === 401) {
       throw new Error('SESSION_EXPIRED');
     }
@@ -82,7 +140,26 @@ async function supabaseUpsert(tabela, item) {
       } catch (_) {
         errorBody = '(corpo da resposta não disponível)';
       }
+      // Tolerância: coluna foto_url em falta → retry uma vez sem o campo
+      const hadFotoUrl = payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url');
+      if (hadFotoUrl && _bpIsFotoUrlSchemaError(errorBody)) {
+        console.warn('[sync-rest] Coluna foto_url indisponível no schema — a sincronizar sem ela. Execute SUPABASE_FOTOS.sql quando possível.');
+        _bpSetSchemaFotoUrl(false);
+        payload = _bpStripFotoUrl(payload);
+        resp = await postPayload(payload);
+        if (resp.status === 401) throw new Error('SESSION_EXPIRED');
+        if (!resp.ok) {
+          let errorBody2 = '';
+          try { errorBody2 = await resp.text(); } catch (_) { errorBody2 = errorBody; }
+          throw new Error(`Supabase upsert ${tabela}: ${resp.status} - ${errorBody2}`);
+        }
+        return;
+      }
       throw new Error(`Supabase upsert ${tabela}: ${resp.status} - ${errorBody}`);
+    }
+    // Sucesso com foto_url → confirmar schema
+    if (payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url') && _bpSchemaFotoUrl !== true) {
+      _bpSetSchemaFotoUrl(true);
     }
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') throw err;
@@ -96,6 +173,28 @@ async function supabaseUpsert(tabela, item) {
         mostrarModalUpgrade('Limite do plano atingido. Faça upgrade para continuar.');
       }
       throw new Error('LIMITE_PLANO_ATINGIDO');
+    }
+    // Última rede de segurança: erro de schema no catch (rede/parse)
+    if (_bpIsFotoUrlSchemaError(errorMsg) && item && (tabela === 'clientes' || tabela === 'profissionais')) {
+      try {
+        console.warn('[sync-rest] Retry de emergência sem foto_url após erro de schema.');
+        _bpSetSchemaFotoUrl(false);
+        const authHeaders2 = await getAuthHeaders();
+        const payload2 = _bpStripFotoUrl(toSupabaseFormat(tabela, item));
+        const resp2 = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders2,
+            'Prefer': 'resolution=merge-duplicates',
+          },
+          body: JSON.stringify(payload2),
+        });
+        if (resp2.status === 401) throw new Error('SESSION_EXPIRED');
+        if (resp2.ok) return;
+      } catch (e2) {
+        if (e2.message === 'SESSION_EXPIRED') throw e2;
+      }
     }
     console.error(`[sync-rest] Falha ao fazer upsert em ${tabela} (id: ${item?.id || 'desconhecido'}):`, errorMsg);
     throw new Error(`Falha na sincronização de ${tabela}: ${errorMsg}`);
@@ -227,7 +326,7 @@ function toSupabaseFormat(tabela, item) {
         updated_at: item.updated_at,
       };
     case 'clientes':
-      return {
+      return _bpAttachFotoUrl({
         id: item.id,
         salao_id: salaoId,
         nome: item.nome || '',
@@ -236,16 +335,16 @@ function toSupabaseFormat(tabela, item) {
         ultima_visita: item.ultimaVisita || null,
         total_visitas: item.visitas || 0,
         updated_at: item.updated_at,
-      };
+      }, item);
     case 'profissionais':
-      return {
+      return _bpAttachFotoUrl({
         id: item.id,
         salao_id: salaoId,
         nome: item.nome || '',
         especialidade: item.especialidade || null,
         ativo: item.ativo !== false,
         updated_at: item.updated_at,
-      };
+      }, item);
     case 'servicos':
       return {
         id: item.id,
@@ -303,6 +402,7 @@ function fromSupabaseFormat(tabela, row) {
         notas:        row.notas,
         ultimaVisita: row.ultima_visita,
         visitas:      row.total_visitas,
+        foto_url:     row.foto_url || null,
         updated_at:   row.updated_at,
       };
     case 'profissionais':
@@ -312,6 +412,7 @@ function fromSupabaseFormat(tabela, row) {
         especialidade: row.especialidade,
         ativo:         row.ativo !== false && row.ativo !== 0,
         data_desativacao: row.data_desativacao || null,
+        foto_url:      row.foto_url || null,
         updated_at:    row.updated_at,
       };
     case 'servicos':
