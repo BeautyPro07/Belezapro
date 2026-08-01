@@ -1846,6 +1846,13 @@ function toSupabaseFormat(tabela, item) {
         salao_id: salaoId,
         nome: item.nome || '',
         especialidade: item.especialidade || null,
+        idade: item.idade != null ? Number(item.idade) : null,
+        data_contratual: item.dataContratual || item.data_contratual || null,
+        numero_bi: item.numeroBI || item.numero_bi || null,
+        morada: item.morada || null,
+        contacto: item.contacto || null,
+        taxa_comissao: item.taxa_comissao != null ? Number(item.taxa_comissao) : (item.taxa != null ? Number(item.taxa) : 0),
+        meta_mensal: item.meta_mensal != null ? Number(item.meta_mensal) : (item.meta != null ? Number(item.meta) : 0),
         ativo: item.ativo !== false && item.ativo !== 0 && item.ativo !== 'false',
         data_desativacao: item.data_desativacao || null,
         updated_at: item.updated_at,
@@ -1914,10 +1921,18 @@ function fromSupabaseFormat(tabela, row) {
       return {
         id:            row.id,
         nome:          row.nome,
-        especialidade: row.especialidade,
-        ativo:         row.ativo !== false && row.ativo !== 0,
+        especialidade: row.especialidade || '',
+        idade:         row.idade != null ? Number(row.idade) : null,
+        dataContratual: row.data_contratual || row.dataContratual || '',
+        numeroBI:      row.numero_bi || row.numeroBI || '',
+        morada:        row.morada || '',
+        contacto:      row.contacto || '',
+        taxa_comissao: row.taxa_comissao != null ? Number(row.taxa_comissao) : 0,
+        meta_mensal:   row.meta_mensal != null ? Number(row.meta_mensal) : 0,
+        ativo:         row.ativo !== false && row.ativo !== 0 && row.ativo !== 'false',
         data_desativacao: row.data_desativacao || null,
         foto_url:      row.foto_url || null,
+        foto:          null,
         updated_at:    row.updated_at,
       };
     case 'servicos':
@@ -6320,17 +6335,100 @@ let editProfId = null;
 function popularEspecialidadesProf(selected) {
   const sel = document.getElementById('prof-esp');
   if (!sel) return;
-  const servicos = (state.servicos || []).slice().sort((a,b) => a.nome.localeCompare(b.nome));
+  // Só serviços activos e com nome — nunca lixo / eliminados / inactivos
+  const servicos = (state.servicos || [])
+    .filter(function (s) {
+      if (!s || !s.nome) return false;
+      if (typeof isServicoAtivo === 'function') return isServicoAtivo(s);
+      return s.ativo !== false && s.ativo !== 0 && s.ativo !== 'false';
+    })
+    .slice()
+    .sort(function (a, b) { return String(a.nome).localeCompare(String(b.nome), 'pt'); });
   let html = '<option value="">Seleccionar serviço / especialidade</option>';
-  html += '<option value="__criar">Criar seu serviço</option>';
-  servicos.forEach(s => {
-    html += `<option value="${escHtml(s.nome)}">${escHtml(s.nome)}</option>`;
+  html += '<option value="__criar">+ Criar novo serviço</option>';
+  servicos.forEach(function (s) {
+    html += '<option value="' + escHtml(s.nome) + '">' + escHtml(s.nome) + '</option>';
   });
   sel.innerHTML = html;
-  if (selected) sel.value = selected;
+  const box = document.getElementById('prof-criar-servico-box');
+  if (selected && selected !== '__criar') {
+    // Se o serviço antigo já não existe na lista activa, ainda assim mostrar valor
+    const exists = servicos.some(function (s) { return s.nome === selected; });
+    if (!exists && selected) {
+      sel.innerHTML = html + '<option value="' + escHtml(selected) + '">' + escHtml(selected) + ' (legado)</option>';
+    }
+    sel.value = selected;
+    if (box) box.style.display = 'none';
+  } else if (selected === '__criar') {
+    sel.value = '__criar';
+    if (box) box.style.display = 'block';
+  } else {
+    if (box) box.style.display = 'none';
+  }
+}
+
+function bpToggleCriarServicoBox() {
+  const sel = document.getElementById('prof-esp');
+  const box = document.getElementById('prof-criar-servico-box');
+  if (!sel || !box) return;
+  const criar = sel.value === '__criar';
+  box.style.display = criar ? 'block' : 'none';
+  if (criar) {
+    const nomeEl = document.getElementById('prof-novo-servico-nome');
+    if (nomeEl) setTimeout(function () { try { nomeEl.focus(); } catch (_) {} }, 50);
+  }
+}
+
+async function bpCriarServicoDesdeProfModal() {
+  const nome = ((document.getElementById('prof-novo-servico-nome') || {}).value || '').trim();
+  const preco = parseFloat((document.getElementById('prof-novo-servico-preco') || {}).value);
+  if (!nome) {
+    toast('Indique o nome do novo serviço', 'error');
+    return null;
+  }
+  if (!preco || preco <= 0) {
+    toast('Indique um preço válido (Kz)', 'error');
+    return null;
+  }
+  if (typeof existeNomeDuplicado === 'function' && existeNomeDuplicado('servicos', nome)) {
+    toast('Já existe um serviço com este nome. Seleccione-o na lista.', 'warning');
+    popularEspecialidadesProf(nome);
+    return nome;
+  }
+  const payload = {
+    nome: nome,
+    precoBase: preco,
+    profissionais: [],
+    ativo: true,
+    duracao: 60,
+    updated_at: new Date().toISOString()
+  };
+  let created = null;
+  if (typeof addServico === 'function') {
+    created = await addServico(payload);
+  }
+  if (!created) return null;
+  // Associar nome ao select e fechar box
+  popularEspecialidadesProf(nome);
   const box = document.getElementById('prof-criar-servico-box');
   if (box) box.style.display = 'none';
+  const nomeEl = document.getElementById('prof-novo-servico-nome');
+  const precoEl = document.getElementById('prof-novo-servico-preco');
+  if (nomeEl) nomeEl.value = '';
+  if (precoEl) precoEl.value = '';
+  toast('Serviço «' + nome + '» adicionado. Pode ajustá-lo depois na aba Serviços.', 'success');
+  if (typeof renderServicos === 'function') {
+    try { renderServicos(); } catch (_) {}
+  }
+  return nome;
 }
+
+
+document.getElementById('prof-esp')?.addEventListener('change', bpToggleCriarServicoBox);
+document.getElementById('prof-criar-servico-btn')?.addEventListener('click', async function (e) {
+  e.preventDefault();
+  await bpCriarServicoDesdeProfModal();
+});
 
 function setProfModalMode(mode) {
   const modal = document.getElementById('modal-prof');
@@ -6459,8 +6557,8 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   const nome = (document.getElementById('prof-nome')?.value || '').trim();
   const idade = document.getElementById('prof-idade')?.value;
   const dataContratual = (document.getElementById('prof-data-contratual')?.value || '').trim();
-  const espSelect = document.getElementById('prof-esp')?.value || '';
-  const especialidade = espSelect === '__criar' ? '' : espSelect;
+  let espSelect = document.getElementById('prof-esp')?.value || '';
+  let especialidade = espSelect === '__criar' ? '' : espSelect;
   const numeroBI = (document.getElementById('prof-bi')?.value || '').trim().toUpperCase();
   const morada = (document.getElementById('prof-morada')?.value || '').trim();
   const contacto = (document.getElementById('prof-contacto')?.value || '').replace(/\D/g, '');
@@ -6471,7 +6569,13 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   if (!nome) { toast('Nome é obrigatório', 'error'); return; }
   if (!idade || isNaN(parseInt(idade, 10))) { toast('Idade é obrigatória', 'error'); return; }
   if (!dataContratual) { toast('Data contratual é obrigatória', 'error'); return; }
-  if (!especialidade) { toast('Seleccione uma especialidade (serviço)', 'error'); return; }
+  // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
+  if (espSelect === '__criar') {
+    const criado = await bpCriarServicoDesdeProfModal();
+    if (!criado) return;
+    especialidade = criado;
+  }
+  if (!especialidade) { toast('Seleccione uma especialidade (serviço) ou crie uma nova', 'error'); return; }
   if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
     toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
