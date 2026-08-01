@@ -514,11 +514,7 @@ async function carregarDoSupabase() {
 
       for (const remoto of itensRemotos) {
         // Ignorar itens com delete pendente ou na lista negra
-        if (idsComDeletePendente.has(remoto.id)) {
-          mapLocal.delete(remoto.id);
-          continue;
-        }
-        if (deletedIds.has(remoto.id)) {
+        if (deletedIds.has(remoto.id) || idsComDeletePendente.has(remoto.id)) {
           continue;
         }
 
@@ -544,9 +540,15 @@ async function carregarDoSupabase() {
           const localTs = local.updated_at || '1970-01-01T00:00:00.000Z';
           const remotoTs = remoto.updated_at || '1970-01-01T00:00:00.000Z';
           if (remotoTs > localTs) {
-            const merged = mergeCampoACampo(remoto, local);
-            resultado.push(merged);
-            if (JSON.stringify(merged) !== JSON.stringify(remoto)) itensParaSync.push(merged);
+            // Respeitar soft-delete local
+            if (local.ativo === false) {
+              resultado.push(local);
+              itensParaSync.push(local);
+            } else {
+              const merged = mergeCampoACampo(remoto, local);
+              resultado.push(merged);
+              if (JSON.stringify(merged) !== JSON.stringify(remoto)) itensParaSync.push(merged);
+            }
           } else if (localTs > remotoTs) {
             const merged = mergeCampoACampo(local, remoto);
             resultado.push(merged);

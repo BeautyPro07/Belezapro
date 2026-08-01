@@ -543,7 +543,13 @@ async function desassociarProfissional(id) {
   }
   const item = (state.profissionais || []).find(function (x) { return x.id === id; });
   if (item) {
-    try { await dbPut('profissionais', item); } catch (e) {
+    try {
+      await dbPut('profissionais', item);
+      // Forçar sync imediato
+      if (typeof addToSyncQueue === 'function') {
+        addToSyncQueue('profissionais', 'upsert', item);
+      }
+    } catch (e) {
       console.error('[desassociarProfissional]', e);
     }
   }

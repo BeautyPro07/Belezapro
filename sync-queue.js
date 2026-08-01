@@ -174,11 +174,10 @@ async function flushSyncQueue() {
 
     try {
       if (op.operacao === 'delete') {
-        // Tombstone permanece na lista negra (TTL) para impedir reimportação
-        // em pulls concurrentes multi-dispositivo (padrão tombstone/eventual consistency).
-        await supabaseDelete(op.tabela, op.payload.id);
-        // NÃO chamar removeDeletedItem aqui — só após TTL ou purge remoto confirmado.
-        if (typeof touchDeletedItem === 'function') touchDeletedItem(op.payload.id, op.tabela);
+        const success = await supabaseDelete(op.tabela, op.payload.id);
+        if (success) {
+          removeDeletedItem(op.payload.id, op.tabela);  // só remover tombstone se delete remoto OK
+        }
       } else {
         // Nunca fazer upsert de item na lista negra
         if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload?.id, op.tabela)) {
