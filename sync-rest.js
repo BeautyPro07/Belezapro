@@ -102,7 +102,8 @@ async function supabaseUpsert(tabela, item) {
     // POLÍTICA FORTE: Verificar duplicados por nome antes de upsert
     // Aplica-se apenas a tabelas com campo 'nome' (profissionais, servicos, clientes)
     // ================================================================
-    if (['profissionais', 'servicos', 'clientes'].includes(tabela) && item.nome) {
+    // Não bloquear por nome quando é desactivação (ativo=false) ou o id é o mesmo
+    if (['profissionais', 'servicos', 'clientes'].includes(tabela) && item.nome && item.ativo !== false) {
       const existe = await existeRegistroDuplicado(tabela, item.nome, salaoId, item.id);
       if (existe) {
         console.warn(`[sync-rest] Upsert bloqueado: ${tabela} com nome "${item.nome}" já existe neste salão.`);
@@ -343,7 +344,8 @@ function toSupabaseFormat(tabela, item) {
         salao_id: salaoId,
         nome: item.nome || '',
         especialidade: item.especialidade || null,
-        ativo: item.ativo !== false,
+        ativo: item.ativo !== false && item.ativo !== 0 && item.ativo !== 'false',
+        data_desativacao: item.data_desativacao || null,
         updated_at: item.updated_at,
       }, item);
     case 'servicos':
@@ -433,6 +435,51 @@ function fromSupabaseFormat(tabela, row) {
 // ====================================================================
 //  CARREGAMENTO DO SUPABASE COM MERGE CAMPO A CAMPO (ROBUSTO)
 // ====================================================================
+
+/** Soft-delete remoto garantido: PATCH ativo=false + verificação GET. */
+async function supabaseDeactivate(tabela, id, extra) {
+  const authHeaders = await getAuthHeaders();
+  const salaoId = state.config.salaoId;
+  if (!salaoId) throw new Error('Salão não identificado. Faça logout e login novamente.');
+  const body = Object.assign({
+    ativo: false,
+    updated_at: new Date().toISOString()
+  }, extra || {});
+  if (tabela === 'profissionais' && !body.data_desativacao) {
+    body.data_desativacao = new Date().toISOString();
+  }
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(body)
+    }
+  );
+  if (resp.status === 401) throw new Error('SESSION_EXPIRED');
+  if (!resp.ok) {
+    let errorBody = '';
+    try { errorBody = await resp.text(); } catch (_) { errorBody = ''; }
+    throw new Error(`Supabase deactivate ${tabela}: ${resp.status} - ${errorBody}`);
+  }
+  // Verificar
+  const check = await fetch(
+    `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}&select=id,ativo`,
+    { headers: authHeaders }
+  );
+  if (check.ok) {
+    const rows = await check.json();
+    if (rows && rows[0] && rows[0].ativo !== false && rows[0].ativo !== 0) {
+      throw new Error(`Deactivate não aplicou ativo=false em ${tabela}/${id}`);
+    }
+  }
+  return true;
+}
+
 async function carregarDoSupabase() {
   if (!navigator.onLine || !state.config.salaoId) return false;
 
@@ -540,28 +587,44 @@ async function carregarDoSupabase() {
         }
 
         if (!local) {
+          // Remoto inactivo: manter no estado (histórico) mas listas filtram
           resultado.push(remoto);
         } else {
-          const localTs = local.updated_at || '1970-01-01T00:00:00.000Z';
-          const remotoTs = remoto.updated_at || '1970-01-01T00:00:00.000Z';
-          if (remotoTs > localTs) {
-            // Respeitar soft-delete local
-            if (local.ativo === false) {
-              resultado.push(local);
-              itensParaSync.push(local);
-            } else {
+          // Contingência: se qualquer lado está inactivo, o resultado fica inactivo
+          const localInactivo = local.ativo === false || local.ativo === 0 || local.ativo === 'false';
+          const remotoInactivo = remoto.ativo === false || remoto.ativo === 0 || remoto.ativo === 'false';
+          if (localInactivo || remotoInactivo) {
+            const base = localInactivo ? { ...remoto, ...local } : { ...local, ...remoto };
+            base.ativo = false;
+            if (local.data_desativacao || remoto.data_desativacao) {
+              base.data_desativacao = local.data_desativacao || remoto.data_desativacao;
+            }
+            // updated_at o mais recente
+            const lt = local.updated_at || '';
+            const rt = remoto.updated_at || '';
+            base.updated_at = lt > rt ? lt : rt;
+            resultado.push(base);
+            // Se remoto ainda activo, forçar PATCH no próximo flush
+            if (!remotoInactivo && typeof addToSyncQueue === 'function') {
+              try { addToSyncQueue(tabela, 'upsert', base); } catch (_) {}
+            }
+            mapLocal.delete(remoto.id);
+          } else {
+            const localTs = local.updated_at || '1970-01-01T00:00:00.000Z';
+            const remotoTs = remoto.updated_at || '1970-01-01T00:00:00.000Z';
+            if (remotoTs > localTs) {
               const merged = mergeCampoACampo(remoto, local);
               resultado.push(merged);
               if (JSON.stringify(merged) !== JSON.stringify(remoto)) itensParaSync.push(merged);
+            } else if (localTs > remotoTs) {
+              const merged = mergeCampoACampo(local, remoto);
+              resultado.push(merged);
+              itensParaSync.push(merged);
+            } else {
+              resultado.push(local);
             }
-          } else if (localTs > remotoTs) {
-            const merged = mergeCampoACampo(local, remoto);
-            resultado.push(merged);
-            itensParaSync.push(merged);
-          } else {
-            resultado.push(local);
+            mapLocal.delete(remoto.id);
           }
-          mapLocal.delete(remoto.id);
         }
       }
 

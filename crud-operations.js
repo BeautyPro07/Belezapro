@@ -135,7 +135,6 @@ async function saveConfig() {
 //  HELPER — DELETE OPTIMISTA COM ROLLBACK
 // ====================================================================
 async function _deleteComRollback(tabela, id, nomeEntidade) {
-  // 1. Guardar snapshot para possível rollback
   const lista = state[tabela] || [];
   const itemOriginal = lista.find(item => item.id === id);
   if (!itemOriginal) {
@@ -143,7 +142,9 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
     return false;
   }
 
-  // 2. Remoção optimista local
+  // Serviços: preferir soft-delete remoto se hard DELETE falhar (FK/histórico)
+  const trySoftServico = (tabela === 'servicos');
+
   await dbDelete(tabela, id);
   if (window.BeautyStore && window.BeautyStore.removeFromList) {
     window.BeautyStore.removeFromList(tabela, id);
@@ -153,16 +154,27 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
   updateUI();
   if (typeof renderBadges === 'function') renderBadges();
 
-  // 3. Sincronizar em background — SEM pull completo (evita “vibração”/reload da UI).
-  // dbDelete já adicionou tombstone + enfileirou delete se necessário.
   if (navigator.onLine && state.config && state.config.salaoId) {
     try {
       if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+      // Contingência: se serviço e ainda existir no servidor, desactivar
+      if (trySoftServico && typeof supabaseDeactivate === 'function') {
+        try {
+          // Se hard delete na fila falhou, PATCH ativo=false mantém histórico limpo na UI
+          await supabaseDeactivate('servicos', id, { updated_at: new Date().toISOString() });
+        } catch (_) {
+          /* hard delete pode já ter removido — ignorar */
+        }
+      }
       if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
       toast(`${nomeEntidade} eliminado(a).`, 'success');
       return true;
     } catch (e) {
       console.warn(`[delete ${tabela}] Falha ao sincronizar:`, e);
+      if (trySoftServico && typeof addToSyncQueue === 'function') {
+        const soft = Object.assign({}, itemOriginal, { ativo: false, updated_at: new Date().toISOString() });
+        addToSyncQueue('servicos', 'upsert', soft);
+      }
       toast(`${nomeEntidade} eliminado(a) localmente. Sync em fila.`, 'warning');
       return true;
     }
@@ -545,11 +557,27 @@ async function desassociarProfissional(id) {
   if (item) {
     try {
       await dbPut('profissionais', item);
-      if (typeof addToSyncQueue === 'function') {
-        addToSyncQueue('profissionais', 'upsert', item);
+      // Contingência 1: PATCH directo no Supabase (fonte de verdade multi-dispositivo)
+      var remotoOk = false;
+      if (navigator.onLine && typeof supabaseDeactivate === 'function') {
+        try {
+          await supabaseDeactivate('profissionais', id, {
+            data_desativacao: item.data_desativacao,
+            updated_at: item.updated_at
+          });
+          remotoOk = true;
+        } catch (eRemoto) {
+          console.warn('[desassociarProfissional] PATCH remoto falhou, fila de contingência', eRemoto);
+        }
       }
-      if (navigator.onLine && typeof flushSyncQueue === 'function') {
-        await flushSyncQueue();
+      // Contingência 2: fila upsert se PATCH falhou ou offline
+      if (!remotoOk && typeof addToSyncQueue === 'function') {
+        addToSyncQueue('profissionais', 'upsert', item);
+        if (navigator.onLine && typeof flushSyncQueue === 'function') {
+          try { await flushSyncQueue(); } catch (eFlush) {
+            console.warn('[desassociarProfissional] flush', eFlush);
+          }
+        }
       }
     } catch (e) {
       console.error('[desassociarProfissional]', e);

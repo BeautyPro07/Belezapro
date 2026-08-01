@@ -179,11 +179,20 @@ async function flushSyncQueue() {
           removeDeletedItem(op.payload.id, op.tabela);  // só remover tombstone se delete remoto OK
         }
       } else {
-        // Nunca fazer upsert de item na lista negra
         if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload?.id, op.tabela)) {
           continue;
         }
-        await supabaseUpsert(op.tabela, op.payload);
+        // Contingência: desactivação → PATCH dedicado (mais fiável que upsert)
+        const payload = op.payload || {};
+        const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
+        if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
+          await supabaseDeactivate(op.tabela, payload.id, {
+            data_desativacao: payload.data_desativacao || null,
+            updated_at: payload.updated_at || new Date().toISOString()
+          });
+        } else {
+          await supabaseUpsert(op.tabela, op.payload);
+        }
       }
     } catch (err) {
       // ================================================================
@@ -282,3 +291,29 @@ dbDelete = async function(store, id) {
     addToSyncQueue(tabela, 'delete', { id });
   }
 };
+
+/** Contingência: reabrir ops failed (ex. destituir) e tentar de novo. */
+async function bpRetryFailedSync() {
+  const q = getSyncQueue();
+  let changed = false;
+  for (const op of q) {
+    if (op.failed) {
+      op.failed = false;
+      op.attempts = 0;
+      op.nextRetry = 0;
+      changed = true;
+    }
+  }
+  if (changed) {
+    saveSyncQueue(q);
+    if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+  }
+}
+if (typeof window !== 'undefined') {
+  window.bpRetryFailedSync = bpRetryFailedSync;
+  window.addEventListener('online', function () {
+    setTimeout(function () {
+      if (typeof bpRetryFailedSync === 'function') bpRetryFailedSync();
+    }, 1500);
+  });
+}
