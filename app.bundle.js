@@ -136,13 +136,35 @@ function addRipple(el, e) {
 
 function closeModal(id) {
   const el = document.getElementById(id);
-  if (el) el.classList.remove('open');
+  if (!el) return;
+  el.classList.remove('open');
+  el.style.display = '';
+  el.style.pointerEvents = '';
+  document.body.classList.remove('bp-modal-open');
 }
 
 function openModal(id) {
   const el = document.getElementById(id);
-  if (el) el.classList.add('open');
+  if (!el) return;
+  el.classList.add('open');
+  el.style.display = 'flex';
+  document.body.classList.add('bp-modal-open');
 }
+
+// Fechar ao tocar no backdrop (só o próprio overlay, não o sheet)
+document.addEventListener('click', function (e) {
+  const t = e.target;
+  if (!t || !t.classList || !t.classList.contains('modal-overlay')) return;
+  if (!t.classList.contains('open')) return;
+  if (t.id === 'modal-confirm' || t.id === 'modal-erro') return;
+  closeModal(t.id);
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelector('.modal-overlay.open');
+  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro') return;
+  closeModal(open.id);
+});
 
 function setButtonLoading(button, isLoading) {
   if (!button) return;
@@ -1932,7 +1954,7 @@ function fromSupabaseFormat(tabela, row) {
         ativo:         row.ativo !== false && row.ativo !== 0 && row.ativo !== 'false',
         data_desativacao: row.data_desativacao || null,
         foto_url:      row.foto_url || null,
-        foto:          null,
+        // NÃO anular foto local — resolveFotoSrc usa foto data: depois foto_url
         updated_at:    row.updated_at,
       };
     case 'servicos':
@@ -2070,6 +2092,13 @@ async function carregarDoSupabase() {
           if (merged[campo] === undefined || merged[campo] === null) {
             merged[campo] = maisAntigo[campo];
           }
+        }
+        // Foto: nunca perder data URL local se o remoto só trouxe foto_url (ou null)
+        if (maisAntigo && typeof maisAntigo.foto === 'string' && maisAntigo.foto.indexOf('data:') === 0) {
+          if (!merged.foto || merged.foto === null) merged.foto = maisAntigo.foto;
+        }
+        if (maisAntigo && maisAntigo.foto_url && !merged.foto_url) {
+          merged.foto_url = maisAntigo.foto_url;
         }
         return merged;
       };
@@ -5632,12 +5661,10 @@ function openVendaModal() {
     if (pag && !pag.value) pag.value = 'Numerário';
     renderCart();
     updateVendaSaveButton();
-    const modal = document.getElementById('modal-venda');
-    if (modal) {
-      modal.classList.add('open');
-      modal.style.display = 'flex';
-    } else if (typeof openModal === 'function') {
-      openModal('modal-venda');
+    if (typeof openModal === 'function') openModal('modal-venda');
+    else {
+      const modal = document.getElementById('modal-venda');
+      if (modal) { modal.classList.add('open'); modal.style.display = 'flex'; }
     }
     setTimeout(function () {
       const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
@@ -6457,6 +6484,30 @@ function _receitaProfissionalMes(profId) {
   }).reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
 }
 
+
+function bpFotoSrcEntidade(ent) {
+  if (!ent) return null;
+  if (window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') {
+    var r = BPMedia.resolveFotoSrc(ent);
+    if (r) return r;
+  }
+  if (ent.foto && String(ent.foto).indexOf('data:') === 0) return ent.foto;
+  if (ent.foto_url) return ent.foto_url;
+  if (ent.foto) return ent.foto;
+  return null;
+}
+function bpViewHeroAvatarHtml(ent, fallbackChar) {
+  var src = bpFotoSrcEntidade(ent);
+  if (src) {
+    var safe = String(src)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;');
+    return '<div class="bp-view-hero-av bp-view-hero-av--img"><img src="' + safe + '" alt="" loading="lazy" decoding="async"></div>';
+  }
+  return '<div class="bp-view-hero-av">' + escHtml(fallbackChar || '?') + '</div>';
+}
+
 function openEditProf(id) {
   const p = state.profissionais.find(x => x.id === id);
   if (!p) return;
@@ -6523,7 +6574,7 @@ function abrirDetalheProfView(id) {
   if (body) {
     body.innerHTML =
       '<div class="bp-view-hero">' +
-      '<div class="bp-view-hero-av">' + escHtml((p.nome || '?').charAt(0).toUpperCase()) + '</div>' +
+      bpViewHeroAvatarHtml(p, (p.nome || '?').charAt(0).toUpperCase()) +
       '<div><div class="bp-view-hero-name">' + escHtml(p.nome || 'Profissional') + '</div>' +
       '<div class="bp-view-hero-meta">' + escHtml(p.especialidade || 'Sem especialidade') + '</div></div></div>' +
       contactActions +
@@ -6706,7 +6757,7 @@ function abrirDetalheClienteView(id) {
     var tier = typeof getClienteTier === 'function' ? getClienteTier(pts) : { id: 'bronze', label: 'Bronze' };
     body.innerHTML =
       '<div class="bp-view-hero">' +
-      '<div class="bp-view-hero-av">' + escHtml((c.nome || '?').charAt(0).toUpperCase()) + '</div>' +
+      bpViewHeroAvatarHtml(c, (c.nome || '?').charAt(0).toUpperCase()) +
       '<div><div class="bp-view-hero-name">' + escHtml(c.nome || 'Cliente') + '</div>' +
       '<div class="bp-view-hero-meta">' + (digits ? ('+244 ' + escHtml(digits)) : 'Sem contacto') +
       ' · <span class="bp-tier bp-tier--' + tier.id + '">' + escHtml(tier.label) + '</span></div></div></div>' +
@@ -9306,7 +9357,11 @@ window.renderBarraMeta = renderBarraMeta;
     calcRentabilidadeProfissionais: calcRentabilidadeProfissionais,
     lerPagamentosSplit: lerPagamentosSplit,
     totalCarrinho: totalCarrinho,
-    CATEGORIAS_DESPESA: CATEGORIAS_DESPESA
+    CATEGORIAS_DESPESA: CATEGORIAS_DESPESA,
+    openModalFluxo: openModalFluxo,
+    openModalRentabilidade: openModalRentabilidade,
+    openModalMetaSalao: openModalMetaSalao,
+    openModalDespesaEnh: openModalDespesaEnh
   };
 })();
 
@@ -11044,7 +11099,10 @@ window.renderBarraMeta = renderBarraMeta;
     estadoHojeProf: estadoHojeProf,
     conflitosAgenda: conflitosAgenda,
     enviarMensagem: enviarMensagem,
-    loadChat: loadChat
+    loadChat: loadChat,
+    openRanking: openRanking,
+    openHorarios: openHorarios,
+    openChat: openChat
   };
 })();
 
@@ -11988,7 +12046,13 @@ window.renderBarraMeta = renderBarraMeta;
     loadAudit: loadAudit,
     getFilialAtiva: getFilialAtiva,
     setFilialAtiva: setFilialAtiva,
-    loadFiliais: loadFiliais
+    loadFiliais: loadFiliais,
+    openDashboard: openDashboard,
+    openReagendar: openReagendar,
+    openExport: openExport,
+    openBackup: openBackup,
+    openAudit: openAudit,
+    openFiliais: openFiliais
   };
 })();
 
@@ -12344,7 +12408,10 @@ window.renderBarraMeta = renderBarraMeta;
     enviarLembreteAgenda: enviarLembreteAgenda,
     pedirPermissaoPush: pedirPermissaoPush,
     notificarLocal: notificarLocal,
-    getClientePontos: getClientePontos
+    getClientePontos: getClientePontos,
+    openModalFidelidade: openModalFidelidade,
+    openModalIndicacao: openModalIndicacao,
+    openModalLembretes: openModalLembretes
   };
 })();
 
@@ -12501,41 +12568,39 @@ window.renderBarraMeta = renderBarraMeta;
         try {
           var dd = document.getElementById("menu-dropdown");
           if (dd) dd.style.display = "none";
+          function call() {
+            var args = Array.prototype.slice.call(arguments);
+            var fn = args.shift();
+            if (typeof fn === "function") { fn.apply(null, args); return true; }
+            return false;
+          }
+          var ok = false;
           if (a === "galeria") {
-            if (window.BPMedia && BPMedia.openGaleria) BPMedia.openGaleria();
-            else if (typeof openGaleria === "function") openGaleria();
-          } else if (window.BPOps) {
-            if (a === "stock" && BPOps.openStock) BPOps.openStock();
-            else if (a === "forn" && BPOps.openFornecedores) BPOps.openFornecedores();
-            else if (a === "nps" && BPOps.openNps) BPOps.openNps();
-            else if (a === "timeline" && BPOps.openTimeline) BPOps.openTimeline();
-            else if (a === "cal" && BPOps.openCalendario) BPOps.openCalendario();
-            else if (a === "pacotes" && BPOps.openPacotes) BPOps.openPacotes();
-          }
-          if (window.BPEquipa) {
-            if (a === "ranking" && BPEquipa.openRanking) BPEquipa.openRanking();
-            else if (a === "horarios" && BPEquipa.openHorarios) BPEquipa.openHorarios();
-            else if (a === "chat" && BPEquipa.openChat) BPEquipa.openChat();
-          }
-          if (window.BPFinance) {
-            if (a === "fluxo" && BPFinance.openFluxo) BPFinance.openFluxo();
-            else if (a === "rentab" && BPFinance.openRentabilidade) BPFinance.openRentabilidade();
-            else if (a === "meta" && BPFinance.openMeta) BPFinance.openMeta();
-            else if (a === "despesas" && BPFinance.openDespesas) BPFinance.openDespesas();
-          }
-          if (window.BPMarketing) {
-            if (a === "fidelidade" && BPMarketing.openFidelidade) BPMarketing.openFidelidade();
-            else if (a === "indicacao" && BPMarketing.openIndicacao) BPMarketing.openIndicacao();
-            else if (a === "lembretes" && BPMarketing.openLembretes) BPMarketing.openLembretes();
-            else if (a === "push" && BPMarketing.openPush) BPMarketing.openPush();
-          }
-          if (window.BPGestao) {
-            if (a === "dash" && BPGestao.openDash) BPGestao.openDash();
-            else if (a === "export" && BPGestao.openExport) BPGestao.openExport();
-            else if (a === "backup" && BPGestao.openBackup) BPGestao.openBackup();
-            else if (a === "audit" && BPGestao.openAudit) BPGestao.openAudit();
-            else if (a === "filiais" && BPGestao.openFiliais) BPGestao.openFiliais();
-          }
+            ok = call(window.BPMedia && BPMedia.openGaleria) || call(window.openGaleria);
+          } else if (a === "stock") ok = call(window.BPOps && BPOps.openStock);
+          else if (a === "forn") ok = call(window.BPOps && BPOps.openFornecedores);
+          else if (a === "nps") ok = call(window.BPOps && BPOps.openNps);
+          else if (a === "timeline") ok = call(window.BPOps && BPOps.openTimeline);
+          else if (a === "cal") ok = call(window.BPOps && BPOps.openCalendario);
+          else if (a === "pacotes") ok = call(window.BPOps && BPOps.openPacotes);
+          else if (a === "ranking") ok = call(window.BPEquipa && BPEquipa.openRanking);
+          else if (a === "horarios") ok = call(window.BPEquipa && BPEquipa.openHorarios);
+          else if (a === "chat") ok = call(window.BPEquipa && BPEquipa.openChat);
+          else if (a === "fluxo") ok = call(window.BPFinance && (BPFinance.openModalFluxo || BPFinance.openFluxo));
+          else if (a === "rentab") ok = call(window.BPFinance && (BPFinance.openModalRentabilidade || BPFinance.openRentabilidade));
+          else if (a === "meta") ok = call(window.BPFinance && (BPFinance.openModalMetaSalao || BPFinance.openMeta));
+          else if (a === "despesas") ok = call(window.BPFinance && (BPFinance.openModalDespesaEnh || BPFinance.openDespesas));
+          else if (a === "fidelidade") ok = call(window.BPMarketing && (BPMarketing.openModalFidelidade || BPMarketing.openFidelidade));
+          else if (a === "indicacao") ok = call(window.BPMarketing && (BPMarketing.openModalIndicacao || BPMarketing.openIndicacao));
+          else if (a === "lembretes") ok = call(window.BPMarketing && (BPMarketing.openModalLembretes || BPMarketing.openLembretes));
+          else if (a === "push") ok = call(window.BPMarketing && (BPMarketing.pedirPermissaoPush || BPMarketing.openPush));
+          else if (a === "dash") ok = call(window.BPGestao && (BPGestao.openDashboard || BPGestao.dashboardExecutivo));
+          else if (a === "export") ok = call(window.BPGestao && (BPGestao.openExport || BPGestao.exportRelatorio));
+          else if (a === "backup") ok = call(window.BPGestao && (BPGestao.openBackup || BPGestao.downloadBackup));
+          else if (a === "audit") ok = call(window.BPGestao && (BPGestao.openAudit || BPGestao.loadAudit));
+          else if (a === "filiais") ok = call(window.BPGestao && (BPGestao.openFiliais || BPGestao.loadFiliais));
+          else if (a === "reagg") ok = call(window.BPGestao && BPGestao.openReagendar);
+          if (!ok && typeof toast === "function") toast("Função indisponível neste momento", "warning");
         } catch (err) {
           console.error("[menu-accordion] action", a, err);
           if (typeof toast === "function") toast("Não foi possível abrir", "error");
@@ -13552,30 +13617,222 @@ window.renderBarraMeta = renderBarraMeta;
     });
   }
 
+  /* Lazy load: IntersectionObserver + data-src (evita carregar todas de uma vez) */
+  /* ================================================================
+   * Galeria — lazy load robusto
+   * - root = contentor com scroll do modal (não o viewport)
+   * - URLs escapadas em atributos
+   * - data: (thumb local) sempre eager; remote lazy
+   * - disconnect no re-render; re-observe após paint
+   * - sem src vazio; placeholder estável
+   * ================================================================ */
+  var _bpGalIo = null;
+  var BP_GAL_PLACEHOLDER = "data:image/svg+xml," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">' +
+    '<rect fill="#e8e4df" width="120" height="120"/>' +
+    '<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#9a9288" font-size="11" font-family="sans-serif">…</text>' +
+    "</svg>"
+  );
+
+  function bpGalEscAttr(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function bpGalSrc(f) {
+    if (!f || typeof f !== "object") return "";
+    var u = f.url || f.thumb || "";
+    if (!u || typeof u !== "string") return "";
+    // rejeitar lixo óbvio
+    if (u === "null" || u === "undefined") return "";
+    return u;
+  }
+
+  function bpGalIsLocalData(src) {
+    return typeof src === "string" && src.indexOf("data:") === 0;
+  }
+
+  function bpGalDisconnect() {
+    if (_bpGalIo) {
+      try { _bpGalIo.disconnect(); } catch (_) {}
+      _bpGalIo = null;
+    }
+  }
+
+  function bpGalScrollRoot(fromEl) {
+    // Preferir o corpo do modal / sheet com overflow; senão viewport (null)
+    var el = fromEl;
+    var hops = 0;
+    while (el && hops < 12) {
+      try {
+        var st = window.getComputedStyle(el);
+        var oy = st && st.overflowY;
+        if ((oy === "auto" || oy === "scroll" || oy === "overlay") && el.scrollHeight > el.clientHeight + 8) {
+          return el;
+        }
+      } catch (_) {}
+      el = el.parentElement;
+      hops++;
+    }
+    var body = document.getElementById("modal-bp-galeria-body");
+    if (body) return body;
+    return null;
+  }
+
+  function bpGalLoadOne(img) {
+    if (!img || img.getAttribute("data-bp-gal-loaded") === "1") return;
+    var src = img.getAttribute("data-src");
+    if (!src) {
+      img.setAttribute("data-bp-gal-loaded", "1");
+      return;
+    }
+    img.setAttribute("data-bp-gal-loaded", "1");
+    img.removeAttribute("data-src");
+    var done = function () {
+      img.classList.add("bp-gal-loaded");
+      img.classList.remove("bp-gal-pending");
+    };
+    img.onload = done;
+    img.onerror = function () {
+      img.classList.add("bp-gal-error");
+      img.classList.remove("bp-gal-pending");
+      img.alt = "Falha ao carregar";
+      // manter placeholder visual
+      try { img.src = BP_GAL_PLACEHOLDER; } catch (_) {}
+    };
+    img.src = src;
+    // cached images may already be complete
+    if (img.complete && img.naturalWidth > 0) done();
+  }
+
+  function bpGalObserve(root) {
+    if (!root) return;
+    var imgs = root.querySelectorAll("img.bp-gal-lazy[data-src]");
+    if (!imgs.length) return;
+
+    // Sem IO: carregar tudo (compat)
+    if (!("IntersectionObserver" in window)) {
+      for (var i = 0; i < imgs.length; i++) bpGalLoadOne(imgs[i]);
+      return;
+    }
+
+    bpGalDisconnect();
+    var scrollRoot = bpGalScrollRoot(root);
+    _bpGalIo = new IntersectionObserver(
+      function (entries) {
+        for (var k = 0; k < entries.length; k++) {
+          var en = entries[k];
+          if (!en.isIntersecting) continue;
+          var img = en.target;
+          try { _bpGalIo.unobserve(img); } catch (_) {}
+          bpGalLoadOne(img);
+        }
+      },
+      { root: scrollRoot, rootMargin: "160px 0px", threshold: 0.01 }
+    );
+    for (var j = 0; j < imgs.length; j++) {
+      // Já visíveis no primeiro frame
+      _bpGalIo.observe(imgs[j]);
+    }
+  }
+
+  function bpGalEnsureStyles() {
+    if (document.getElementById("bp-gal-lazy-css")) return;
+    var st = document.createElement("style");
+    st.id = "bp-gal-lazy-css";
+    st.textContent =
+      ".bp-gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}" +
+      ".bp-gal-item{position:relative;border-radius:10px;overflow:hidden;background:var(--bg-soft,#f0ebe6);aspect-ratio:1;}" +
+      ".bp-gal-item img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .2s ease;}" +
+      ".bp-gal-lazy.bp-gal-pending{opacity:.65;}" +
+      ".bp-gal-lazy.bp-gal-loaded{opacity:1;}" +
+      ".bp-gal-lazy.bp-gal-error{opacity:.4;}" +
+      ".bp-gal-placeholder{display:flex;align-items:center;justify-content:center;height:100%;font-size:12px;color:var(--text-muted,#9a9288);}" +
+      ".bp-gal-meta{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;background:linear-gradient(transparent,rgba(0,0,0,.55));color:#fff;font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:6px;}" +
+      ".bp-gal-meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+      ".bp-gal-del{background:rgba(0,0,0,.35);border:0;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;flex-shrink:0;}";
+    document.head.appendChild(st);
+  }
+
   function openGaleria(profIdPreset) {
+    bpGalEnsureStyles();
     ensureShell("modal-bp-galeria", "Galeria de serviços", "Media", "Fotos dos trabalhos, associadas a cada profissional.");
     renderGaleria(profIdPreset);
     openShell("modal-bp-galeria");
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        var body = document.getElementById("modal-bp-galeria-body");
+        bpGalObserve((body && body.querySelector(".bp-gal-grid")) || body);
+      });
+    });
   }
 
   function renderGaleria(profIdPreset) {
     var body = document.getElementById("modal-bp-galeria-body");
     if (!body) return;
-    var profs = state.profissionais || [];
+    bpGalDisconnect();
+
+    var allProfs = state.profissionais || [];
+    var profs = allProfs.filter(function (p) {
+      if (!p || !p.id) return false;
+      if (typeof isProfissionalAtivo === "function") return isProfissionalAtivo(p);
+      return p.ativo !== false && p.ativo !== 0 && p.ativo !== "false";
+    });
     var profId = profIdPreset || (profs[0] && profs[0].id) || "";
+    if (profIdPreset) {
+      var still = profs.some(function (p) { return p.id === profIdPreset; });
+      if (!still) {
+        var p0 = allProfs.find(function (x) { return x && x.id === profIdPreset; });
+        if (p0) {
+          profs = [p0].concat(profs);
+          profId = profIdPreset;
+        }
+      } else {
+        profId = profIdPreset;
+      }
+    }
+
     var opts = profs.map(function (p) {
-      return '<option value="' + p.id + '"' + (p.id === profId ? " selected" : "") + ">" + esc(p.nome) + "</option>";
+      return '<option value="' + bpGalEscAttr(p.id) + '"' + (p.id === profId ? " selected" : "") + ">" + esc(p.nome) + "</option>";
     }).join("");
 
-    var fotos = profId ? galeriaPorProf(profId) : loadGaleria().slice().reverse();
+    var fotos = (profId ? galeriaPorProf(profId) : loadGaleria().slice().reverse()).filter(function (f) {
+      return f && f.id;
+    });
+
+    var EAGER_REMOTE = 4;
+    var remoteSeen = 0;
     var grid = fotos.map(function (f) {
-      return '<div class="bp-gal-item" data-gal-id="' + f.id + '">' +
-        '<img src="' + (f.url || f.thumb || '') + '" alt="" loading="lazy" decoding="async">' +
+      var src = bpGalSrc(f);
+      var meta =
         '<div class="bp-gal-meta">' +
-          '<span>' + esc(f.caption || f.data || "") + "</span>" +
-          '<button type="button" class="bp-gal-del" data-del-gal="' + f.id + '" title="Remover">×</button>' +
-        "</div></div>";
-    }).join("") || '<div class="bp-empty"><strong>Sem fotos</strong>Adicione a primeira foto do trabalho abaixo.</div>';
+          "<span>" + esc(f.caption || f.data || "") + "</span>" +
+          '<button type="button" class="bp-gal-del" data-del-gal="' + bpGalEscAttr(f.id) + '" title="Remover" aria-label="Remover">×</button>' +
+        "</div>";
+      if (!src) {
+        return '<div class="bp-gal-item bp-gal-item--empty" data-gal-id="' + bpGalEscAttr(f.id) + '">' +
+          '<div class="bp-gal-placeholder">Sem imagem</div>' + meta + "</div>";
+      }
+      var safe = bpGalEscAttr(src);
+      var imgTag;
+      // data: local → sempre eager (já em memória). Remote → primeiras N eager, resto lazy.
+      if (bpGalIsLocalData(src) || remoteSeen < EAGER_REMOTE) {
+        if (!bpGalIsLocalData(src)) remoteSeen++;
+        imgTag =
+          '<img class="bp-gal-lazy bp-gal-eager bp-gal-loaded" src="' + safe +
+          '" alt="" loading="eager" decoding="async" data-bp-gal-loaded="1">';
+      } else {
+        imgTag =
+          '<img class="bp-gal-lazy bp-gal-pending" src="' + BP_GAL_PLACEHOLDER +
+          '" data-src="' + safe + '" alt="" loading="lazy" decoding="async">';
+      }
+      return '<div class="bp-gal-item" data-gal-id="' + bpGalEscAttr(f.id) + '">' + imgTag + meta + "</div>";
+    }).join("") ||
+      '<div class="bp-empty"><strong>Sem fotos</strong>Adicione a primeira foto do trabalho abaixo.</div>';
 
     body.innerHTML =
       '<div class="input-group"><label class="input-label">Profissional</label>' +
@@ -13656,6 +13913,13 @@ window.renderBarraMeta = renderBarraMeta;
       };
     });
   }
+
+    // Lazy load imagens fora do viewport
+    setTimeout(function () {
+      bpGalObserve(body.querySelector(".bp-gal-grid") || body);
+    }, 30);
+
+
 
   /* ---------- Menu: CRM → Galeria (inject into accordion panel if exists) ---------- */
   function ensureMenuItem() {

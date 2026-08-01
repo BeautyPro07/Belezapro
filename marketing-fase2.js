@@ -349,6 +349,9 @@
     enviarLembreteAgenda: enviarLembreteAgenda,
     pedirPermissaoPush: pedirPermissaoPush,
     notificarLocal: notificarLocal,
-    getClientePontos: getClientePontos
+    getClientePontos: getClientePontos,
+    openModalFidelidade: openModalFidelidade,
+    openModalIndicacao: openModalIndicacao,
+    openModalLembretes: openModalLembretes
   };
 })();

@@ -150,41 +150,39 @@
         try {
           var dd = document.getElementById("menu-dropdown");
           if (dd) dd.style.display = "none";
+          function call() {
+            var args = Array.prototype.slice.call(arguments);
+            var fn = args.shift();
+            if (typeof fn === "function") { fn.apply(null, args); return true; }
+            return false;
+          }
+          var ok = false;
           if (a === "galeria") {
-            if (window.BPMedia && BPMedia.openGaleria) BPMedia.openGaleria();
-            else if (typeof openGaleria === "function") openGaleria();
-          } else if (window.BPOps) {
-            if (a === "stock" && BPOps.openStock) BPOps.openStock();
-            else if (a === "forn" && BPOps.openFornecedores) BPOps.openFornecedores();
-            else if (a === "nps" && BPOps.openNps) BPOps.openNps();
-            else if (a === "timeline" && BPOps.openTimeline) BPOps.openTimeline();
-            else if (a === "cal" && BPOps.openCalendario) BPOps.openCalendario();
-            else if (a === "pacotes" && BPOps.openPacotes) BPOps.openPacotes();
-          }
-          if (window.BPEquipa) {
-            if (a === "ranking" && BPEquipa.openRanking) BPEquipa.openRanking();
-            else if (a === "horarios" && BPEquipa.openHorarios) BPEquipa.openHorarios();
-            else if (a === "chat" && BPEquipa.openChat) BPEquipa.openChat();
-          }
-          if (window.BPFinance) {
-            if (a === "fluxo" && BPFinance.openFluxo) BPFinance.openFluxo();
-            else if (a === "rentab" && BPFinance.openRentabilidade) BPFinance.openRentabilidade();
-            else if (a === "meta" && BPFinance.openMeta) BPFinance.openMeta();
-            else if (a === "despesas" && BPFinance.openDespesas) BPFinance.openDespesas();
-          }
-          if (window.BPMarketing) {
-            if (a === "fidelidade" && BPMarketing.openFidelidade) BPMarketing.openFidelidade();
-            else if (a === "indicacao" && BPMarketing.openIndicacao) BPMarketing.openIndicacao();
-            else if (a === "lembretes" && BPMarketing.openLembretes) BPMarketing.openLembretes();
-            else if (a === "push" && BPMarketing.openPush) BPMarketing.openPush();
-          }
-          if (window.BPGestao) {
-            if (a === "dash" && BPGestao.openDash) BPGestao.openDash();
-            else if (a === "export" && BPGestao.openExport) BPGestao.openExport();
-            else if (a === "backup" && BPGestao.openBackup) BPGestao.openBackup();
-            else if (a === "audit" && BPGestao.openAudit) BPGestao.openAudit();
-            else if (a === "filiais" && BPGestao.openFiliais) BPGestao.openFiliais();
-          }
+            ok = call(window.BPMedia && BPMedia.openGaleria) || call(window.openGaleria);
+          } else if (a === "stock") ok = call(window.BPOps && BPOps.openStock);
+          else if (a === "forn") ok = call(window.BPOps && BPOps.openFornecedores);
+          else if (a === "nps") ok = call(window.BPOps && BPOps.openNps);
+          else if (a === "timeline") ok = call(window.BPOps && BPOps.openTimeline);
+          else if (a === "cal") ok = call(window.BPOps && BPOps.openCalendario);
+          else if (a === "pacotes") ok = call(window.BPOps && BPOps.openPacotes);
+          else if (a === "ranking") ok = call(window.BPEquipa && BPEquipa.openRanking);
+          else if (a === "horarios") ok = call(window.BPEquipa && BPEquipa.openHorarios);
+          else if (a === "chat") ok = call(window.BPEquipa && BPEquipa.openChat);
+          else if (a === "fluxo") ok = call(window.BPFinance && (BPFinance.openModalFluxo || BPFinance.openFluxo));
+          else if (a === "rentab") ok = call(window.BPFinance && (BPFinance.openModalRentabilidade || BPFinance.openRentabilidade));
+          else if (a === "meta") ok = call(window.BPFinance && (BPFinance.openModalMetaSalao || BPFinance.openMeta));
+          else if (a === "despesas") ok = call(window.BPFinance && (BPFinance.openModalDespesaEnh || BPFinance.openDespesas));
+          else if (a === "fidelidade") ok = call(window.BPMarketing && (BPMarketing.openModalFidelidade || BPMarketing.openFidelidade));
+          else if (a === "indicacao") ok = call(window.BPMarketing && (BPMarketing.openModalIndicacao || BPMarketing.openIndicacao));
+          else if (a === "lembretes") ok = call(window.BPMarketing && (BPMarketing.openModalLembretes || BPMarketing.openLembretes));
+          else if (a === "push") ok = call(window.BPMarketing && (BPMarketing.pedirPermissaoPush || BPMarketing.openPush));
+          else if (a === "dash") ok = call(window.BPGestao && (BPGestao.openDashboard || BPGestao.dashboardExecutivo));
+          else if (a === "export") ok = call(window.BPGestao && (BPGestao.openExport || BPGestao.exportRelatorio));
+          else if (a === "backup") ok = call(window.BPGestao && (BPGestao.openBackup || BPGestao.downloadBackup));
+          else if (a === "audit") ok = call(window.BPGestao && (BPGestao.openAudit || BPGestao.loadAudit));
+          else if (a === "filiais") ok = call(window.BPGestao && (BPGestao.openFiliais || BPGestao.loadFiliais));
+          else if (a === "reagg") ok = call(window.BPGestao && BPGestao.openReagendar);
+          if (!ok && typeof toast === "function") toast("Função indisponível neste momento", "warning");
         } catch (err) {
           console.error("[menu-accordion] action", a, err);
           if (typeof toast === "function") toast("Não foi possível abrir", "error");

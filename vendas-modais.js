@@ -508,12 +508,10 @@ function openVendaModal() {
     if (pag && !pag.value) pag.value = 'Numerário';
     renderCart();
     updateVendaSaveButton();
-    const modal = document.getElementById('modal-venda');
-    if (modal) {
-      modal.classList.add('open');
-      modal.style.display = 'flex';
-    } else if (typeof openModal === 'function') {
-      openModal('modal-venda');
+    if (typeof openModal === 'function') openModal('modal-venda');
+    else {
+      const modal = document.getElementById('modal-venda');
+      if (modal) { modal.classList.add('open'); modal.style.display = 'flex'; }
     }
     setTimeout(function () {
       const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');

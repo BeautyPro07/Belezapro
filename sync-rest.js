@@ -430,7 +430,7 @@ function fromSupabaseFormat(tabela, row) {
         ativo:         row.ativo !== false && row.ativo !== 0 && row.ativo !== 'false',
         data_desativacao: row.data_desativacao || null,
         foto_url:      row.foto_url || null,
-        foto:          null,
+        // NÃO anular foto local — resolveFotoSrc usa foto data: depois foto_url
         updated_at:    row.updated_at,
       };
     case 'servicos':
@@ -568,6 +568,13 @@ async function carregarDoSupabase() {
           if (merged[campo] === undefined || merged[campo] === null) {
             merged[campo] = maisAntigo[campo];
           }
+        }
+        // Foto: nunca perder data URL local se o remoto só trouxe foto_url (ou null)
+        if (maisAntigo && typeof maisAntigo.foto === 'string' && maisAntigo.foto.indexOf('data:') === 0) {
+          if (!merged.foto || merged.foto === null) merged.foto = maisAntigo.foto;
+        }
+        if (maisAntigo && maisAntigo.foto_url && !merged.foto_url) {
+          merged.foto_url = maisAntigo.foto_url;
         }
         return merged;
       };

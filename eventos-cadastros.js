@@ -375,6 +375,30 @@ function _receitaProfissionalMes(profId) {
   }).reduce(function (s, m) { return s + (Number(m.valor) || 0); }, 0);
 }
 
+
+function bpFotoSrcEntidade(ent) {
+  if (!ent) return null;
+  if (window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') {
+    var r = BPMedia.resolveFotoSrc(ent);
+    if (r) return r;
+  }
+  if (ent.foto && String(ent.foto).indexOf('data:') === 0) return ent.foto;
+  if (ent.foto_url) return ent.foto_url;
+  if (ent.foto) return ent.foto;
+  return null;
+}
+function bpViewHeroAvatarHtml(ent, fallbackChar) {
+  var src = bpFotoSrcEntidade(ent);
+  if (src) {
+    var safe = String(src)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;');
+    return '<div class="bp-view-hero-av bp-view-hero-av--img"><img src="' + safe + '" alt="" loading="lazy" decoding="async"></div>';
+  }
+  return '<div class="bp-view-hero-av">' + escHtml(fallbackChar || '?') + '</div>';
+}
+
 function openEditProf(id) {
   const p = state.profissionais.find(x => x.id === id);
   if (!p) return;
@@ -441,7 +465,7 @@ function abrirDetalheProfView(id) {
   if (body) {
     body.innerHTML =
       '<div class="bp-view-hero">' +
-      '<div class="bp-view-hero-av">' + escHtml((p.nome || '?').charAt(0).toUpperCase()) + '</div>' +
+      bpViewHeroAvatarHtml(p, (p.nome || '?').charAt(0).toUpperCase()) +
       '<div><div class="bp-view-hero-name">' + escHtml(p.nome || 'Profissional') + '</div>' +
       '<div class="bp-view-hero-meta">' + escHtml(p.especialidade || 'Sem especialidade') + '</div></div></div>' +
       contactActions +
@@ -624,7 +648,7 @@ function abrirDetalheClienteView(id) {
     var tier = typeof getClienteTier === 'function' ? getClienteTier(pts) : { id: 'bronze', label: 'Bronze' };
     body.innerHTML =
       '<div class="bp-view-hero">' +
-      '<div class="bp-view-hero-av">' + escHtml((c.nome || '?').charAt(0).toUpperCase()) + '</div>' +
+      bpViewHeroAvatarHtml(c, (c.nome || '?').charAt(0).toUpperCase()) +
       '<div><div class="bp-view-hero-name">' + escHtml(c.nome || 'Cliente') + '</div>' +
       '<div class="bp-view-hero-meta">' + (digits ? ('+244 ' + escHtml(digits)) : 'Sem contacto') +
       ' · <span class="bp-tier bp-tier--' + tier.id + '">' + escHtml(tier.label) + '</span></div></div></div>' +

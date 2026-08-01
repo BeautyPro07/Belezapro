@@ -557,6 +557,10 @@
     calcRentabilidadeProfissionais: calcRentabilidadeProfissionais,
     lerPagamentosSplit: lerPagamentosSplit,
     totalCarrinho: totalCarrinho,
-    CATEGORIAS_DESPESA: CATEGORIAS_DESPESA
+    CATEGORIAS_DESPESA: CATEGORIAS_DESPESA,
+    openModalFluxo: openModalFluxo,
+    openModalRentabilidade: openModalRentabilidade,
+    openModalMetaSalao: openModalMetaSalao,
+    openModalDespesaEnh: openModalDespesaEnh
   };
 })();

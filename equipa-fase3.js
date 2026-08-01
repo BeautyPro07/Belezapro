@@ -600,6 +600,9 @@
     estadoHojeProf: estadoHojeProf,
     conflitosAgenda: conflitosAgenda,
     enviarMensagem: enviarMensagem,
-    loadChat: loadChat
+    loadChat: loadChat,
+    openRanking: openRanking,
+    openHorarios: openHorarios,
+    openChat: openChat
   };
 })();

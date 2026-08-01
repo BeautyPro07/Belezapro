@@ -80,13 +80,35 @@ function addRipple(el, e) {
 
 function closeModal(id) {
   const el = document.getElementById(id);
-  if (el) el.classList.remove('open');
+  if (!el) return;
+  el.classList.remove('open');
+  el.style.display = '';
+  el.style.pointerEvents = '';
+  document.body.classList.remove('bp-modal-open');
 }
 
 function openModal(id) {
   const el = document.getElementById(id);
-  if (el) el.classList.add('open');
+  if (!el) return;
+  el.classList.add('open');
+  el.style.display = 'flex';
+  document.body.classList.add('bp-modal-open');
 }
+
+// Fechar ao tocar no backdrop (só o próprio overlay, não o sheet)
+document.addEventListener('click', function (e) {
+  const t = e.target;
+  if (!t || !t.classList || !t.classList.contains('modal-overlay')) return;
+  if (!t.classList.contains('open')) return;
+  if (t.id === 'modal-confirm' || t.id === 'modal-erro') return;
+  closeModal(t.id);
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelector('.modal-overlay.open');
+  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro') return;
+  closeModal(open.id);
+});
 
 function setButtonLoading(button, isLoading) {
   if (!button) return;

@@ -937,6 +937,12 @@
     loadAudit: loadAudit,
     getFilialAtiva: getFilialAtiva,
     setFilialAtiva: setFilialAtiva,
-    loadFiliais: loadFiliais
+    loadFiliais: loadFiliais,
+    openDashboard: openDashboard,
+    openReagendar: openReagendar,
+    openExport: openExport,
+    openBackup: openBackup,
+    openAudit: openAudit,
+    openFiliais: openFiliais
   };
 })();
