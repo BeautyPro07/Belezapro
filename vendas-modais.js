@@ -493,26 +493,36 @@ document.addEventListener('click', function(e) {
 
 // --- Função de abertura do modal (restaurar carrinho) ---
 function openVendaModal() {
-  loadCartFromStorage();
-  const clientSel = document.getElementById('venda-cliente');
-  if (clientSel) {
-    const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
-      .concat((state.clientes || []).map(c =>
-        `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
-      ));
-    clientSel.innerHTML = opts.join('');
+  try {
+    loadCartFromStorage();
+    const clientSel = document.getElementById('venda-cliente');
+    if (clientSel) {
+      const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
+        .concat((state.clientes || []).map(c =>
+          `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
+        ));
+      clientSel.innerHTML = opts.join('');
+    }
+    if (typeof populateVendaSelects === 'function') populateVendaSelects();
+    const pag = document.getElementById('venda-pagamento');
+    if (pag && !pag.value) pag.value = 'Numerário';
+    renderCart();
+    updateVendaSaveButton();
+    const modal = document.getElementById('modal-venda');
+    if (modal) {
+      modal.classList.add('open');
+      modal.style.display = 'flex';
+    } else if (typeof openModal === 'function') {
+      openModal('modal-venda');
+    }
+    setTimeout(function () {
+      const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
+      if (el && typeof el.focus === 'function') try { el.focus(); } catch (e) {}
+    }, 120);
+  } catch (err) {
+    console.error('[openVendaModal]', err);
+    if (typeof toast === 'function') toast('Não foi possível abrir a venda', 'error');
   }
-  populateVendaSelects();
-  const pag = document.getElementById('venda-pagamento');
-  if (pag && !pag.value) pag.value = 'Numerário';
-  renderCart();
-  updateVendaSaveButton();
-  openModal('modal-venda');
-  // Foco no serviço se carrinho vazio — fluxo mais rápido
-  setTimeout(function () {
-    const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
-    if (el && typeof el.focus === 'function') try { el.focus(); } catch (e) {}
-  }, 120);
 }
 
 // --- Limpar carrinho (após venda ou cancelamento) ---

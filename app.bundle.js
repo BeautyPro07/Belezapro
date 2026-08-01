@@ -847,6 +847,14 @@ function bpWithTimeout(promise, ms, label) {
   ]);
 }
 
+(function bpApplyRoleCacheEarly() {
+  try {
+    const r = localStorage.getItem('bp_user_role');
+    if (r && typeof state !== 'undefined' && state.config && (!state.config.userRole || state.config.userRole === 'operador')) {
+      if (typeof RBAC_ROLES === 'undefined' || RBAC_ROLES.includes(r)) state.config.userRole = r;
+    }
+  } catch (_) {}
+})();
 function bpHideSplashNow() {
   try {
     const splash = document.getElementById('splash-screen');
@@ -939,6 +947,7 @@ async function checkSession() {
       state.config.salaoId = profile.salao_id;
       state.config.storeName = profile.nome || state.config.storeName || 'Salão';
       state.config.userRole = profile.role;
+      try { if (profile.role) localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
       if (typeof saveConfig === 'function') {
         try { await saveConfig(); } catch (_) {}
       }
@@ -1132,6 +1141,7 @@ document.getElementById('login-btn').addEventListener('click', async function() 
     state.config.salaoId   = profile.salao_id;
     state.config.storeName = profile.nome || 'Salão';
     state.config.userRole  = profile.role;
+    try { if (profile.role) localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
     const trocouDeSalao = await detetarTrocaDeSalao(profile.salao_id);
     aplicarPermissoes();
     await sincronizarConfigDoServidor();
@@ -1697,6 +1707,7 @@ async function supabaseDelete(tabela, id) {
         throw new Error(`DELETE não eliminou o registo ${id} na tabela ${tabela}. RLS pode estar a bloquear a operação.`);
       }
     }
+    return true;
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') throw err;
     const errorMsg = err.message || String(err) || 'Erro desconhecido';
@@ -1972,6 +1983,10 @@ async function carregarDoSupabase() {
       for (const remoto of itensRemotos) {
         // Ignorar itens com delete pendente ou na lista negra
         if (deletedIds.has(remoto.id) || idsComDeletePendente.has(remoto.id)) {
+          // Remoto ainda existe mas foi apagado localmente → reforçar DELETE na fila
+          if (deletedIds.has(remoto.id) && !idsComDeletePendente.has(remoto.id) && typeof addToSyncQueue === 'function') {
+            try { addToSyncQueue(tabela, 'delete', { id: remoto.id }); } catch (_) {}
+          }
           continue;
         }
 
@@ -2049,10 +2064,9 @@ async function carregarDoSupabase() {
             continue;
           }
         }
-        // Último caso: item local não tem operação pendente, não é recente, não está na lista negra
-        // → pode ser reintroduzido (comportamento anterior)
-        resultado.push(local);
-        itensParaSync.push(local);
+        // Último caso: só local, sem fila, não recente → NÃO reintroduzir nem re-upsert
+        // (evita ressurreição de deletes e lixo offline)
+        continue;
       }
 
       return resultado;
@@ -2064,14 +2078,24 @@ async function carregarDoSupabase() {
     state.profissionais = mergeTable(state.profissionais, profsRemotos, 'profissionais');
     state.servicos      = mergeTable(state.servicos, servicosRemotos, 'servicos');
 
-    // Persiste localmente SEM disparar sync
+    // Fingerprint antes/depois para evitar updateUI sem mudanças
+    const fpBefore = window._bpDataFp || '';
+    const fpAfter = [
+      (state.clientes||[]).length,
+      (state.agendamentos||[]).length,
+      (state.movimentos||[]).length,
+      (state.profissionais||[]).map(p => p.id+':'+(p.ativo===false?'0':'1')).join(','),
+      (state.servicos||[]).map(s => s.id+':'+(s.ativo===false?'0':'1')).join(',')
+    ].join('|');
+
     for (const c of state.clientes)      await dbPutLocal('clientes',      c);
     for (const a of state.agendamentos)  await dbPutLocal('agendamentos',  a);
     for (const m of state.movimentos)    await dbPutLocal('movimentos',    m);
     for (const p of state.profissionais) await dbPutLocal('profissionais', p);
     for (const s of state.servicos)      await dbPutLocal('servicos',      s);
 
-    return true;
+    window._bpDataFp = fpAfter;
+    return fpAfter !== fpBefore;
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') {
       console.warn('[carregarDoSupabase] Sessão expirada, a sincronização será retomada após login.');
@@ -2813,9 +2837,11 @@ async function desassociarProfissional(id) {
   if (item) {
     try {
       await dbPut('profissionais', item);
-      // Forçar sync imediato
       if (typeof addToSyncQueue === 'function') {
         addToSyncQueue('profissionais', 'upsert', item);
+      }
+      if (navigator.onLine && typeof flushSyncQueue === 'function') {
+        await flushSyncQueue();
       }
     } catch (e) {
       console.error('[desassociarProfissional]', e);
@@ -5450,26 +5476,36 @@ document.addEventListener('click', function(e) {
 
 // --- Função de abertura do modal (restaurar carrinho) ---
 function openVendaModal() {
-  loadCartFromStorage();
-  const clientSel = document.getElementById('venda-cliente');
-  if (clientSel) {
-    const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
-      .concat((state.clientes || []).map(c =>
-        `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
-      ));
-    clientSel.innerHTML = opts.join('');
+  try {
+    loadCartFromStorage();
+    const clientSel = document.getElementById('venda-cliente');
+    if (clientSel) {
+      const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
+        .concat((state.clientes || []).map(c =>
+          `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
+        ));
+      clientSel.innerHTML = opts.join('');
+    }
+    if (typeof populateVendaSelects === 'function') populateVendaSelects();
+    const pag = document.getElementById('venda-pagamento');
+    if (pag && !pag.value) pag.value = 'Numerário';
+    renderCart();
+    updateVendaSaveButton();
+    const modal = document.getElementById('modal-venda');
+    if (modal) {
+      modal.classList.add('open');
+      modal.style.display = 'flex';
+    } else if (typeof openModal === 'function') {
+      openModal('modal-venda');
+    }
+    setTimeout(function () {
+      const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
+      if (el && typeof el.focus === 'function') try { el.focus(); } catch (e) {}
+    }, 120);
+  } catch (err) {
+    console.error('[openVendaModal]', err);
+    if (typeof toast === 'function') toast('Não foi possível abrir a venda', 'error');
   }
-  populateVendaSelects();
-  const pag = document.getElementById('venda-pagamento');
-  if (pag && !pag.value) pag.value = 'Numerário';
-  renderCart();
-  updateVendaSaveButton();
-  openModal('modal-venda');
-  // Foco no serviço se carrinho vazio — fluxo mais rápido
-  setTimeout(function () {
-    const el = document.getElementById(cartItems.length ? 'venda-pagamento' : 'ci-servico-sel');
-    if (el && typeof el.focus === 'function') try { el.focus(); } catch (e) {}
-  }, 120);
 }
 
 // --- Limpar carrinho (após venda ou cancelamento) ---
@@ -5860,13 +5896,21 @@ function ativarAbaAtiva() {
 // ====================================================================
 function normalizarRole(role) {
   if (RBAC_ROLES.includes(role)) return role;
-  if (role) console.warn('[RBAC] role desconhecido recebido do perfil ("' + role + '") — a aplicar acesso mínimo (operador).');
+  // Cache local: evita flash operador após ausência/reload antes do profile chegar
+  try {
+    const cached = localStorage.getItem('bp_user_role');
+    if (cached && RBAC_ROLES.includes(cached)) return cached;
+  } catch (_) {}
+  if (role) console.warn('[RBAC] role desconhecido ("' + role + '") — acesso mínimo operador.');
   return 'operador';
 }
 
 function aplicarPermissoes() {
   const role = normalizarRole(state.config.userRole);
   state.config.userRole = role;
+  try {
+    if (role && RBAC_ROLES.includes(role)) localStorage.setItem('bp_user_role', role);
+  } catch (_) {}
 
   document.querySelectorAll('[data-role]').forEach(el => {
     const allowed = el.dataset.role.split(',').map(r => r.trim());
@@ -8287,17 +8331,25 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // 90s. Agora faz pull a cada poucos segundos, sem throttle, com uma
   // guarda simples para nunca sobrepor dois pulls em curso.
   // ================================================================
-  const SYNC_POLL_MS = 4000; // cadência do pull automático — ajustar entre 3000 e 5000 se necessário
+  // Pull silencioso: 45s, sem vibração de UI se modal aberto ou dados iguais
+  const SYNC_POLL_MS = 45000;
   let bpPullEmCurso = false;
+  function bpModalAberto() {
+    try {
+      return !!document.querySelector('.modal-overlay.open, .modal-sheet.open, .bp-shell-modal.open');
+    } catch (_) { return false; }
+  }
   setInterval(() => {
     if (!(navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId)) return;
-    if (bpPullEmCurso) return; // evita pulls sobrepostos se a rede estiver lenta
+    if (bpPullEmCurso || bpModalAberto()) return;
     bpPullEmCurso = true;
     carregarDoSupabase().then(atualizado => {
       window.BPRuntime = window.BPRuntime || {}; window.BPRuntime.lastSupabasePull = Date.now();
-      if (atualizado) {
-        updateUI();
+      // Só repintar se houve mudança real E nenhum modal aberto
+      if (atualizado && !bpModalAberto()) {
         if (typeof renderBadges === 'function') renderBadges();
+        // updateUI completo só se não houver formulário aberto
+        if (typeof updateUI === 'function') updateUI();
       }
     }).catch(() => {}).finally(() => { bpPullEmCurso = false; });
   }, SYNC_POLL_MS);
@@ -8305,18 +8357,20 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // Ponto 3 — Forçar pull quando a app volta ao foco (visível)
   // Isto garante que ao trocar de app e voltar, os dados são atualizados
   document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && navigator.onLine && state?.config?.salaoId) {
-      console.log('[Sync] App visível, a sincronizar...');
-      try {
-        const atualizado = await carregarDoSupabase();
-        if (atualizado) {
-          updateUI();
-          renderBadges(); // ← ADICIONADO: atualiza badge após sincronização ao voltar ao foco
-          console.log('[Sync] Dados atualizados após retorno ao foco.');
-        }
-      } catch (e) {
-        console.warn('[Sync] Falha ao sincronizar ao voltar ao foco:', e);
+    if (document.visibilityState !== 'visible' || !navigator.onLine || !state?.config?.salaoId) return;
+    if (bpPullEmCurso) return;
+    bpPullEmCurso = true;
+    try {
+      const atualizado = await carregarDoSupabase();
+      if (atualizado && !bpModalAberto()) {
+        if (typeof renderBadges === 'function') renderBadges();
+        if (typeof updateUI === 'function') updateUI();
       }
+      if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+    } catch (e) {
+      console.warn('[Sync] foco:', e);
+    } finally {
+      bpPullEmCurso = false;
     }
   });
 
@@ -10088,6 +10142,7 @@ window.renderBarraMeta = renderBarraMeta;
     item("crm", "nps", "Avaliação NPS");
     item("crm", "timeline", "Histórico do cliente");
     item("crm", "cal", "Calendário (.ics)");
+    item("crm", "galeria", "Galeria de serviços");
     section("Comercial", "com");
     item("com", "pacotes", "Pacotes e assinaturas");
 
@@ -10112,6 +10167,11 @@ window.renderBarraMeta = renderBarraMeta;
           if (a === "timeline") openTimeline();
           if (a === "cal") openCalendario();
           if (a === "pacotes") openPacotes();
+          if (a === "galeria") {
+            if (window.BPMedia && typeof BPMedia.openGaleria === "function") BPMedia.openGaleria();
+            else if (typeof openGaleria === "function") openGaleria();
+            else if (typeof toast === "function") toast("Galeria indisponível", "warning");
+          }
         } catch (err) {
           console.error("[BPOpsCRM]", err);
           if (typeof toast === "function") toast("Não foi possível abrir esta secção", "error");
@@ -10141,7 +10201,13 @@ window.renderBarraMeta = renderBarraMeta;
     downloadIcs: downloadIcs,
     upsertPacote: upsertPacote,
     venderPacote: venderPacote,
-    consumirSessaoPacote: consumirSessaoPacote
+    consumirSessaoPacote: consumirSessaoPacote,
+    openStock: openStock,
+    openFornecedores: typeof openFornecedores === "function" ? openFornecedores : openStock,
+    openNps: openNps,
+    openTimeline: typeof openTimeline === "function" ? openTimeline : null,
+    openCalendario: typeof openCalendario === "function" ? openCalendario : null,
+    openPacotes: typeof openPacotes === "function" ? openPacotes : null
   };
 })();
 
@@ -12194,6 +12260,60 @@ window.renderBarraMeta = renderBarraMeta;
     if (logout) dd.insertBefore(root, logout);
     else dd.appendChild(root);
 
+    // Acções dos itens (galeria, nps, etc.) — o acordeão só abria painéis
+    root.addEventListener("click", function (e) {
+      var actBtn = e.target.closest("[data-bp-action]");
+      if (actBtn && root.contains(actBtn) && !actBtn.classList.contains("bp-acc-toggle")) {
+        e.preventDefault();
+        e.stopPropagation();
+        var a = actBtn.getAttribute("data-bp-action");
+        var menu = actBtn.getAttribute("data-bp-menu") || "";
+        try {
+          var dd = document.getElementById("menu-dropdown");
+          if (dd) dd.style.display = "none";
+          if (a === "galeria") {
+            if (window.BPMedia && BPMedia.openGaleria) BPMedia.openGaleria();
+            else if (typeof openGaleria === "function") openGaleria();
+          } else if (window.BPOps) {
+            if (a === "stock" && BPOps.openStock) BPOps.openStock();
+            else if (a === "forn" && BPOps.openFornecedores) BPOps.openFornecedores();
+            else if (a === "nps" && BPOps.openNps) BPOps.openNps();
+            else if (a === "timeline" && BPOps.openTimeline) BPOps.openTimeline();
+            else if (a === "cal" && BPOps.openCalendario) BPOps.openCalendario();
+            else if (a === "pacotes" && BPOps.openPacotes) BPOps.openPacotes();
+          }
+          if (window.BPEquipa) {
+            if (a === "ranking" && BPEquipa.openRanking) BPEquipa.openRanking();
+            else if (a === "horarios" && BPEquipa.openHorarios) BPEquipa.openHorarios();
+            else if (a === "chat" && BPEquipa.openChat) BPEquipa.openChat();
+          }
+          if (window.BPFinance) {
+            if (a === "fluxo" && BPFinance.openFluxo) BPFinance.openFluxo();
+            else if (a === "rentab" && BPFinance.openRentabilidade) BPFinance.openRentabilidade();
+            else if (a === "meta" && BPFinance.openMeta) BPFinance.openMeta();
+            else if (a === "despesas" && BPFinance.openDespesas) BPFinance.openDespesas();
+          }
+          if (window.BPMarketing) {
+            if (a === "fidelidade" && BPMarketing.openFidelidade) BPMarketing.openFidelidade();
+            else if (a === "indicacao" && BPMarketing.openIndicacao) BPMarketing.openIndicacao();
+            else if (a === "lembretes" && BPMarketing.openLembretes) BPMarketing.openLembretes();
+            else if (a === "push" && BPMarketing.openPush) BPMarketing.openPush();
+          }
+          if (window.BPGestao) {
+            if (a === "dash" && BPGestao.openDash) BPGestao.openDash();
+            else if (a === "export" && BPGestao.openExport) BPGestao.openExport();
+            else if (a === "backup" && BPGestao.openBackup) BPGestao.openBackup();
+            else if (a === "audit" && BPGestao.openAudit) BPGestao.openAudit();
+            else if (a === "filiais" && BPGestao.openFiliais) BPGestao.openFiliais();
+          }
+        } catch (err) {
+          console.error("[menu-accordion] action", a, err);
+          if (typeof toast === "function") toast("Não foi possível abrir", "error");
+        }
+        return;
+      }
+    });
+
     // toggle acordeão — um aberto de cada vez
     root.addEventListener("click", function (e) {
       var tog = e.target.closest(".bp-acc-toggle");
@@ -13373,6 +13493,7 @@ window.renderBarraMeta = renderBarraMeta;
     }
   });
 
+  window.openGaleria = openGaleria;
   window.BPMedia = {
     compressFile: compressFile,
     setClienteFoto: setClienteFoto,

@@ -34,6 +34,14 @@ function bpWithTimeout(promise, ms, label) {
   ]);
 }
 
+(function bpApplyRoleCacheEarly() {
+  try {
+    const r = localStorage.getItem('bp_user_role');
+    if (r && typeof state !== 'undefined' && state.config && (!state.config.userRole || state.config.userRole === 'operador')) {
+      if (typeof RBAC_ROLES === 'undefined' || RBAC_ROLES.includes(r)) state.config.userRole = r;
+    }
+  } catch (_) {}
+})();
 function bpHideSplashNow() {
   try {
     const splash = document.getElementById('splash-screen');
@@ -126,6 +134,7 @@ async function checkSession() {
       state.config.salaoId = profile.salao_id;
       state.config.storeName = profile.nome || state.config.storeName || 'Salão';
       state.config.userRole = profile.role;
+      try { if (profile.role) localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
       if (typeof saveConfig === 'function') {
         try { await saveConfig(); } catch (_) {}
       }
@@ -319,6 +328,7 @@ document.getElementById('login-btn').addEventListener('click', async function() 
     state.config.salaoId   = profile.salao_id;
     state.config.storeName = profile.nome || 'Salão';
     state.config.userRole  = profile.role;
+    try { if (profile.role) localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
     const trocouDeSalao = await detetarTrocaDeSalao(profile.salao_id);
     aplicarPermissoes();
     await sincronizarConfigDoServidor();

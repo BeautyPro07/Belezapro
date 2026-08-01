@@ -1059,6 +1059,7 @@
     item("crm", "nps", "Avaliação NPS");
     item("crm", "timeline", "Histórico do cliente");
     item("crm", "cal", "Calendário (.ics)");
+    item("crm", "galeria", "Galeria de serviços");
     section("Comercial", "com");
     item("com", "pacotes", "Pacotes e assinaturas");
 
@@ -1083,6 +1084,11 @@
           if (a === "timeline") openTimeline();
           if (a === "cal") openCalendario();
           if (a === "pacotes") openPacotes();
+          if (a === "galeria") {
+            if (window.BPMedia && typeof BPMedia.openGaleria === "function") BPMedia.openGaleria();
+            else if (typeof openGaleria === "function") openGaleria();
+            else if (typeof toast === "function") toast("Galeria indisponível", "warning");
+          }
         } catch (err) {
           console.error("[BPOpsCRM]", err);
           if (typeof toast === "function") toast("Não foi possível abrir esta secção", "error");
@@ -1112,6 +1118,12 @@
     downloadIcs: downloadIcs,
     upsertPacote: upsertPacote,
     venderPacote: venderPacote,
-    consumirSessaoPacote: consumirSessaoPacote
+    consumirSessaoPacote: consumirSessaoPacote,
+    openStock: openStock,
+    openFornecedores: typeof openFornecedores === "function" ? openFornecedores : openStock,
+    openNps: openNps,
+    openTimeline: typeof openTimeline === "function" ? openTimeline : null,
+    openCalendario: typeof openCalendario === "function" ? openCalendario : null,
+    openPacotes: typeof openPacotes === "function" ? openPacotes : null
   };
 })();

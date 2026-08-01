@@ -26,13 +26,21 @@ function ativarAbaAtiva() {
 // ====================================================================
 function normalizarRole(role) {
   if (RBAC_ROLES.includes(role)) return role;
-  if (role) console.warn('[RBAC] role desconhecido recebido do perfil ("' + role + '") — a aplicar acesso mínimo (operador).');
+  // Cache local: evita flash operador após ausência/reload antes do profile chegar
+  try {
+    const cached = localStorage.getItem('bp_user_role');
+    if (cached && RBAC_ROLES.includes(cached)) return cached;
+  } catch (_) {}
+  if (role) console.warn('[RBAC] role desconhecido ("' + role + '") — acesso mínimo operador.');
   return 'operador';
 }
 
 function aplicarPermissoes() {
   const role = normalizarRole(state.config.userRole);
   state.config.userRole = role;
+  try {
+    if (role && RBAC_ROLES.includes(role)) localStorage.setItem('bp_user_role', role);
+  } catch (_) {}
 
   document.querySelectorAll('[data-role]').forEach(el => {
     const allowed = el.dataset.role.split(',').map(r => r.trim());

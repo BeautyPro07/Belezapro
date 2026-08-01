@@ -364,7 +364,16 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
   max-height: min(92vh, 720px);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.modal-sheet--venda .venda-modal-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--card-white, #fff);
+  padding-top: 8px;
+  z-index: 2;
 }
 .modal-sheet--venda .handle { flex-shrink: 0; }
 .venda-modal-head {

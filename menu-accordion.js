@@ -139,6 +139,60 @@
     if (logout) dd.insertBefore(root, logout);
     else dd.appendChild(root);
 
+    // Acções dos itens (galeria, nps, etc.) — o acordeão só abria painéis
+    root.addEventListener("click", function (e) {
+      var actBtn = e.target.closest("[data-bp-action]");
+      if (actBtn && root.contains(actBtn) && !actBtn.classList.contains("bp-acc-toggle")) {
+        e.preventDefault();
+        e.stopPropagation();
+        var a = actBtn.getAttribute("data-bp-action");
+        var menu = actBtn.getAttribute("data-bp-menu") || "";
+        try {
+          var dd = document.getElementById("menu-dropdown");
+          if (dd) dd.style.display = "none";
+          if (a === "galeria") {
+            if (window.BPMedia && BPMedia.openGaleria) BPMedia.openGaleria();
+            else if (typeof openGaleria === "function") openGaleria();
+          } else if (window.BPOps) {
+            if (a === "stock" && BPOps.openStock) BPOps.openStock();
+            else if (a === "forn" && BPOps.openFornecedores) BPOps.openFornecedores();
+            else if (a === "nps" && BPOps.openNps) BPOps.openNps();
+            else if (a === "timeline" && BPOps.openTimeline) BPOps.openTimeline();
+            else if (a === "cal" && BPOps.openCalendario) BPOps.openCalendario();
+            else if (a === "pacotes" && BPOps.openPacotes) BPOps.openPacotes();
+          }
+          if (window.BPEquipa) {
+            if (a === "ranking" && BPEquipa.openRanking) BPEquipa.openRanking();
+            else if (a === "horarios" && BPEquipa.openHorarios) BPEquipa.openHorarios();
+            else if (a === "chat" && BPEquipa.openChat) BPEquipa.openChat();
+          }
+          if (window.BPFinance) {
+            if (a === "fluxo" && BPFinance.openFluxo) BPFinance.openFluxo();
+            else if (a === "rentab" && BPFinance.openRentabilidade) BPFinance.openRentabilidade();
+            else if (a === "meta" && BPFinance.openMeta) BPFinance.openMeta();
+            else if (a === "despesas" && BPFinance.openDespesas) BPFinance.openDespesas();
+          }
+          if (window.BPMarketing) {
+            if (a === "fidelidade" && BPMarketing.openFidelidade) BPMarketing.openFidelidade();
+            else if (a === "indicacao" && BPMarketing.openIndicacao) BPMarketing.openIndicacao();
+            else if (a === "lembretes" && BPMarketing.openLembretes) BPMarketing.openLembretes();
+            else if (a === "push" && BPMarketing.openPush) BPMarketing.openPush();
+          }
+          if (window.BPGestao) {
+            if (a === "dash" && BPGestao.openDash) BPGestao.openDash();
+            else if (a === "export" && BPGestao.openExport) BPGestao.openExport();
+            else if (a === "backup" && BPGestao.openBackup) BPGestao.openBackup();
+            else if (a === "audit" && BPGestao.openAudit) BPGestao.openAudit();
+            else if (a === "filiais" && BPGestao.openFiliais) BPGestao.openFiliais();
+          }
+        } catch (err) {
+          console.error("[menu-accordion] action", a, err);
+          if (typeof toast === "function") toast("Não foi possível abrir", "error");
+        }
+        return;
+      }
+    });
+
     // toggle acordeão — um aberto de cada vez
     root.addEventListener("click", function (e) {
       var tog = e.target.closest(".bp-acc-toggle");

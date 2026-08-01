@@ -964,6 +964,7 @@
     }
   });
 
+  window.openGaleria = openGaleria;
   window.BPMedia = {
     compressFile: compressFile,
     setClienteFoto: setClienteFoto,

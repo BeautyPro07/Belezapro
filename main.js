@@ -124,17 +124,25 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // 90s. Agora faz pull a cada poucos segundos, sem throttle, com uma
   // guarda simples para nunca sobrepor dois pulls em curso.
   // ================================================================
-  const SYNC_POLL_MS = 4000; // cadência do pull automático — ajustar entre 3000 e 5000 se necessário
+  // Pull silencioso: 45s, sem vibração de UI se modal aberto ou dados iguais
+  const SYNC_POLL_MS = 45000;
   let bpPullEmCurso = false;
+  function bpModalAberto() {
+    try {
+      return !!document.querySelector('.modal-overlay.open, .modal-sheet.open, .bp-shell-modal.open');
+    } catch (_) { return false; }
+  }
   setInterval(() => {
     if (!(navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId)) return;
-    if (bpPullEmCurso) return; // evita pulls sobrepostos se a rede estiver lenta
+    if (bpPullEmCurso || bpModalAberto()) return;
     bpPullEmCurso = true;
     carregarDoSupabase().then(atualizado => {
       window.BPRuntime = window.BPRuntime || {}; window.BPRuntime.lastSupabasePull = Date.now();
-      if (atualizado) {
-        updateUI();
+      // Só repintar se houve mudança real E nenhum modal aberto
+      if (atualizado && !bpModalAberto()) {
         if (typeof renderBadges === 'function') renderBadges();
+        // updateUI completo só se não houver formulário aberto
+        if (typeof updateUI === 'function') updateUI();
       }
     }).catch(() => {}).finally(() => { bpPullEmCurso = false; });
   }, SYNC_POLL_MS);
@@ -142,18 +150,20 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // Ponto 3 — Forçar pull quando a app volta ao foco (visível)
   // Isto garante que ao trocar de app e voltar, os dados são atualizados
   document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && navigator.onLine && state?.config?.salaoId) {
-      console.log('[Sync] App visível, a sincronizar...');
-      try {
-        const atualizado = await carregarDoSupabase();
-        if (atualizado) {
-          updateUI();
-          renderBadges(); // ← ADICIONADO: atualiza badge após sincronização ao voltar ao foco
-          console.log('[Sync] Dados atualizados após retorno ao foco.');
-        }
-      } catch (e) {
-        console.warn('[Sync] Falha ao sincronizar ao voltar ao foco:', e);
+    if (document.visibilityState !== 'visible' || !navigator.onLine || !state?.config?.salaoId) return;
+    if (bpPullEmCurso) return;
+    bpPullEmCurso = true;
+    try {
+      const atualizado = await carregarDoSupabase();
+      if (atualizado && !bpModalAberto()) {
+        if (typeof renderBadges === 'function') renderBadges();
+        if (typeof updateUI === 'function') updateUI();
       }
+      if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+    } catch (e) {
+      console.warn('[Sync] foco:', e);
+    } finally {
+      bpPullEmCurso = false;
     }
   });
 

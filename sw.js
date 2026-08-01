@@ -1,11 +1,10 @@
-// sw.template.js — modelo para gerar o sw.js final
-// O placeholder 'belezapro-shell-fb041643' será substituído pelo script de build
-
-const CACHE_NAME = 'belezapro-shell-fb041643';
+// BeautyPro Service Worker — alinhado ao index.html (só app.bundle.js)
+const CACHE_NAME = 'belezapro-shell-v20260801';
 
 const APP_SHELL = [
   './',
   './index.html',
+  './app.bundle.js',
   './base-variaveis.css',
   './componentes-base.css',
   './layout-nav-tabs.css',
@@ -21,43 +20,19 @@ const APP_SHELL = [
   './design-system-final.css',
   './dark-mode.css',
   './splash-sparkline.css',
-  './core-constants.js',
-  './core-utils.js',
-  './tests-pure.js',
-  './core-state.js',
-  './core-store.js',
-  './db-indexeddb.js',
-  './auth-supabase.js',
-  './sync-queue.js',
-  './sync-rest.js',
-  './plano-limites.js',
-  './crud-operations.js',
-  './ui-render-dashboard-agenda.js',
-  './ui-render-clientes-caixa-equipa.js',
-  './chart-module.js',
-  './vendas-modais.js',
-  './detalhes-acessibilidade.js',
-  './ui-events-navegacao.js',
-  './eventos-cadastros.js',
-  './eventos-caixa-vendas.js',
-  './eventos-globais.js',
-  './ia-module.js',
-  './main.js',
+  './bp-premium-panels.css',
+  './desktop-responsive.css',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  './logo.png',
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
-  'https://js-de.sentry-cdn.com/3036c354ac820ced1c3ea8a8c8737481.min.js',
+  './logo.png'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return Promise.allSettled(
-        APP_SHELL.map((url) => cache.add(url).catch(() => null))
-      );
-    })
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(APP_SHELL.map((url) => cache.add(url).catch(() => null)))
+    )
   );
   self.skipWaiting();
 });
@@ -65,11 +40,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((nomes) =>
-      Promise.all(
-        nomes
-          .filter((nome) => nome !== CACHE_NAME)
-          .map((nome) => caches.delete(nome))
-      )
+      Promise.all(nomes.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
     )
   );
   self.clients.claim();
@@ -77,20 +48,28 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-
+  const url = event.request.url || '';
+  // Nunca cachear REST/Storage Supabase
+  if (url.indexOf('supabase.co') !== -1) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
   event.respondWith(
-    caches.match(event.request).then((respostaCache) => {
-      const pedidoRede = fetch(event.request)
-        .then((respostaRede) => {
-          if (respostaRede && respostaRede.status === 200) {
-            const clone = respostaRede.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+    caches.match(event.request).then((cached) => {
+      const network = fetch(event.request)
+        .then((res) => {
+          if (res && res.status === 200 && (url.indexOf('app.bundle.js') !== -1 || url.indexOf('.css') !== -1 || url.indexOf('index.html') !== -1)) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
           }
-          return respostaRede;
+          return res;
         })
-        .catch(() => respostaCache);
-
-      return respostaCache || pedidoRede;
+        .catch(() => cached);
+      // Network-first para JS/HTML (evita shell antiga); cache-first para assets estáticos
+      if (url.indexOf('app.bundle.js') !== -1 || url.indexOf('index.html') !== -1 || url.endsWith('/')) {
+        return network;
+      }
+      return cached || network;
     })
   );
 });

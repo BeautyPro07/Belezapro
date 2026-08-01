@@ -545,9 +545,11 @@ async function desassociarProfissional(id) {
   if (item) {
     try {
       await dbPut('profissionais', item);
-      // Forçar sync imediato
       if (typeof addToSyncQueue === 'function') {
         addToSyncQueue('profissionais', 'upsert', item);
+      }
+      if (navigator.onLine && typeof flushSyncQueue === 'function') {
+        await flushSyncQueue();
       }
     } catch (e) {
       console.error('[desassociarProfissional]', e);

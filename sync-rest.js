@@ -240,6 +240,7 @@ async function supabaseDelete(tabela, id) {
         throw new Error(`DELETE não eliminou o registo ${id} na tabela ${tabela}. RLS pode estar a bloquear a operação.`);
       }
     }
+    return true;
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') throw err;
     const errorMsg = err.message || String(err) || 'Erro desconhecido';
@@ -515,6 +516,10 @@ async function carregarDoSupabase() {
       for (const remoto of itensRemotos) {
         // Ignorar itens com delete pendente ou na lista negra
         if (deletedIds.has(remoto.id) || idsComDeletePendente.has(remoto.id)) {
+          // Remoto ainda existe mas foi apagado localmente → reforçar DELETE na fila
+          if (deletedIds.has(remoto.id) && !idsComDeletePendente.has(remoto.id) && typeof addToSyncQueue === 'function') {
+            try { addToSyncQueue(tabela, 'delete', { id: remoto.id }); } catch (_) {}
+          }
           continue;
         }
 
@@ -592,10 +597,9 @@ async function carregarDoSupabase() {
             continue;
           }
         }
-        // Último caso: item local não tem operação pendente, não é recente, não está na lista negra
-        // → pode ser reintroduzido (comportamento anterior)
-        resultado.push(local);
-        itensParaSync.push(local);
+        // Último caso: só local, sem fila, não recente → NÃO reintroduzir nem re-upsert
+        // (evita ressurreição de deletes e lixo offline)
+        continue;
       }
 
       return resultado;
@@ -607,14 +611,24 @@ async function carregarDoSupabase() {
     state.profissionais = mergeTable(state.profissionais, profsRemotos, 'profissionais');
     state.servicos      = mergeTable(state.servicos, servicosRemotos, 'servicos');
 
-    // Persiste localmente SEM disparar sync
+    // Fingerprint antes/depois para evitar updateUI sem mudanças
+    const fpBefore = window._bpDataFp || '';
+    const fpAfter = [
+      (state.clientes||[]).length,
+      (state.agendamentos||[]).length,
+      (state.movimentos||[]).length,
+      (state.profissionais||[]).map(p => p.id+':'+(p.ativo===false?'0':'1')).join(','),
+      (state.servicos||[]).map(s => s.id+':'+(s.ativo===false?'0':'1')).join(',')
+    ].join('|');
+
     for (const c of state.clientes)      await dbPutLocal('clientes',      c);
     for (const a of state.agendamentos)  await dbPutLocal('agendamentos',  a);
     for (const m of state.movimentos)    await dbPutLocal('movimentos',    m);
     for (const p of state.profissionais) await dbPutLocal('profissionais', p);
     for (const s of state.servicos)      await dbPutLocal('servicos',      s);
 
-    return true;
+    window._bpDataFp = fpAfter;
+    return fpAfter !== fpBefore;
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') {
       console.warn('[carregarDoSupabase] Sessão expirada, a sincronização será retomada após login.');
