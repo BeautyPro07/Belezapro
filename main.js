@@ -113,24 +113,31 @@ document.addEventListener('DOMContentLoaded', async function init() {
 
   console.log('BeautyPro inicializado com sucesso!');
 
-  // Sync periódico adaptativo (P2): 45s em idle; 15s se houver fila pendente
+  // ================================================================
+  // CORREÇÃO (sync lento sem reload): existiam DOIS throttles de 90s
+  // (este, e outro em security-hardening.js/bpSilentPull) que limitavam
+  // o pull real ao Supabase a, no máximo, 1x a cada 90s quando não havia
+  // fila local pendente. Por isso o dispositivo B só via as alterações
+  // do dispositivo A quase de imediato ao recarregar a página (o reload
+  // ignora o throttle, ver checkSession()/bpSilentPull(true) em
+  // auth-supabase.js), mas com a app apenas aberta podia demorar até
+  // 90s. Agora faz pull a cada poucos segundos, sem throttle, com uma
+  // guarda simples para nunca sobrepor dois pulls em curso.
+  // ================================================================
+  const SYNC_POLL_MS = 4000; // cadência do pull automático — ajustar entre 3000 e 5000 se necessário
+  let bpPullEmCurso = false;
   setInterval(() => {
     if (!(navigator.onLine && document.visibilityState === 'visible' && state?.config?.salaoId)) return;
-    const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
-    const pendentes = fila.filter(op => op.failed !== true).length;
-    // Skip pull pesado se nada pendente e último pull < 90s (throttle)
-    const now = Date.now();
-    if (pendentes === 0 && window.BPRuntime && window.BPRuntime.lastSupabasePull && (now - window.BPRuntime.lastSupabasePull) < 90000) {
-      return;
-    }
+    if (bpPullEmCurso) return; // evita pulls sobrepostos se a rede estiver lenta
+    bpPullEmCurso = true;
     carregarDoSupabase().then(atualizado => {
       window.BPRuntime = window.BPRuntime || {}; window.BPRuntime.lastSupabasePull = Date.now();
       if (atualizado) {
         updateUI();
         if (typeof renderBadges === 'function') renderBadges();
       }
-    }).catch(() => {});
-  }, 15000);
+    }).catch(() => {}).finally(() => { bpPullEmCurso = false; });
+  }, SYNC_POLL_MS);
 
   // Ponto 3 — Forçar pull quando a app volta ao foco (visível)
   // Isto garante que ao trocar de app e voltar, os dados são atualizados

@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  var PULL_MIN_MS = 90000;
+  var PULL_MIN_MS = 4000; // alinhado com SYNC_POLL_MS em main.js (era 90000 — causa da demora sem reload)
   var lastPullAt = 0;
   var pullInFlight = false;
 
@@ -55,5 +55,5 @@
   var origFlush = window.flushSyncQueue;
   // no-op wrap if needed later
 
-  console.info("[bp-hardening] activo — tombstones + pull throttled 90s");
+  console.info("[bp-hardening] activo — tombstones + pull throttled 4s");
 })();
