@@ -1,13 +1,21 @@
-# Galeria CRM + troca de foto de perfil
+# Pacote: galeria sync + foto no create + agenda dia exacto
 
-## Galeria não abria
-Causa: openGaleria chamava ensureShell/openShell (funções privadas do IIFE ops-crm).
-Fix: ensureShell/openShell locais em media-galeria via ensureBpSheetModal/openBpSheetModal.
+## 1. Galeria CRM multi-dispositivo
+- Tabela galeria_fotos (SUPABASE_GALERIA.sql) — OBRIGATÓRIO
+- Upload → Storage + upsert metadados
+- Abrir galeria → pull + merge
+- Contingência list Storage
 
-## Foto não substituía
-Causa: Storage usa o mesmo path entityId.jpg; URL pública igual → browser/CDN serviam a imagem antiga. Além disso mantinha-se foto_url antiga até ao upload.
-Fix:
-- Ao escolher nova foto: foto_url = null (UI usa data: local)
-- Após upload: foto_url com ?v=timestamp (cache-bust)
-- cacheControl Storage 60s
-- patchRowAvatar força ?v= se necessário
+## 2. Foto ao criar perfil
+- Antes: pending só com setTimeout frágil → lista só com inicial
+- Agora: após addProfissional/addCliente aplica takePending*Foto + set*Foto + re-render lista
+
+## 3. Agenda «Dia exacto»
+- Input deixou de estar pointer-events:none invisível
+- showPicker() + input visível no popover
+- Listeners só em #agenda-filter-popover
+
+## Deploy
+1. SUPABASE_GALERIA.sql
+2. app.bundle.js + index.html
+3. Hard refresh PWA

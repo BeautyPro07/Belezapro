@@ -4176,19 +4176,48 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// Listeners para todos os botões de filtro (incluindo Dia Exato)
-document.querySelectorAll('.agenda-periodo-filter').forEach(btn => {
+// Listeners só dos filtros da AGENDA (não misturar com caixa)
+document.querySelectorAll('#agenda-filter-popover .agenda-periodo-filter').forEach(btn => {
   btn.addEventListener('click', function(e) {
     e.stopPropagation();
     const periodo = this.dataset.periodo;
 
-    // Dia Exato: abrir seletor de data
+    // Dia exacto: mostrar input e abrir date picker (mobile-friendly)
     if (periodo === 'dia') {
-      const input = document.getElementById('agenda-data-exata');
-      if (input) {
-        input.click();
+      // Só reagir a botões da agenda (não caixa)
+      if (this.classList.contains('caixa-periodo-filter') || this.classList.contains('caixa-loc-periodo')) {
+        return;
       }
-      return; // não fecha popover nem muda o filtro ainda
+      const input = document.getElementById('agenda-data-exata');
+      if (!input) {
+        toast('Selector de data indisponível', 'error');
+        return;
+      }
+      // Tornar interativo (estava opacity:0;pointer-events:none)
+      input.style.cssText = 'display:block;position:static;opacity:1;pointer-events:auto;width:100%;height:auto;margin:8px 0 0;padding:10px;border-radius:8px;border:1px solid var(--border-soft);background:var(--card-white,#fff);font-size:16px;';
+      const pop = document.getElementById('agenda-filter-popover');
+      if (pop && input.parentElement !== pop) {
+        pop.appendChild(input);
+      }
+      if (!input.value) input.value = (typeof hoje === 'function' ? hoje() : '');
+      input.focus();
+      try {
+        if (typeof input.showPicker === 'function') input.showPicker();
+        else input.click();
+      } catch (_) {
+        try { input.click(); } catch (__) {}
+      }
+      // Se o utilizador já tinha data, aplicar logo
+      if (input.value) {
+        agendaFilter = 'dia';
+        localStorage.setItem(agendaFilterKey, 'dia');
+        localStorage.setItem('bp_agenda_data_exata', input.value);
+        atualizarFiltroAgendaUI();
+        // manter popover aberto até change ou segundo toque — mas render já
+        renderAgendaFull();
+        renderBadges();
+      }
+      return;
     }
 
     // Outros períodos (hoje, semana, mes, todos)
@@ -4217,11 +4246,15 @@ document.getElementById('agenda-data-exata')?.addEventListener('change', functio
     agendaFilter = 'dia';
     localStorage.setItem(agendaFilterKey, 'dia');
     localStorage.setItem('bp_agenda_data_exata', data);
+    state.agendaDataAtual = data;
     atualizarFiltroAgendaUI();
     fecharPopover();
     renderAgendaFull();
     renderBadges();
   }
+});
+document.getElementById('agenda-data-exata')?.addEventListener('input', function() {
+  if (this.value) this.dispatchEvent(new Event('change'));
 });
 
 // ====================================================================
@@ -6265,6 +6298,12 @@ document.getElementById('modal-cliente-rapido-save').addEventListener('click', a
   if (!nome) { toast('Nome é obrigatório', 'error'); return; }
   const result = await addCliente({ nome, telefone, notas: '' });
   if (result) {
+    try {
+      if (window.BPMedia && BPMedia.takePendingClienteFoto) {
+        var fQ = BPMedia.takePendingClienteFoto();
+        if (fQ && BPMedia.setClienteFoto) await BPMedia.setClienteFoto(result.id, fQ);
+      }
+    } catch (_) {}
     closeModal('modal-cliente-rapido');
     openModal('modal-agenda');
     const sel = document.getElementById('agenda-cliente');
@@ -6349,6 +6388,18 @@ document.getElementById('modal-cliente-save').addEventListener('click', async ()
   } else { 
     const result = await addCliente({ nome, telefone, notas });
     if (result) {
+      try {
+        var fotoC = null;
+        if (window.BPMedia && typeof BPMedia.takePendingClienteFoto === 'function') {
+          fotoC = BPMedia.takePendingClienteFoto();
+        }
+        if (fotoC && typeof BPMedia.setClienteFoto === 'function') {
+          await BPMedia.setClienteFoto(result.id, fotoC);
+          if (typeof BPMedia.patchRowAvatar === 'function') BPMedia.patchRowAvatar('clientes', result.id);
+          if (typeof BPMedia.enhanceListAvatars === 'function') BPMedia.enhanceListAvatars();
+          if (typeof renderClientes === 'function') renderClientes();
+        }
+      } catch (eFoto) { console.warn('[cli foto save]', eFoto); }
       closeModal('modal-cliente');
     }
   }
@@ -6654,7 +6705,22 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     closeModal('modal-prof');
   } else {
     const result = await addProfissional(dados);
-    if (result) closeModal('modal-prof');
+    if (result) {
+      // Foto escolhida antes de guardar (criação)
+      try {
+        var fotoP = null;
+        if (window.BPMedia && typeof BPMedia.takePendingProfFoto === 'function') {
+          fotoP = BPMedia.takePendingProfFoto();
+        }
+        if (fotoP && typeof BPMedia.setProfFoto === 'function') {
+          await BPMedia.setProfFoto(result.id, fotoP);
+          if (typeof BPMedia.patchRowAvatar === 'function') BPMedia.patchRowAvatar('profissionais', result.id);
+          if (typeof BPMedia.enhanceListAvatars === 'function') BPMedia.enhanceListAvatars();
+          if (typeof renderProfissionais === 'function') renderProfissionais();
+        }
+      } catch (eFoto) { console.warn('[prof foto save]', eFoto); }
+      closeModal('modal-prof');
+    }
   }
 });
 
@@ -12844,8 +12910,16 @@ window.renderBarraMeta = renderBarraMeta;
   var _uploadToken = Object.create(null);
   var UPLOAD_MS = 12000;
 
-  var GALERIA_KEY = "bp_galeria_v1";
+  var GALERIA_KEY_BASE = "bp_galeria_v1";
   var MAX_GALERIA = 60;
+  function galeriaStorageKey() {
+    try {
+      var sid = (state && state.config && state.config.salaoId) ? String(state.config.salaoId) : "";
+      return sid ? (GALERIA_KEY_BASE + "_" + sid) : GALERIA_KEY_BASE;
+    } catch (_) {
+      return GALERIA_KEY_BASE;
+    }
+  }
   var AVATAR_MAX = 160;      // lista/modal: thumb leve
   var GALERIA_MAX = 720;     // upload original galeria
   var GALERIA_THUMB = 240;   // thumb local/galeria
@@ -13257,8 +13331,18 @@ window.renderBarraMeta = renderBarraMeta;
   /* ---------- galeria ---------- */
   function loadGaleria() {
     try {
-      var raw = localStorage.getItem(GALERIA_KEY);
+      var raw = localStorage.getItem(galeriaStorageKey());
       var list = raw ? JSON.parse(raw) : [];
+      // Migração: chave antiga sem salao_id
+      if ((!list || !list.length) && galeriaStorageKey() !== GALERIA_KEY_BASE) {
+        try {
+          var legacy = localStorage.getItem(GALERIA_KEY_BASE);
+          if (legacy) {
+            list = JSON.parse(legacy);
+            if (Array.isArray(list) && list.length) saveGaleria(list);
+          }
+        } catch (_) {}
+      }
       return Array.isArray(list) ? list : [];
     } catch (e) { return []; }
   }
@@ -13273,15 +13357,15 @@ window.renderBarraMeta = renderBarraMeta;
           data: f.data || "",
           ts: f.ts || "",
           url: f.url || null,
-          thumb: f.thumb || null
+          thumb: f.thumb || null,
+          updated_at: f.updated_at || f.ts || new Date().toISOString()
         };
-        // Se há URL remota, não guardar data URL (quota / parse)
         if (o.url && o.thumb && String(o.thumb).indexOf("data:") === 0) {
           o.thumb = o.url;
         }
         return o;
       });
-      localStorage.setItem(GALERIA_KEY, JSON.stringify(slim));
+      localStorage.setItem(galeriaStorageKey(), JSON.stringify(slim));
       return true;
     } catch (e) {
       toastMsg("Armazenamento cheio — remova fotos antigas", "error");
@@ -13300,6 +13384,180 @@ window.renderBarraMeta = renderBarraMeta;
   }
   function galeriaPorProf(profId) {
     return loadGaleria().filter(function (x) { return x.profissional_id === profId; }).reverse();
+  }
+
+  /** Push metadados da galeria para Supabase (tabela galeria_fotos). */
+  async function upsertGaleriaRemoto(entry) {
+    if (!entry || !entry.id) return false;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+    if (typeof SUPABASE_URL === "undefined" || !SUPABASE_URL) return false;
+    var salaoId = (state && state.config && state.config.salaoId) ? state.config.salaoId : null;
+    if (!salaoId) return false;
+    try {
+      var authHeaders = typeof getAuthHeaders === "function" ? await getAuthHeaders() : null;
+      if (!authHeaders) return false;
+      var body = {
+        id: entry.id,
+        salao_id: salaoId,
+        profissional_id: entry.profissional_id || null,
+        profissional_nome: entry.profissional_nome || null,
+        caption: entry.caption || null,
+        data: entry.data || null,
+        url: entry.url || null,
+        ts: entry.ts || new Date().toISOString(),
+        updated_at: entry.updated_at || new Date().toISOString()
+      };
+      var resp = await fetch(SUPABASE_URL + "/rest/v1/galeria_fotos", {
+        method: "POST",
+        headers: Object.assign({
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates"
+        }, authHeaders),
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        var txt = "";
+        try { txt = await resp.text(); } catch (_) {}
+        console.warn("[BPMedia] galeria upsert", resp.status, txt);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn("[BPMedia] galeria upsert", e);
+      return false;
+    }
+  }
+
+  async function deleteGaleriaRemoto(id) {
+    if (!id) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    if (typeof SUPABASE_URL === "undefined" || !SUPABASE_URL) return;
+    var salaoId = (state && state.config && state.config.salaoId) ? state.config.salaoId : null;
+    if (!salaoId) return;
+    try {
+      var authHeaders = typeof getAuthHeaders === "function" ? await getAuthHeaders() : null;
+      if (!authHeaders) return;
+      await fetch(
+        SUPABASE_URL + "/rest/v1/galeria_fotos?id=eq." + encodeURIComponent(id) +
+          "&salao_id=eq." + encodeURIComponent(salaoId),
+        { method: "DELETE", headers: authHeaders }
+      );
+    } catch (e) {
+      console.warn("[BPMedia] galeria delete remoto", e);
+    }
+  }
+
+  /** Pull galeria do Supabase e funde com local (remoto com URL ganha). */
+  async function pullGaleriaRemoto() {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return loadGaleria();
+    if (typeof SUPABASE_URL === "undefined" || !SUPABASE_URL) return loadGaleria();
+    var salaoId = (state && state.config && state.config.salaoId) ? state.config.salaoId : null;
+    if (!salaoId) return loadGaleria();
+    try {
+      var authHeaders = typeof getAuthHeaders === "function" ? await getAuthHeaders() : null;
+      if (!authHeaders) return loadGaleria();
+      var resp = await fetch(
+        SUPABASE_URL + "/rest/v1/galeria_fotos?salao_id=eq." + encodeURIComponent(salaoId) +
+          "&select=*&order=ts.desc",
+        { headers: authHeaders }
+      );
+      if (!resp.ok) {
+        // tabela pode não existir ainda
+        if (resp.status === 404 || resp.status === 406) {
+          console.warn("[BPMedia] tabela galeria_fotos ausente — execute SUPABASE_GALERIA.sql");
+        }
+        return loadGaleria();
+      }
+      var rows = await resp.json();
+      if (!Array.isArray(rows)) return loadGaleria();
+      var local = loadGaleria();
+      var map = Object.create(null);
+      local.forEach(function (f) {
+        if (f && f.id) map[f.id] = f;
+      });
+      rows.forEach(function (r) {
+        if (!r || !r.id) return;
+        var prev = map[r.id];
+        // Preferir URL remota; manter thumb local se ainda não há url
+        map[r.id] = {
+          id: r.id,
+          profissional_id: r.profissional_id,
+          profissional_nome: r.profissional_nome || (prev && prev.profissional_nome) || "",
+          caption: r.caption || (prev && prev.caption) || "",
+          data: r.data || (prev && prev.data) || "",
+          ts: r.ts || (prev && prev.ts) || "",
+          url: r.url || (prev && prev.url) || null,
+          thumb: (r.url || (prev && prev.thumb) || (prev && prev.url) || null),
+          updated_at: r.updated_at || r.ts || (prev && prev.updated_at) || ""
+        };
+      });
+      // Locais só data: sem url e sem remoto → manter (pendente upload)
+      var merged = Object.keys(map).map(function (k) { return map[k]; });
+      merged.sort(function (a, b) {
+        return String(b.ts || "").localeCompare(String(a.ts || ""));
+      });
+      saveGaleria(merged);
+      return merged;
+    } catch (e) {
+      console.warn("[BPMedia] pull galeria", e);
+      return loadGaleria();
+    }
+  }
+
+  /** Lista ficheiros no Storage se a tabela ainda não existir (contingência). */
+  async function pullGaleriaFromStorage() {
+    if (typeof supabaseClient === "undefined" || !supabaseClient) return;
+    var salaoId = (state && state.config && state.config.salaoId) ? state.config.salaoId : null;
+    if (!salaoId) return;
+    try {
+      var prefix = String(salaoId) + "/galeria";
+      var res = await supabaseClient.storage.from("fotos").list("galeria", { limit: 100 });
+      // path real: salaoId/galeria/profId/file — list hierarchical
+      var profFolders = await supabaseClient.storage.from("fotos").list(String(salaoId) + "/galeria", { limit: 50 });
+      if (profFolders.error || !profFolders.data) return;
+      var local = loadGaleria();
+      var byId = Object.create(null);
+      local.forEach(function (f) { if (f && f.id) byId[f.id] = f; });
+      for (var i = 0; i < profFolders.data.length; i++) {
+        var folder = profFolders.data[i];
+        if (!folder || !folder.name) continue;
+        var files = await supabaseClient.storage.from("fotos").list(String(salaoId) + "/galeria/" + folder.name, { limit: 40 });
+        if (files.error || !files.data) continue;
+        files.data.forEach(function (file) {
+          if (!file || !file.name || file.name === ".emptyFolderPlaceholder") return;
+          var id = file.name.replace(/\.jpg$/i, "").replace(/\.jpeg$/i, "").replace(/\.webp$/i, "");
+          if (byId[id] && byId[id].url) return;
+          var path = String(salaoId) + "/galeria/" + folder.name + "/" + file.name;
+          var pub = supabaseClient.storage.from("fotos").getPublicUrl(path);
+          var u = pub && pub.data && pub.data.publicUrl ? pub.data.publicUrl : null;
+          if (!u) return;
+          byId[id] = {
+            id: id,
+            profissional_id: folder.name,
+            profissional_nome: "",
+            caption: "",
+            data: "",
+            ts: file.updated_at || file.created_at || new Date().toISOString(),
+            url: u,
+            thumb: u,
+            updated_at: file.updated_at || ""
+          };
+        });
+      }
+      var merged = Object.keys(byId).map(function (k) { return byId[k]; });
+      if (merged.length) saveGaleria(merged);
+    } catch (e) {
+      console.warn("[BPMedia] storage list galeria", e);
+    }
+  }
+
+  async function syncGaleriaFull() {
+    await pullGaleriaRemoto();
+    // Contingência se tabela vazia mas há ficheiros
+    var cur = loadGaleria();
+    var hasUrl = cur.some(function (f) { return f && f.url; });
+    if (!hasUrl) await pullGaleriaFromStorage();
+    return loadGaleria();
   }
 
   /* ---------- UI avatar helpers ---------- */
@@ -13613,20 +13871,37 @@ window.renderBarraMeta = renderBarraMeta;
       if (t2 && session.pendingProfFoto && session.pendingProfScope === "new") {
         var nome2 = ((document.getElementById("prof-nome") || {}).value || "").trim();
         var foto2 = session.pendingProfFoto;
-        clearProfPending();
-        setTimeout(async function () {
-          if (!nome2 || !foto2) return;
+        // NÃO limpar ainda — eventos-cadastros / takePending também podem consumir
+        var attempts = 0;
+        var tryApply = async function () {
+          attempts++;
+          if (!foto2 || !nome2) return;
           var matches = (state.profissionais || []).filter(function (x) { return x.nome === nome2; });
-          if (!matches.length) return;
+          if (!matches.length) {
+            if (attempts < 12) setTimeout(tryApply, 250);
+            return;
+          }
           matches.sort(function (a, b) {
             return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
           });
           var p = matches[0];
-          if (p) {
-            await setProfFoto(p.id, foto2);
+          if (!p) return;
+          // Se já tem a mesma foto, só patch UI
+          if (p.foto === foto2 || (p.foto && p.foto.indexOf("data:") === 0)) {
+            clearProfPending();
             patchRowAvatar("profissionais", p.id);
+            enhanceListAvatars();
+            return;
           }
-        }, 500);
+          await setProfFoto(p.id, foto2);
+          clearProfPending();
+          patchRowAvatar("profissionais", p.id);
+          enhanceListAvatars();
+          if (typeof renderProfissionais === "function") {
+            try { renderProfissionais(); } catch (_) {}
+          }
+        };
+        setTimeout(tryApply, 300);
       }
     });
   }
@@ -13813,12 +14088,18 @@ window.renderBarraMeta = renderBarraMeta;
     }
   }
 
-  function openGaleria(profIdPreset) {
+  async function openGaleria(profIdPreset) {
     try {
       bpGalEnsureStyles();
       ensureShell("modal-bp-galeria", "Galeria de serviços", "Media", "Fotos dos trabalhos, associadas a cada profissional.");
-      renderGaleria(profIdPreset);
       openShell("modal-bp-galeria");
+      // Sync remoto antes de pintar (não bloqueia UI se falhar)
+      try {
+        if (navigator.onLine) await syncGaleriaFull();
+      } catch (eSync) {
+        console.warn("[BPMedia] sync galeria", eSync);
+      }
+      renderGaleria(profIdPreset);
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           var body = document.getElementById("modal-bp-galeria-body");
@@ -13952,7 +14233,9 @@ window.renderBarraMeta = renderBarraMeta;
               if (!hit || hit.profissional_id !== pid) return;
               hit.url = remoteUrl;
               hit.thumb = remoteUrl;
+              hit.updated_at = new Date().toISOString();
               saveGaleria(list);
+              upsertGaleriaRemoto(hit);
               renderGaleria(pid);
             });
           }
@@ -13970,6 +14253,7 @@ window.renderBarraMeta = renderBarraMeta;
         var pidDel = (document.getElementById("bp-gal-prof") || {}).value;
         if (pidDel && delId) removeFotoStorage("galeria/" + pidDel, delId);
         removeFotoGaleria(delId);
+        deleteGaleriaRemoto(delId);
         renderGaleria(pidDel);
         toastMsg("Foto removida", "success");
       };
@@ -14049,6 +14333,14 @@ window.renderBarraMeta = renderBarraMeta;
     }
   });
 
+
+  // Sync galeria em background quando a app volta online / após login
+  window.addEventListener("online", function () {
+    setTimeout(function () {
+      if (typeof syncGaleriaFull === "function") syncGaleriaFull();
+    }, 2000);
+  });
+
   window.openGaleria = openGaleria;
   window.BPMedia = {
     compressFile: compressFile,
@@ -14056,6 +14348,22 @@ window.renderBarraMeta = renderBarraMeta;
     setProfFoto: setProfFoto,
     openGaleria: openGaleria,
     loadGaleria: loadGaleria,
+    takePendingProfFoto: function () {
+      var f = session.pendingProfFoto;
+      var scope = session.pendingProfScope;
+      clearProfPending();
+      return scope === "new" ? f : null;
+    },
+    takePendingClienteFoto: function () {
+      var f = session.pendingClienteFoto;
+      var scope = session.pendingClienteScope;
+      clearClientePending();
+      return scope === "new" ? f : null;
+    },
+    peekPendingProfFoto: function () { return session.pendingProfFoto; },
+    peekPendingClienteFoto: function () { return session.pendingClienteFoto; },
+    syncGaleriaFull: syncGaleriaFull,
+    pullGaleriaRemoto: pullGaleriaRemoto,
     enhanceListAvatars: enhanceListAvatars,
     patchRowAvatar: patchRowAvatar,
     resolveFotoSrc: resolveFotoSrc,

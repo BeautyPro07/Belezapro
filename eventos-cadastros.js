@@ -156,6 +156,12 @@ document.getElementById('modal-cliente-rapido-save').addEventListener('click', a
   if (!nome) { toast('Nome é obrigatório', 'error'); return; }
   const result = await addCliente({ nome, telefone, notas: '' });
   if (result) {
+    try {
+      if (window.BPMedia && BPMedia.takePendingClienteFoto) {
+        var fQ = BPMedia.takePendingClienteFoto();
+        if (fQ && BPMedia.setClienteFoto) await BPMedia.setClienteFoto(result.id, fQ);
+      }
+    } catch (_) {}
     closeModal('modal-cliente-rapido');
     openModal('modal-agenda');
     const sel = document.getElementById('agenda-cliente');
@@ -240,6 +246,18 @@ document.getElementById('modal-cliente-save').addEventListener('click', async ()
   } else { 
     const result = await addCliente({ nome, telefone, notas });
     if (result) {
+      try {
+        var fotoC = null;
+        if (window.BPMedia && typeof BPMedia.takePendingClienteFoto === 'function') {
+          fotoC = BPMedia.takePendingClienteFoto();
+        }
+        if (fotoC && typeof BPMedia.setClienteFoto === 'function') {
+          await BPMedia.setClienteFoto(result.id, fotoC);
+          if (typeof BPMedia.patchRowAvatar === 'function') BPMedia.patchRowAvatar('clientes', result.id);
+          if (typeof BPMedia.enhanceListAvatars === 'function') BPMedia.enhanceListAvatars();
+          if (typeof renderClientes === 'function') renderClientes();
+        }
+      } catch (eFoto) { console.warn('[cli foto save]', eFoto); }
       closeModal('modal-cliente');
     }
   }
@@ -545,7 +563,22 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     closeModal('modal-prof');
   } else {
     const result = await addProfissional(dados);
-    if (result) closeModal('modal-prof');
+    if (result) {
+      // Foto escolhida antes de guardar (criação)
+      try {
+        var fotoP = null;
+        if (window.BPMedia && typeof BPMedia.takePendingProfFoto === 'function') {
+          fotoP = BPMedia.takePendingProfFoto();
+        }
+        if (fotoP && typeof BPMedia.setProfFoto === 'function') {
+          await BPMedia.setProfFoto(result.id, fotoP);
+          if (typeof BPMedia.patchRowAvatar === 'function') BPMedia.patchRowAvatar('profissionais', result.id);
+          if (typeof BPMedia.enhanceListAvatars === 'function') BPMedia.enhanceListAvatars();
+          if (typeof renderProfissionais === 'function') renderProfissionais();
+        }
+      } catch (eFoto) { console.warn('[prof foto save]', eFoto); }
+      closeModal('modal-prof');
+    }
   }
 });
 

@@ -873,19 +873,48 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// Listeners para todos os botões de filtro (incluindo Dia Exato)
-document.querySelectorAll('.agenda-periodo-filter').forEach(btn => {
+// Listeners só dos filtros da AGENDA (não misturar com caixa)
+document.querySelectorAll('#agenda-filter-popover .agenda-periodo-filter').forEach(btn => {
   btn.addEventListener('click', function(e) {
     e.stopPropagation();
     const periodo = this.dataset.periodo;
 
-    // Dia Exato: abrir seletor de data
+    // Dia exacto: mostrar input e abrir date picker (mobile-friendly)
     if (periodo === 'dia') {
-      const input = document.getElementById('agenda-data-exata');
-      if (input) {
-        input.click();
+      // Só reagir a botões da agenda (não caixa)
+      if (this.classList.contains('caixa-periodo-filter') || this.classList.contains('caixa-loc-periodo')) {
+        return;
       }
-      return; // não fecha popover nem muda o filtro ainda
+      const input = document.getElementById('agenda-data-exata');
+      if (!input) {
+        toast('Selector de data indisponível', 'error');
+        return;
+      }
+      // Tornar interativo (estava opacity:0;pointer-events:none)
+      input.style.cssText = 'display:block;position:static;opacity:1;pointer-events:auto;width:100%;height:auto;margin:8px 0 0;padding:10px;border-radius:8px;border:1px solid var(--border-soft);background:var(--card-white,#fff);font-size:16px;';
+      const pop = document.getElementById('agenda-filter-popover');
+      if (pop && input.parentElement !== pop) {
+        pop.appendChild(input);
+      }
+      if (!input.value) input.value = (typeof hoje === 'function' ? hoje() : '');
+      input.focus();
+      try {
+        if (typeof input.showPicker === 'function') input.showPicker();
+        else input.click();
+      } catch (_) {
+        try { input.click(); } catch (__) {}
+      }
+      // Se o utilizador já tinha data, aplicar logo
+      if (input.value) {
+        agendaFilter = 'dia';
+        localStorage.setItem(agendaFilterKey, 'dia');
+        localStorage.setItem('bp_agenda_data_exata', input.value);
+        atualizarFiltroAgendaUI();
+        // manter popover aberto até change ou segundo toque — mas render já
+        renderAgendaFull();
+        renderBadges();
+      }
+      return;
     }
 
     // Outros períodos (hoje, semana, mes, todos)
@@ -914,11 +943,15 @@ document.getElementById('agenda-data-exata')?.addEventListener('change', functio
     agendaFilter = 'dia';
     localStorage.setItem(agendaFilterKey, 'dia');
     localStorage.setItem('bp_agenda_data_exata', data);
+    state.agendaDataAtual = data;
     atualizarFiltroAgendaUI();
     fecharPopover();
     renderAgendaFull();
     renderBadges();
   }
+});
+document.getElementById('agenda-data-exata')?.addEventListener('input', function() {
+  if (this.value) this.dispatchEvent(new Event('change'));
 });
 
 // ====================================================================
