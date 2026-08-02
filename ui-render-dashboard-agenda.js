@@ -428,7 +428,9 @@ function renderDashboard() {
   }
 
   const h = new Date().getHours();
-  const greetEl = document.getElementById('greeting');
+  
+  try { if (typeof initKpiTemporalUi === 'function') initKpiTemporalUi(); if (typeof actualizarKpiMiniChart === 'function') actualizarKpiMiniChart(); } catch (eK) { console.warn('[kpi-temporal]', eK); }
+const greetEl = document.getElementById('greeting');
   if (greetEl) {
     greetEl.textContent = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   }
@@ -975,3 +977,188 @@ setInterval(syncAgenda, 60000);
 
 // Verificar quando a app volta ao foco
 document.addEventListener('visibilitychange', syncAgenda);
+
+// ====================================================================
+//  KPI mini-chart + espaço temporal (7d / 30d / mês / ano)
+// ====================================================================
+function _kpiSerieReceita(intervalo) {
+  const movs = state.movimentos || [];
+  const inicio = new Date((intervalo.inicio || hoje()) + 'T00:00:00');
+  const fim = new Date((intervalo.fim || hoje()) + 'T00:00:00');
+  const ms = 86400000;
+  const dias = Math.max(1, Math.round((fim - inicio) / ms) + 1);
+  const passo = dias > 31 ? Math.ceil(dias / 31) : 1;
+  const serie = [];
+  for (let i = 0; i < dias; i += passo) {
+    const d = new Date(inicio.getTime() + i * ms);
+    const ds = formatarDataISO(d);
+    const total = movs.filter(m => m.tipo === 'venda' && m.data === ds)
+      .reduce((s, v) => s + (Number(v.valor) || 0), 0);
+    serie.push(total);
+  }
+  return serie;
+}
+
+function _desenharKpiSpark(canvasId, serie) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const gold = (getComputedStyle(document.documentElement).getPropertyValue('--gold') || '#c9a227').trim();
+  if (!serie || !serie.length) {
+    ctx.strokeStyle = gold;
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(4, h / 2);
+    ctx.lineTo(w - 4, h / 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const max = Math.max.apply(null, serie.concat([1]));
+  const pad = 3;
+  ctx.beginPath();
+  serie.forEach(function (v, i) {
+    const x = pad + (i / Math.max(serie.length - 1, 1)) * (w - pad * 2);
+    const y = h - pad - (v / max) * (h - pad * 2);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = 1.75;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  // fill suave
+  const lastX = pad + ((serie.length - 1) / Math.max(serie.length - 1, 1)) * (w - pad * 2);
+  ctx.lineTo(lastX, h - pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.closePath();
+  ctx.fillStyle = gold;
+  ctx.globalAlpha = 0.12;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function _kpiTemporalLabels() {
+  return { '7dias': '7 dias', '30dias': '30 dias', mes: 'Mês', ano: 'Ano' };
+}
+
+function actualizarKpiMiniChart() {
+  const intervalo = getIntervaloDashAtual();
+  const serie = _kpiSerieReceita(intervalo);
+  _desenharKpiSpark('kpi-mini-chart', serie);
+  const lab = document.getElementById('kpi-mini-chart-label');
+  const map = _kpiTemporalLabels();
+  const text = map[state.dashPeriodo] || (intervalo.label || 'Período');
+  if (lab) lab.textContent = text;
+  const hint = document.getElementById('kpi-temporal-hint');
+  if (hint) hint.textContent = (intervalo.label || text) + ' · toque para alterar';
+}
+
+let _kpiTemporalDraft = null;
+function abrirKpiTemporalSheet() {
+  _kpiTemporalDraft = state.dashPeriodo;
+  // Se período actual não é um dos 4, default 7dias no UI (sem aplicar ainda)
+  const opts = ['7dias', '30dias', 'mes', 'ano'];
+  if (opts.indexOf(_kpiTemporalDraft) < 0) _kpiTemporalDraft = '7dias';
+  document.querySelectorAll('.kpi-temporal-opt').forEach(function (b) {
+    b.classList.toggle('is-active', b.dataset.periodo === _kpiTemporalDraft);
+  });
+  _refreshKpiTemporalPreview(_kpiTemporalDraft);
+  if (typeof openModal === 'function') openModal('modal-kpi-temporal');
+  else {
+    const el = document.getElementById('modal-kpi-temporal');
+    if (el) { el.classList.add('open'); el.style.display = 'flex'; }
+  }
+}
+
+function _refreshKpiTemporalPreview(periodo) {
+  const intervalo = calcularIntervaloPeriodo(periodo, 0);
+  const movs = (state.movimentos || []).filter(function (m) {
+    return m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim;
+  });
+  const rev = _somaVendas(movs);
+  const rangeEl = document.getElementById('kpi-temporal-range');
+  const revEl = document.getElementById('kpi-temporal-rev');
+  const nEl = document.getElementById('kpi-temporal-n');
+  if (rangeEl) rangeEl.textContent = (intervalo.label || '') + ' · ' + formatarDataCurta(intervalo.inicio) + ' – ' + formatarDataCurta(intervalo.fim);
+  if (revEl) revEl.textContent = typeof fmtKz === 'function' ? fmtKz(rev) : String(rev);
+  if (nEl) nEl.textContent = String(movs.length);
+  _desenharKpiSpark('kpi-temporal-chart', _kpiSerieReceita(intervalo));
+}
+
+function aplicarKpiTemporal(periodo) {
+  if (!periodo) return;
+  state.dashPeriodo = periodo;
+  state.dashOffset = 0;
+  try {
+    localStorage.setItem('bp_dash_periodo', periodo);
+    localStorage.setItem('bp_dash_offset', '0');
+  } catch (_) {}
+  // Gráfico principal partilha o intervalo do dash (getIntervaloDashAtual)
+  if (periodo === 'hora') {
+    state.chartPeriodo = 'hora';
+  } else {
+    state.chartPeriodo = (periodo === '7dias') ? 'semana' : ((periodo === '30dias') ? 'mes' : periodo);
+  }
+  try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
+  if (typeof _bpSetChartFilterActive === 'function') {
+    try { _bpSetChartFilterActive(state.chartPeriodo === 'semana' && periodo === '7dias' ? 'semana' : (periodo === '30dias' ? 'mes' : state.chartPeriodo)); } catch (_) {}
+  }
+  if (typeof closeModal === 'function') closeModal('modal-kpi-temporal');
+  else {
+    var el = document.getElementById('modal-kpi-temporal');
+    if (el) { el.classList.remove('open'); el.style.display = ''; }
+  }
+  if (typeof renderDashboard === 'function') renderDashboard();
+  if (typeof renderizarGrafico === 'function') renderizarGrafico();
+  actualizarKpiMiniChart();
+}
+
+function initKpiTemporalUi() {
+  if (window.__bpKpiTemporalInit) {
+    actualizarKpiMiniChart();
+    return;
+  }
+  window.__bpKpiTemporalInit = true;
+  const btn = document.getElementById('kpi-mini-chart-btn');
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      abrirKpiTemporalSheet();
+    });
+  }
+  document.querySelectorAll('.kpi-temporal-opt').forEach(function (b) {
+    if (b.dataset.bound) return;
+    b.dataset.bound = '1';
+    b.addEventListener('click', function () {
+      _kpiTemporalDraft = this.dataset.periodo;
+      document.querySelectorAll('.kpi-temporal-opt').forEach(function (x) {
+        x.classList.toggle('is-active', x === b);
+      });
+      _refreshKpiTemporalPreview(_kpiTemporalDraft);
+    });
+  });
+  const apply = document.getElementById('kpi-temporal-apply');
+  if (apply && !apply.dataset.bound) {
+    apply.dataset.bound = '1';
+    apply.addEventListener('click', function () {
+      aplicarKpiTemporal(_kpiTemporalDraft || '7dias');
+    });
+  }
+  const modal = document.getElementById('modal-kpi-temporal');
+  if (modal && !modal.dataset.bound) {
+    modal.dataset.bound = '1';
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal || e.target.getAttribute('data-close') === 'modal-kpi-temporal') {
+        if (typeof closeModal === 'function') closeModal('modal-kpi-temporal');
+      }
+    });
+  }
+  actualizarKpiMiniChart();
+}
+

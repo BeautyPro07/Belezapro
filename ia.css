@@ -1,3 +1,15 @@
+/* Tokens IA — white-label / dark-mode ready */
+:root {
+  --ia-composer-bg: #f5f6f8;
+  --ia-composer-border: var(--border-soft, #e5e2dc);
+  --ia-send-bg: var(--gold, #c9a227);
+  --ia-send-fg: #1c1a18;
+  --ia-send-bg-active: var(--gold-dark, #a8841a);
+  --ia-send-idle-opacity: 0.62;
+  --ia-bg-art-opacity: 0.10;
+  --ia-chip-bg: #fff;
+  --ia-model-chip-max: 7.5rem;
+}
 /* ====================================================================
    ia.css — extraído do style.css (Fase C da modularização)
    Conteúdo: Benza AI: cabeçalho, resumo, sugestões, insights, chat
@@ -272,3 +284,171 @@
 }
 .ia-msg-bot-corpo .ia-md-table tr:last-child td { border-bottom: none; }
 .ia-msg-bot-corpo strong { font-weight: 700; color: var(--text-primary); }
+
+
+/* ---- Composer estilo "comentários / follow-up" ---- */
+.ia-chat-shell {
+  position: relative;
+  min-height: 180px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.ia-bg-art {
+  position: absolute;
+  inset: 12% 8% 18% 8%;
+  opacity: var(--ia-bg-art-opacity);
+  pointer-events: none;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ia-bg-art svg {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+}
+#ia-chat-empty {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 28px 12px 16px;
+}
+.ia-chat {
+  position: relative;
+  z-index: 1;
+}
+.ia-composer {
+  margin-top: 10px;
+  background: var(--ia-composer-bg);
+  border: 1px solid var(--ia-composer-border);
+  border-radius: 16px;
+  padding: 10px 12px 8px;
+  box-shadow: 0 1px 2px rgba(20,17,15,.04);
+}
+.ia-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  min-height: 40px;
+}
+.ia-input-row .input-field,
+.ia-composer #ia-input {
+  flex: 1;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 6px 4px !important;
+  font-size: .88rem !important;
+  min-height: 36px;
+  outline: none;
+}
+.ia-model-chip {
+  flex-shrink: 0;
+  font-size: .65rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: #fff;
+  border: 1px solid var(--border-soft, #e0dcd6);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  max-width: var(--ia-model-chip-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ia-send-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--ia-send-bg);
+  color: var(--ia-send-fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(20,17,15,.08);
+  transition: transform .12s ease, background .15s ease;
+}
+.ia-send-btn:active { transform: scale(0.96); background: var(--ia-send-bg-active); }
+.ia-composer-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: .62rem;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+.ia-input-row .btn { display: none; } /* legado */
+
+.ia-chat-shell.has-messages .ia-bg-art { opacity: calc(var(--ia-bg-art-opacity) * 0.35); }
+.ia-chat-shell.has-messages #ia-chat-empty { display: none; }
+.ia-send-btn:focus-visible {
+  outline: 2px solid var(--gold, #c9a227);
+  outline-offset: 2px;
+}
+#ia-input:focus-visible {
+  outline: none;
+}
+.ia-composer:focus-within {
+  border-color: var(--gold, #c9a227);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.12);
+}
+
+/* Composer multilinha ~80% */
+.ia-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.ia-input-area,
+.ia-composer #ia-input {
+  flex: 1 1 80%;
+  width: 80%;
+  max-width: 80%;
+  min-height: 40px;
+  max-height: 120px;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.35;
+  font-size: .9rem !important;
+  padding: 10px 12px !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--border-soft, #e5e2dc) !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+.ia-model-chip { display: none !important; }
+.ia-send-btn {
+  background: var(--ia-send-bg) !important;
+  color: var(--ia-send-fg) !important;
+  transition: transform .55s cubic-bezier(.2,.8,.2,1), opacity .25s ease, background .2s ease;
+}
+.ia-send-btn.is-idle {
+  opacity: var(--ia-send-idle-opacity);
+  animation: iaSendIdle 2.8s ease-in-out infinite;
+}
+.ia-send-btn:not(.is-idle) {
+  opacity: 1;
+  animation: none;
+}
+.ia-send-btn.is-sending {
+  animation: none;
+  transform: rotate(360deg);
+  opacity: 1;
+}
+@keyframes iaSendIdle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ia-send-btn.is-idle { animation: none; }
+  .ia-send-btn.is-sending { transition-duration: .2s; }
+}

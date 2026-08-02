@@ -675,6 +675,10 @@ function montarMsgBotIA(resposta, ts) {
 function atualizarEstadoVazioIA() {
   const vazio = document.getElementById('ia-chat-empty');
   const chat = document.getElementById('ia-chat');
+  const shell = document.getElementById('ia-chat-container');
+  if (shell && chat) {
+    shell.classList.toggle('has-messages', chat.children.length > 0);
+  }
   if (vazio && chat) vazio.style.display = chat.children.length > 0 ? 'none' : '';
 }
 const IA_HIST_KEY = () => 'bp_ia_chat_' + (state.config.salaoId || 'local');
@@ -695,12 +699,57 @@ function guardarHistoricoIA() {
 }
 carregarHistoricoIA();
 
-document.getElementById('ia-enviar').addEventListener('click', async () => {
+function bpIaAutosizeInput() {
+  const input = document.getElementById('ia-input');
+  if (!input) return;
+  input.style.height = 'auto';
+  const h = Math.min(120, Math.max(40, input.scrollHeight));
+  input.style.height = h + 'px';
+}
+function bpIaSyncSendState() {
   const input = document.getElementById('ia-input');
   const btn = document.getElementById('ia-enviar');
-  const pergunta = input.value.trim();
+  if (!btn) return;
+  const has = !!(input && input.value.trim());
+  btn.classList.toggle('is-idle', !has);
+  if (!has) btn.classList.remove('is-sending');
+}
+function bpIaBindComposer() {
+  const input = document.getElementById('ia-input');
+  const btn = document.getElementById('ia-enviar');
+  if (!input || input.dataset.bpIaBound === '1') return;
+  input.dataset.bpIaBound = '1';
+  input.addEventListener('input', function () {
+    bpIaAutosizeInput();
+    bpIaSyncSendState();
+  });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (btn) btn.click();
+    }
+  });
+  bpIaAutosizeInput();
+  bpIaSyncSendState();
+}
+
+document.getElementById('ia-enviar')?.addEventListener('click', async () => {
+  const input = document.getElementById('ia-input');
+  const btn = document.getElementById('ia-enviar');
+  const pergunta = (input && input.value || '').trim();
   if (!pergunta || _iaBusy) return;
   const chat = document.getElementById('ia-chat');
+  if (!chat) return;
+  if (btn) {
+    btn.classList.remove('is-idle');
+    btn.classList.add('is-sending');
+    // reinicia transição 360°
+    btn.style.transition = 'none';
+    btn.style.transform = 'rotate(0deg)';
+    void btn.offsetWidth;
+    btn.style.transition = '';
+    btn.style.transform = '';
+  }
   chat.innerHTML += montarMsgUsuarioIA(pergunta);
   atualizarEstadoVazioIA();
   const pensando = document.createElement('div');
@@ -709,13 +758,22 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
   pensando.innerHTML = `<div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span></div><span class="ia-dots">Benza está a analisar<span>.</span><span>.</span><span>.</span></span>`;
   chat.appendChild(pensando);
   chat.scrollTop = chat.scrollHeight;
-  input.value = '';
+  if (input) {
+    input.value = '';
+    bpIaAutosizeInput();
+  }
   if (btn) btn.disabled = true;
   let resposta = null;
   try {
     resposta = await perguntarIA(pergunta);
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = false;
+      setTimeout(function () {
+        btn.classList.remove('is-sending');
+        bpIaSyncSendState();
+      }, 560);
+    }
   }
   document.getElementById('ia-pensando')?.remove();
   if (resposta) {
@@ -726,18 +784,23 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
     guardarHistoricoIA();
   }
   actualizarContadorIA();
+  bpIaSyncSendState();
 });
 
-document.getElementById('ia-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('ia-enviar').click();
-});
+bpIaBindComposer();
+document.addEventListener('DOMContentLoaded', bpIaBindComposer);
 
 // Sugestões rápidas e chips de continuação (delegação de eventos — cobre também os que são criados depois de cada resposta)
 document.addEventListener('click', (e) => {
   const card = e.target.closest('.ia-sugestao-card, .ia-followup-chip');
   if (card && card.dataset.pergunta) {
     const input = document.getElementById('ia-input');
-    if (input) { input.value = card.dataset.pergunta; document.getElementById('ia-enviar').click(); }
+    if (input) {
+      input.value = card.dataset.pergunta;
+      if (typeof bpIaAutosizeInput === 'function') bpIaAutosizeInput();
+      if (typeof bpIaSyncSendState === 'function') bpIaSyncSendState();
+      document.getElementById('ia-enviar').click();
+    }
   }
   const fb = e.target.closest('.ia-feedback-btn');
   if (fb) {

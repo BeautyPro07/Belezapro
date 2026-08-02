@@ -120,18 +120,18 @@
         <div class="app-header-inner">
           <div style="display:flex;flex-direction:column;gap:3px;padding-right:44px;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <div class="logo" style="flex-shrink:0;display:flex;align-items:center;gap:6px;">
-                <img src="logo.png" alt="BeautyPro" style="height:24px;width:auto;">
+              <div class="logo" style="flex-shrink:0;display:flex;align-items:center;gap:8px;">
+                <img src="logo.png" alt="BeautyPro" style="height:27px;width:auto;">
                 Beauty<span>Pro</span>
               </div>
-              <div class="store-name" id="store-name-display" title="Duplo clique para gerir profissionais" style="max-width:38vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Carregando...</div>
+              <div class="store-name" id="store-name-display" title="Duplo clique para gerir profissionais" style="max-width:36vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.82rem;">Carregando...</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="plano-badge" id="plano-badge" style="flex-shrink:0;">TRIAL</span>
               <span class="trial-countdown" id="trial-countdown" style="display:none;flex-shrink:0;"></span>
             </div>
           </div>
-          <div class="header-actions" style="position:absolute;top:8px;right:8px;">
+          <div class="header-actions">
             <div id="sync-status-container" class="sync-status" title="Estado de sincronização" role="status" aria-live="polite">
               <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
               <span id="sync-text">…</span>
@@ -186,6 +186,17 @@
 
             <!-- KPIs -->
             <div class="kpi-grid">
+              <!-- Espaço temporal — integrado na grelha dos KPIs (não no cabeçalho) -->
+              <div class="kpi-temporal-bar" style="grid-column: span 2;">
+                <div class="kpi-temporal-bar-text">
+                  <span class="kpi-temporal-bar-title">Desempenho</span>
+                  <span class="kpi-temporal-bar-hint" id="kpi-temporal-hint">Toque no gráfico para o espaço temporal</span>
+                </div>
+                <button type="button" class="kpi-mini-chart-btn" id="kpi-mini-chart-btn" aria-label="Espaço temporal dos KPIs" title="Espaço temporal">
+                  <canvas id="kpi-mini-chart" width="120" height="36" aria-hidden="true"></canvas>
+                  <span class="kpi-mini-chart-label" id="kpi-mini-chart-label">7 dias</span>
+                </button>
+              </div>
               <!-- Card 1: Faturamento -->
               <div class="kpi-card gold-accent" id="kpi-revenue-card" data-role="admin,gerente">
                 <div class="kpi-label">Faturamento</div>
@@ -245,29 +256,30 @@
             <div id="agenda-today-list"></div>
 
             <!-- GRÁFICO -->
-            <div class="card mt-3" style="padding:16px;position:relative;" data-role="admin,gerente">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-                <div style="display:flex;gap:6px;align-items:center;">
-                  <span style="font-size:.65rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.06em;">Período</span>
-                  <button class="btn btn-sm btn-secondary chart-filter" data-periodo="dia" style="padding:4px 12px;min-height:28px;font-size:.65rem;">Dia</button>
-                  <button class="btn btn-sm btn-primary chart-filter" data-periodo="semana" style="padding:4px 12px;min-height:28px;font-size:.65rem;">Semana</button>
-                  <button class="btn btn-sm btn-secondary chart-filter" data-periodo="mes" style="padding:4px 12px;min-height:28px;font-size:.65rem;">Mês</button>
-                  <button class="btn btn-sm btn-secondary chart-filter" data-periodo="hora" style="padding:4px 12px;min-height:28px;font-size:.65rem;">Hora</button>
+            <div class="card mt-3 dash-chart-card" data-role="admin,gerente">
+              <div class="dash-chart-toolbar">
+                <span class="dash-chart-periodo-label">Período</span>
+                <div class="dash-chart-seg" role="group" aria-label="Período do gráfico">
+                  <button type="button" class="chart-filter" data-periodo="dia">Dia</button>
+                  <button type="button" class="chart-filter is-active" data-periodo="semana">Semana</button>
+                  <button type="button" class="chart-filter" data-periodo="mes">Mês</button>
+                  <button type="button" class="chart-filter" data-periodo="hora">Hora</button>
                 </div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <button class="btn btn-sm btn-secondary" id="chart-prev" style="padding:4px 8px;min-height:28px;font-size:.65rem;">◀</button>
-                  <span style="font-size:.7rem;font-weight:600;color:var(--text-secondary);" id="chart-period-label">Últimos 7 dias</span>
-                  <button class="btn btn-sm btn-secondary" id="chart-next" style="padding:4px 8px;min-height:28px;font-size:.65rem;">▶</button>
-                  <button id="chart-eye-toggle" style="background:none;border:none;cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:1.2rem;line-height:1;">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <div class="dash-chart-nav">
+                  <button type="button" class="dash-chart-nav-btn" id="chart-prev" aria-label="Anterior">‹</button>
+                  <span class="dash-chart-nav-label" id="chart-period-label">Últimos 7 dias</span>
+                  <button type="button" class="dash-chart-nav-btn" id="chart-next" aria-label="Seguinte">›</button>
+                  <button type="button" class="dash-chart-eye" id="chart-eye-toggle" aria-label="Mostrar valores">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                       <circle cx="12" cy="12" r="3"/>
                     </svg>
                   </button>
                 </div>
               </div>
-              <div style="position:relative;width:100%;">
-                <canvas id="weekly-chart" width="400" height="160" style="width:100%;height:160px;display:block;touch-action:none;"></canvas>
+              <div class="dash-chart-canvas-wrap">
+                <canvas id="weekly-chart" width="400" height="140" style="width:100%;height:140px;display:block;touch-action:none;"></canvas>
+                <div id="dash-chart-empty" class="dash-chart-empty" hidden>Sem movimento neste período</div>
               </div>
             </div>
           </div>
@@ -514,35 +526,58 @@
                 <input type="text" id="ia-onb-nome-ia" class="input-field" placeholder="Como queres chamar o teu assistente? (ex: Bela)" style="margin-bottom:12px;text-align:center;">
                 <button class="btn btn-primary btn-block" id="ia-onb-comecar">Começar</button>
               </div>
-              <div id="ia-chat-empty">
-                <div class="ia-chat-empty-title">Como posso ajudar hoje?</div>
-                <div class="ia-chat-empty-sub">Pergunte sobre vendas, clientes, agenda, equipa, caixa ou desempenho.</div>
-              </div>
-              <div id="ia-chat-container" style="position:relative;">
+              <div id="ia-chat-container" class="ia-chat-shell" style="position:relative;">
+                <div class="ia-bg-art" aria-hidden="true">
+                  <svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                    <!-- Gestor homem + agente IA em diálogo -->
+                    <ellipse cx="160" cy="175" rx="90" ry="10" fill="#e8e4df" opacity=".5"/>
+                    <!-- Gestor (esquerda) -->
+                    <circle cx="110" cy="78" r="22" fill="#d4c4b0"/>
+                    <ellipse cx="110" cy="78" rx="14" ry="12" fill="#c4a484"/>
+                    <path d="M88 110 Q110 98 132 110 L138 155 Q110 165 82 155 Z" fill="#3d5a80"/>
+                    <rect x="98" y="118" width="24" height="8" rx="2" fill="#e8eef5"/>
+                    <!-- Agente IA (direita) -->
+                    <circle cx="210" cy="76" r="22" fill="#e8e4df"/>
+                    <circle cx="210" cy="76" r="14" fill="#f5f0ea"/>
+                    <circle cx="204" cy="74" r="2.2" fill="#c9a227"/>
+                    <circle cx="216" cy="74" r="2.2" fill="#c9a227"/>
+                    <path d="M203 82 Q210 88 217 82" fill="none" stroke="#c9a227" stroke-width="1.5" stroke-linecap="round"/>
+                    <path d="M188 108 Q210 96 232 108 L236 152 Q210 162 184 152 Z" fill="#2b2b2b"/>
+                    <circle cx="210" cy="122" r="6" fill="#c9a227" opacity=".85"/>
+                    <!-- Balões -->
+                    <ellipse cx="70" cy="48" rx="28" ry="16" fill="#fff" stroke="#e0dcd6" stroke-width="1.5"/>
+                    <path d="M78 62 L82 72 L88 60" fill="#fff" stroke="#e0dcd6" stroke-width="1"/>
+                    <ellipse cx="250" cy="44" rx="30" ry="17" fill="#fff" stroke="#e0dcd6" stroke-width="1.5"/>
+                    <path d="M242 58 L236 70 L248 58" fill="#fff" stroke="#e0dcd6" stroke-width="1"/>
+                    <circle cx="248" cy="42" r="2" fill="#c9a227"/>
+                    <circle cx="256" cy="42" r="2" fill="#c9a227"/>
+                    <circle cx="264" cy="42" r="2" fill="#c9a227"/>
+                  </svg>
+                </div>
+                <div id="ia-chat-empty">
+                  <div class="ia-chat-empty-title">Como posso ajudar hoje?</div>
+                  <div class="ia-chat-empty-sub">Pergunte sobre vendas, clientes, agenda, equipa, caixa ou desempenho.</div>
+                </div>
                 <div class="ia-chat" id="ia-chat"></div>
                 <div id="ia-offline-overlay">
-                  <svg width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="var(--neutral-300)" stroke-width="2">
-                    <path d="M20 50 L30 40 L40 50 L50 30 L60 40 L70 30" stroke-linecap="round"/>
-                    <path d="M20 30 L30 20 L40 30 L50 20 L60 30 L70 20" stroke-linecap="round" stroke-dasharray="4 4"/>
-                    <path d="M40 60 V70" stroke-width="3"/>
-                    <circle cx="40" cy="75" r="2" fill="var(--neutral-300)"/>
-                  </svg>
-                  <h3 style="font-family:var(--font-sans);font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:12px 0 4px;">Sem internet</h3>
+                  <h3 style="font-family:var(--font-sans);font-size:1rem;font-weight:600;color:var(--text-primary);margin:12px 0 4px;">Sem internet</h3>
                   <p style="font-size:0.85rem;color:var(--text-secondary);max-width:240px;">A Benza necessita de ligação para responder.</p>
                   <button class="btn btn-secondary btn-sm" id="ia-offline-retry" style="margin-top:12px;">Tentar novamente</button>
                 </div>
               </div>
-              <div class="ia-input-row">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--gold)" style="flex-shrink:0;"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg>
-                <input type="text" id="ia-input" class="input-field" placeholder="Faça uma pergunta..." style="flex:1;border:none;box-shadow:none;background:transparent;padding:4px;font-size:.85rem;">
-                <button class="btn btn-primary" id="ia-enviar">Perguntar <span aria-hidden="true">→</span></button>
+              <div class="ia-composer">
+                <div class="ia-input-row">
+                  <textarea id="ia-input" class="input-field ia-input-area" rows="1" placeholder="Faça uma pergunta…" autocomplete="off" enterkeyhint="send"></textarea>
+                  <button type="button" class="ia-send-btn is-idle" id="ia-enviar" aria-label="Enviar">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+                  </button>
+                </div>
+                <div class="ia-composer-meta">
+                  <span class="ia-limite">Perguntas hoje: <span id="ia-contador">0</span></span>
+                  <span id="ia-status">IA pronta</span>
+                </div>
               </div>
-              <div class="ia-input-exemplo">Ex.: Qual foi o meu lucro esta semana?</div>
-              <div class="ia-limite">
-                Perguntas hoje: <span id="ia-contador">0</span>
-              </div>
-              <div style="font-size:.65rem;color:var(--text-muted);text-align:center;margin-top:4px;">
-                <span id="ia-status">IA pronta</span>
+              <div class="ia-input-exemplo" style="display:none">Ex.: Qual foi o meu lucro esta semana?
               </div>
             </div>
 
@@ -1221,6 +1256,37 @@
   </div>
 
   <!-- SCRIPTS — runtime único (Fase 1.4). Fontes individuais ficam no repo para edição; ordem em build-bundle.js. -->
+  
+<!-- Sheet: espaço temporal dos KPIs -->
+<div id="modal-kpi-temporal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="kpi-temporal-title">
+  <div class="bp-sheet modal-sheet kpi-temporal-sheet">
+    <div class="bp-sheet-handle handle" aria-hidden="true"></div>
+    <div class="bp-sheet-header">
+      <div class="bp-sheet-eyebrow">Resumo</div>
+      <h2 class="bp-sheet-title" id="kpi-temporal-title">Espaço temporal</h2>
+      <p class="bp-sheet-subtitle">Os KPIs e o mini-gráfico usam o mesmo intervalo.</p>
+    </div>
+    <div class="bp-sheet-body" id="kpi-temporal-body">
+      <div class="kpi-temporal-seg" role="group" aria-label="Espaço temporal">
+        <button type="button" class="kpi-temporal-opt" data-periodo="7dias">7 dias</button>
+        <button type="button" class="kpi-temporal-opt" data-periodo="30dias">30 dias</button>
+        <button type="button" class="kpi-temporal-opt" data-periodo="mes">Mês</button>
+        <button type="button" class="kpi-temporal-opt" data-periodo="ano">Ano</button>
+      </div>
+      <div class="kpi-temporal-summary">
+        <div class="kpi-temporal-row"><span>Intervalo</span><strong id="kpi-temporal-range">—</strong></div>
+        <div class="kpi-temporal-row"><span>Receita</span><strong id="kpi-temporal-rev">—</strong></div>
+        <div class="kpi-temporal-row"><span>Vendas</span><strong id="kpi-temporal-n">—</strong></div>
+      </div>
+      <canvas id="kpi-temporal-chart" width="320" height="100" style="width:100%;height:100px;display:block;"></canvas>
+    </div>
+    <div class="bp-sheet-footer modal-actions">
+      <button type="button" class="btn btn-secondary" data-close="modal-kpi-temporal">Fechar</button>
+      <button type="button" class="btn btn-primary" id="kpi-temporal-apply">Aplicar</button>
+    </div>
+  </div>
+</div>
+
   <script src="app.bundle.js"></script>
 
 

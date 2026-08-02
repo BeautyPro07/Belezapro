@@ -1295,39 +1295,49 @@ function actualizarBannerOffline() {
 }
 
 function atualizarIndicadorSync() {
-  const dot  = document.getElementById('sync-dot');
   const text = document.getElementById('sync-text');
   const container = document.getElementById('sync-status-container');
-  const fila = getSyncQueue();
-  const pendentes = fila.filter(function (op) { return op.failed !== true; }).length;
-  const falhados = fila.filter(function (op) { return op.failed === true; }).length;
+  const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
+  const pendentes = fila.filter(function (op) { return op && op.failed !== true; }).length;
+  const falhados = fila.filter(function (op) { return op && op.failed === true; }).length;
+  const offline = (typeof navigator !== 'undefined' && !navigator.onLine);
 
-  if (dot && text) {
-    if (!navigator.onLine) {
-      dot.classList.remove('online');
-      text.textContent = pendentes > 0
-        ? ('Offline · ' + pendentes + ' pend.')
-        : 'Offline';
-    } else {
-      dot.classList.add('online');
-      if (pendentes > 0) {
-        text.textContent = pendentes + (pendentes === 1 ? ' pendente' : ' pendentes');
-      } else if (falhados > 0) {
-        text.textContent = falhados + (falhados === 1 ? ' falha' : ' falhas');
-      } else {
-        text.textContent = 'Sincronizado';
-      }
-    }
+  let stateKey = 'ok';
+  let label = '';
+  if (offline) {
+    stateKey = 'offline';
+    label = pendentes > 0 ? ('Offline · ' + pendentes + ' pend.') : 'Offline';
+  } else if (pendentes > 0) {
+    stateKey = 'pending';
+    label = pendentes === 1 ? '1 pendente' : (pendentes + ' pendentes');
+  } else if (falhados > 0) {
+    stateKey = 'error';
+    label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
   }
 
+  const show = stateKey !== 'ok';
+  if (text) text.textContent = label;
   if (container) {
-    container.style.display = 'flex';
-    container.setAttribute('data-state',
-      !navigator.onLine ? 'offline' : (pendentes > 0 ? 'pending' : (falhados > 0 ? 'error' : 'ok'))
-    );
+    container.classList.toggle('is-visible', show);
+    container.style.display = show ? 'flex' : 'none';
+    container.setAttribute('data-state', stateKey);
+    container.setAttribute('aria-hidden', show ? 'false' : 'true');
+    if (show) container.setAttribute('title', label);
+    else container.removeAttribute('title');
   }
+  // Evento único para outros módulos (sem DOM scraping)
+  try {
+    window.dispatchEvent(new CustomEvent('bp:sync-state', { detail: { state: stateKey, pendentes: pendentes, falhados: falhados, offline: offline } }));
+  } catch (_) {}
 
-  actualizarBannerOffline();
+  if (typeof actualizarBannerOffline === 'function') actualizarBannerOffline();
+}
+
+/** Alias estável — única API pública de UI de sync */
+function setSyncUi() { atualizarIndicadorSync(); }
+if (typeof window !== 'undefined') {
+  window.setSyncUi = setSyncUi;
+  window.atualizarIndicadorSync = atualizarIndicadorSync;
 }
 
 function addToSyncQueue(tabela, operacao, payload) {
@@ -3731,7 +3741,9 @@ function renderDashboard() {
   }
 
   const h = new Date().getHours();
-  const greetEl = document.getElementById('greeting');
+  
+  try { if (typeof initKpiTemporalUi === 'function') initKpiTemporalUi(); if (typeof actualizarKpiMiniChart === 'function') actualizarKpiMiniChart(); } catch (eK) { console.warn('[kpi-temporal]', eK); }
+const greetEl = document.getElementById('greeting');
   if (greetEl) {
     greetEl.textContent = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   }
@@ -4278,6 +4290,191 @@ setInterval(syncAgenda, 60000);
 
 // Verificar quando a app volta ao foco
 document.addEventListener('visibilitychange', syncAgenda);
+
+// ====================================================================
+//  KPI mini-chart + espaço temporal (7d / 30d / mês / ano)
+// ====================================================================
+function _kpiSerieReceita(intervalo) {
+  const movs = state.movimentos || [];
+  const inicio = new Date((intervalo.inicio || hoje()) + 'T00:00:00');
+  const fim = new Date((intervalo.fim || hoje()) + 'T00:00:00');
+  const ms = 86400000;
+  const dias = Math.max(1, Math.round((fim - inicio) / ms) + 1);
+  const passo = dias > 31 ? Math.ceil(dias / 31) : 1;
+  const serie = [];
+  for (let i = 0; i < dias; i += passo) {
+    const d = new Date(inicio.getTime() + i * ms);
+    const ds = formatarDataISO(d);
+    const total = movs.filter(m => m.tipo === 'venda' && m.data === ds)
+      .reduce((s, v) => s + (Number(v.valor) || 0), 0);
+    serie.push(total);
+  }
+  return serie;
+}
+
+function _desenharKpiSpark(canvasId, serie) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const gold = (getComputedStyle(document.documentElement).getPropertyValue('--gold') || '#c9a227').trim();
+  if (!serie || !serie.length) {
+    ctx.strokeStyle = gold;
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(4, h / 2);
+    ctx.lineTo(w - 4, h / 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const max = Math.max.apply(null, serie.concat([1]));
+  const pad = 3;
+  ctx.beginPath();
+  serie.forEach(function (v, i) {
+    const x = pad + (i / Math.max(serie.length - 1, 1)) * (w - pad * 2);
+    const y = h - pad - (v / max) * (h - pad * 2);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = 1.75;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  // fill suave
+  const lastX = pad + ((serie.length - 1) / Math.max(serie.length - 1, 1)) * (w - pad * 2);
+  ctx.lineTo(lastX, h - pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.closePath();
+  ctx.fillStyle = gold;
+  ctx.globalAlpha = 0.12;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function _kpiTemporalLabels() {
+  return { '7dias': '7 dias', '30dias': '30 dias', mes: 'Mês', ano: 'Ano' };
+}
+
+function actualizarKpiMiniChart() {
+  const intervalo = getIntervaloDashAtual();
+  const serie = _kpiSerieReceita(intervalo);
+  _desenharKpiSpark('kpi-mini-chart', serie);
+  const lab = document.getElementById('kpi-mini-chart-label');
+  const map = _kpiTemporalLabels();
+  const text = map[state.dashPeriodo] || (intervalo.label || 'Período');
+  if (lab) lab.textContent = text;
+  const hint = document.getElementById('kpi-temporal-hint');
+  if (hint) hint.textContent = (intervalo.label || text) + ' · toque para alterar';
+}
+
+let _kpiTemporalDraft = null;
+function abrirKpiTemporalSheet() {
+  _kpiTemporalDraft = state.dashPeriodo;
+  // Se período actual não é um dos 4, default 7dias no UI (sem aplicar ainda)
+  const opts = ['7dias', '30dias', 'mes', 'ano'];
+  if (opts.indexOf(_kpiTemporalDraft) < 0) _kpiTemporalDraft = '7dias';
+  document.querySelectorAll('.kpi-temporal-opt').forEach(function (b) {
+    b.classList.toggle('is-active', b.dataset.periodo === _kpiTemporalDraft);
+  });
+  _refreshKpiTemporalPreview(_kpiTemporalDraft);
+  if (typeof openModal === 'function') openModal('modal-kpi-temporal');
+  else {
+    const el = document.getElementById('modal-kpi-temporal');
+    if (el) { el.classList.add('open'); el.style.display = 'flex'; }
+  }
+}
+
+function _refreshKpiTemporalPreview(periodo) {
+  const intervalo = calcularIntervaloPeriodo(periodo, 0);
+  const movs = (state.movimentos || []).filter(function (m) {
+    return m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim;
+  });
+  const rev = _somaVendas(movs);
+  const rangeEl = document.getElementById('kpi-temporal-range');
+  const revEl = document.getElementById('kpi-temporal-rev');
+  const nEl = document.getElementById('kpi-temporal-n');
+  if (rangeEl) rangeEl.textContent = (intervalo.label || '') + ' · ' + formatarDataCurta(intervalo.inicio) + ' – ' + formatarDataCurta(intervalo.fim);
+  if (revEl) revEl.textContent = typeof fmtKz === 'function' ? fmtKz(rev) : String(rev);
+  if (nEl) nEl.textContent = String(movs.length);
+  _desenharKpiSpark('kpi-temporal-chart', _kpiSerieReceita(intervalo));
+}
+
+function aplicarKpiTemporal(periodo) {
+  if (!periodo) return;
+  state.dashPeriodo = periodo;
+  state.dashOffset = 0;
+  try {
+    localStorage.setItem('bp_dash_periodo', periodo);
+    localStorage.setItem('bp_dash_offset', '0');
+  } catch (_) {}
+  // Gráfico principal partilha o intervalo do dash (getIntervaloDashAtual)
+  if (periodo === 'hora') {
+    state.chartPeriodo = 'hora';
+  } else {
+    state.chartPeriodo = (periodo === '7dias') ? 'semana' : ((periodo === '30dias') ? 'mes' : periodo);
+  }
+  try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
+  if (typeof _bpSetChartFilterActive === 'function') {
+    try { _bpSetChartFilterActive(state.chartPeriodo === 'semana' && periodo === '7dias' ? 'semana' : (periodo === '30dias' ? 'mes' : state.chartPeriodo)); } catch (_) {}
+  }
+  if (typeof closeModal === 'function') closeModal('modal-kpi-temporal');
+  else {
+    var el = document.getElementById('modal-kpi-temporal');
+    if (el) { el.classList.remove('open'); el.style.display = ''; }
+  }
+  if (typeof renderDashboard === 'function') renderDashboard();
+  if (typeof renderizarGrafico === 'function') renderizarGrafico();
+  actualizarKpiMiniChart();
+}
+
+function initKpiTemporalUi() {
+  if (window.__bpKpiTemporalInit) {
+    actualizarKpiMiniChart();
+    return;
+  }
+  window.__bpKpiTemporalInit = true;
+  const btn = document.getElementById('kpi-mini-chart-btn');
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      abrirKpiTemporalSheet();
+    });
+  }
+  document.querySelectorAll('.kpi-temporal-opt').forEach(function (b) {
+    if (b.dataset.bound) return;
+    b.dataset.bound = '1';
+    b.addEventListener('click', function () {
+      _kpiTemporalDraft = this.dataset.periodo;
+      document.querySelectorAll('.kpi-temporal-opt').forEach(function (x) {
+        x.classList.toggle('is-active', x === b);
+      });
+      _refreshKpiTemporalPreview(_kpiTemporalDraft);
+    });
+  });
+  const apply = document.getElementById('kpi-temporal-apply');
+  if (apply && !apply.dataset.bound) {
+    apply.dataset.bound = '1';
+    apply.addEventListener('click', function () {
+      aplicarKpiTemporal(_kpiTemporalDraft || '7dias');
+    });
+  }
+  const modal = document.getElementById('modal-kpi-temporal');
+  if (modal && !modal.dataset.bound) {
+    modal.dataset.bound = '1';
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal || e.target.getAttribute('data-close') === 'modal-kpi-temporal') {
+        if (typeof closeModal === 'function') closeModal('modal-kpi-temporal');
+      }
+    });
+  }
+  actualizarKpiMiniChart();
+}
+
 
 /* ===== FILE: ui-render-clientes-caixa-equipa.js ===== */
 // ====================================================================
@@ -4951,7 +5148,7 @@ function renderizarGrafico() {
   const ctx = canvas.getContext('2d');
   const parentWidth = canvas.parentElement.getBoundingClientRect().width || 400;
   const width = Math.max(parentWidth, 200);
-  const height = 160;
+  const height = 140;
   canvas.width = width;
   canvas.height = height;
   ctx.clearRect(0, 0, width, height);
@@ -5003,53 +5200,95 @@ function renderizarGrafico() {
     }
   }
 
+  const hasData = dados.some(function (v) { return Number(v) > 0; });
   maxVal = Math.max(maxVal, 1);
+  const emptyEl = document.getElementById('dash-chart-empty');
+  if (emptyEl) {
+    emptyEl.hidden = hasData;
+    emptyEl.setAttribute('aria-hidden', hasData ? 'true' : 'false');
+  }
 
-  const barW = (width - 40) / Math.max(labels.length, 1) - 4;
-  const startX = 20;
-  const baseY = height - 20;
-  const gold = (typeof getComputedStyle === 'function' && getComputedStyle(document.documentElement).getPropertyValue('--gold').trim()) || '#D4AF37';
-  const goldDark = (typeof getComputedStyle === 'function' && getComputedStyle(document.documentElement).getPropertyValue('--gold-600').trim()) || '#A7872B';
-  const mutedBar = (typeof getComputedStyle === 'function' && getComputedStyle(document.documentElement).getPropertyValue('--border-soft').trim()) || '#DCD5C9';
+  // Tokens CSS (fallback seguro)
+  const cs = (typeof getComputedStyle === 'function') ? getComputedStyle(document.documentElement) : null;
+  const tok = function (name, fb) {
+    try { const v = cs && cs.getPropertyValue(name); return (v && v.trim()) || fb; } catch (_) { return fb; }
+  };
+  const gold = tok('--gold', '#D4AF37');
+  const goldDark = tok('--gold-600', tok('--gold-dark', '#A7872B'));
+  const mutedBar = tok('--border-soft', '#DCD5C9');
+  const textMuted = tok('--text-muted', '#8c8980');
+  const textPrimary = tok('--text-primary', '#1C1A18');
 
-  for (let i = 0; i < labels.length; i++) {
-    const x = startX + i * (barW + 4);
-    const barH = Math.max(4, (dados[i] / maxVal) * (height - 40));
-    const y = baseY - barH;
-    const radius = 4;
+  const n = Math.max(labels.length, 1);
+  // Largura adaptativa: muitas barras → mais finas; poucas → cap 40px (nunca 1 barra a largura toda)
+  const slot = (width - 48) / n;
+  const barW = Math.min(40, Math.max(6, slot - 6));
+  const gap = Math.min(8, Math.max(3, (slot - barW)));
+  const groupW = n * barW + (n - 1) * gap;
+  const startX = Math.max(24, (width - groupW) / 2);
+  const baseY = height - 22;
+  const plotH = height - 40;
 
-    const grad = ctx.createLinearGradient(0, y, 0, baseY);
-    if (dados[i] > 0) {
-      grad.addColorStop(0, gold);
-      grad.addColorStop(1, goldDark);
-    } else {
-      grad.addColorStop(0, mutedBar);
-      grad.addColorStop(1, mutedBar);
-    }
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + barW - radius, y);
-    ctx.arcTo(x + barW, y, x + barW, y + radius, radius);
-    ctx.lineTo(x + barW, baseY);
-    ctx.lineTo(x, baseY);
-    ctx.lineTo(x, y + radius);
-    ctx.arcTo(x, y, x + radius, y, radius);
-    ctx.closePath();
-    ctx.fill();
+  // Baseline discreta
+  ctx.strokeStyle = mutedBar;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(16, baseY + 0.5);
+  ctx.lineTo(width - 16, baseY + 0.5);
+  ctx.stroke();
 
-    const isLast = (i === labels.length - 1 && dashOff === 0);
-    ctx.fillStyle = isLast ? '#1C1A18' : '#8c8980';
-    ctx.font = isLast ? 'bold 9px Inter' : '9px Inter';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(labels[i], x + barW / 2, baseY + 4);
+  if (!hasData) {
+    // Só empty state — sem barras fantasma
+    labels.forEach(function (lab, i) {
+      const x = startX + i * (barW + gap) + barW / 2;
+      ctx.fillStyle = textMuted;
+      ctx.font = '9px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      if (n <= 14) ctx.fillText(lab, x, baseY + 4);
+    });
+  } else {
+    for (let i = 0; i < labels.length; i++) {
+      const x = startX + i * (barW + gap);
+      const val = Number(dados[i]) || 0;
+      const barH = val > 0 ? Math.max(3, (val / maxVal) * plotH) : 0;
+      const y = baseY - barH;
+      const radius = Math.min(4, barW / 2);
 
-    if (mostrarValores && dados[i] > 0) {
-      ctx.fillStyle = '#1C1A18';
-      ctx.font = 'bold 9px Inter';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(fmtKz(dados[i]).replace(' Kz', ''), x + barW / 2, y - 2);
+      if (val > 0) {
+        const grad = ctx.createLinearGradient(0, y, 0, baseY);
+        grad.addColorStop(0, gold);
+        grad.addColorStop(1, goldDark);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + barW - radius, y);
+        ctx.arcTo(x + barW, y, x + barW, y + radius, radius);
+        ctx.lineTo(x + barW, baseY);
+        ctx.lineTo(x, baseY);
+        ctx.lineTo(x, y + radius);
+        ctx.arcTo(x, y, x + radius, y, radius);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // stub mínimo (1px) só para marcar o eixo quando há dados noutros dias
+        ctx.fillStyle = mutedBar;
+        ctx.fillRect(x + barW * 0.25, baseY - 2, barW * 0.5, 2);
+      }
+
+      const isLast = (i === labels.length - 1 && dashOff === 0);
+      ctx.fillStyle = isLast ? textPrimary : textMuted;
+      ctx.font = (isLast ? 'bold ' : '') + '9px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      if (n <= 16) ctx.fillText(labels[i], x + barW / 2, baseY + 4);
+
+      if (mostrarValores && val > 0 && typeof fmtKz === 'function') {
+        ctx.fillStyle = textPrimary;
+        ctx.font = 'bold 9px system-ui, sans-serif';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(fmtKz(val).replace(' Kz', ''), x + barW / 2, y - 2);
+      }
     }
   }
 
@@ -5114,31 +5353,39 @@ function renderizarGrafico() {
 }
 
 let _chartControlsBound = false;
+function _bpSetChartFilterActive(periodo) {
+  document.querySelectorAll('.dash-chart-seg .chart-filter, .chart-filter[data-periodo]').forEach(function (b) {
+    const on = b.getAttribute('data-periodo') === periodo;
+    b.classList.toggle('is-active', on);
+    b.classList.toggle('btn-primary', on);
+    b.classList.toggle('btn-secondary', !on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
 function initChartControls() {
   if (_chartControlsBound) return;
   _chartControlsBound = true;
-  document.querySelectorAll('.chart-filter').forEach(btn => {
-    btn.addEventListener('click', function() {
+  // Estado inicial coerente com state
+  const inicial = state.chartPeriodo || state.dashPeriodo || 'semana';
+  _bpSetChartFilterActive(inicial === 'hora' ? 'hora' : (state.dashPeriodo || inicial));
+
+  document.querySelectorAll('.dash-chart-seg .chart-filter').forEach(function (btn) {
+    btn.addEventListener('click', function () {
       const periodo = this.dataset.periodo;
+      if (!periodo) return;
       if (periodo === 'hora') {
         state.chartPeriodo = 'hora';
       } else {
-        state.chartPeriodo = 'semana';
-        const mapDash = { dia: 'dia', semana: 'semana', mes: 'mes' };
-        if (mapDash[periodo]) {
-          state.dashPeriodo = mapDash[periodo];
-          state.dashOffset = 0;
+        state.chartPeriodo = periodo; // dia | semana | mes — alinhado ao dash
+        state.dashPeriodo = periodo;
+        state.dashOffset = 0;
+        try {
           localStorage.setItem('bp_dash_periodo', state.dashPeriodo);
           localStorage.setItem('bp_dash_offset', '0');
-        }
+        } catch (_) {}
       }
-      localStorage.setItem('bp_chart_periodo', state.chartPeriodo);
-      document.querySelectorAll('.chart-filter').forEach(b => {
-        b.classList.remove('btn-primary');
-        b.classList.add('btn-secondary');
-      });
-      this.classList.remove('btn-secondary');
-      this.classList.add('btn-primary');
+      try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
+      _bpSetChartFilterActive(periodo);
       if (typeof renderDashboard === 'function') renderDashboard();
       renderizarGrafico();
     });
@@ -8364,6 +8611,10 @@ function montarMsgBotIA(resposta, ts) {
 function atualizarEstadoVazioIA() {
   const vazio = document.getElementById('ia-chat-empty');
   const chat = document.getElementById('ia-chat');
+  const shell = document.getElementById('ia-chat-container');
+  if (shell && chat) {
+    shell.classList.toggle('has-messages', chat.children.length > 0);
+  }
   if (vazio && chat) vazio.style.display = chat.children.length > 0 ? 'none' : '';
 }
 const IA_HIST_KEY = () => 'bp_ia_chat_' + (state.config.salaoId || 'local');
@@ -8384,12 +8635,57 @@ function guardarHistoricoIA() {
 }
 carregarHistoricoIA();
 
-document.getElementById('ia-enviar').addEventListener('click', async () => {
+function bpIaAutosizeInput() {
+  const input = document.getElementById('ia-input');
+  if (!input) return;
+  input.style.height = 'auto';
+  const h = Math.min(120, Math.max(40, input.scrollHeight));
+  input.style.height = h + 'px';
+}
+function bpIaSyncSendState() {
   const input = document.getElementById('ia-input');
   const btn = document.getElementById('ia-enviar');
-  const pergunta = input.value.trim();
+  if (!btn) return;
+  const has = !!(input && input.value.trim());
+  btn.classList.toggle('is-idle', !has);
+  if (!has) btn.classList.remove('is-sending');
+}
+function bpIaBindComposer() {
+  const input = document.getElementById('ia-input');
+  const btn = document.getElementById('ia-enviar');
+  if (!input || input.dataset.bpIaBound === '1') return;
+  input.dataset.bpIaBound = '1';
+  input.addEventListener('input', function () {
+    bpIaAutosizeInput();
+    bpIaSyncSendState();
+  });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (btn) btn.click();
+    }
+  });
+  bpIaAutosizeInput();
+  bpIaSyncSendState();
+}
+
+document.getElementById('ia-enviar')?.addEventListener('click', async () => {
+  const input = document.getElementById('ia-input');
+  const btn = document.getElementById('ia-enviar');
+  const pergunta = (input && input.value || '').trim();
   if (!pergunta || _iaBusy) return;
   const chat = document.getElementById('ia-chat');
+  if (!chat) return;
+  if (btn) {
+    btn.classList.remove('is-idle');
+    btn.classList.add('is-sending');
+    // reinicia transição 360°
+    btn.style.transition = 'none';
+    btn.style.transform = 'rotate(0deg)';
+    void btn.offsetWidth;
+    btn.style.transition = '';
+    btn.style.transform = '';
+  }
   chat.innerHTML += montarMsgUsuarioIA(pergunta);
   atualizarEstadoVazioIA();
   const pensando = document.createElement('div');
@@ -8398,13 +8694,22 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
   pensando.innerHTML = `<div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span></div><span class="ia-dots">Benza está a analisar<span>.</span><span>.</span><span>.</span></span>`;
   chat.appendChild(pensando);
   chat.scrollTop = chat.scrollHeight;
-  input.value = '';
+  if (input) {
+    input.value = '';
+    bpIaAutosizeInput();
+  }
   if (btn) btn.disabled = true;
   let resposta = null;
   try {
     resposta = await perguntarIA(pergunta);
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = false;
+      setTimeout(function () {
+        btn.classList.remove('is-sending');
+        bpIaSyncSendState();
+      }, 560);
+    }
   }
   document.getElementById('ia-pensando')?.remove();
   if (resposta) {
@@ -8415,18 +8720,23 @@ document.getElementById('ia-enviar').addEventListener('click', async () => {
     guardarHistoricoIA();
   }
   actualizarContadorIA();
+  bpIaSyncSendState();
 });
 
-document.getElementById('ia-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('ia-enviar').click();
-});
+bpIaBindComposer();
+document.addEventListener('DOMContentLoaded', bpIaBindComposer);
 
 // Sugestões rápidas e chips de continuação (delegação de eventos — cobre também os que são criados depois de cada resposta)
 document.addEventListener('click', (e) => {
   const card = e.target.closest('.ia-sugestao-card, .ia-followup-chip');
   if (card && card.dataset.pergunta) {
     const input = document.getElementById('ia-input');
-    if (input) { input.value = card.dataset.pergunta; document.getElementById('ia-enviar').click(); }
+    if (input) {
+      input.value = card.dataset.pergunta;
+      if (typeof bpIaAutosizeInput === 'function') bpIaAutosizeInput();
+      if (typeof bpIaSyncSendState === 'function') bpIaSyncSendState();
+      document.getElementById('ia-enviar').click();
+    }
   }
   const fb = e.target.closest('.ia-feedback-btn');
   if (fb) {

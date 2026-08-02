@@ -354,3 +354,205 @@
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
+
+
+/* ---- Dashboard chart toolbar (compacto) ---- */
+.dash-chart-card {
+  padding: 12px 14px 10px;
+  position: relative;
+}
+.dash-chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 10px;
+}
+.dash-chart-periodo-label {
+  font-size: .62rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.dash-chart-seg {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-soft, #f3efe9);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 0;
+}
+.dash-chart-seg .chart-filter {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: .68rem;
+  font-weight: 600;
+  padding: 5px 11px;
+  min-height: 28px;
+  height: 28px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1;
+  box-shadow: none;
+}
+.dash-chart-seg .chart-filter.is-active,
+.dash-chart-seg .chart-filter.btn-primary {
+  background: var(--gold, #c9a227);
+  color: #1c1a18;
+}
+.dash-chart-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.dash-chart-nav-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--card-white, #fff);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.dash-chart-nav-label {
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 4.5rem;
+  text-align: center;
+}
+.dash-chart-eye {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--gold-dark, #a8841a);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.dash-chart-canvas-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 140px;
+}
+.dash-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .78rem;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.dash-chart-empty[hidden] { display: none !important; }
+
+/* Mini chart temporal — dentro da grelha KPI */
+.kpi-temporal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-premium);
+  min-height: 52px;
+}
+.kpi-temporal-bar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.kpi-temporal-bar-title {
+  font-size: .62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-secondary);
+}
+.kpi-temporal-bar-hint {
+  font-size: .68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpi-mini-chart-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft, #f7f4ef);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.kpi-mini-chart-btn:hover,
+.kpi-mini-chart-btn:focus-visible {
+  border-color: var(--gold, #c9a227);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.12);
+  outline: none;
+}
+.kpi-mini-chart-btn:active { transform: scale(0.98); }
+.kpi-mini-chart-btn canvas {
+  display: block;
+  width: 100px;
+  height: 32px;
+}
+.kpi-mini-chart-label {
+  font-size: .62rem;
+  font-weight: 600;
+  color: var(--gold-dark, #a8841a);
+  white-space: nowrap;
+}
+.kpi-temporal-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.kpi-temporal-opt {
+  flex: 1 1 auto;
+  min-width: 4.5rem;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft, #f3efe9);
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.kpi-temporal-opt.is-active {
+  background: var(--gold, #c9a227);
+  color: #1c1a18;
+  border-color: transparent;
+}
+.kpi-temporal-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: .8rem;
+}
+.kpi-temporal-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+.kpi-temporal-row strong { color: var(--text-primary); font-weight: 600; }
