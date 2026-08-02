@@ -1,34 +1,13 @@
-# Pacote robusto — UI fotos/CRM + lazy galeria (revisão cirúrgica)
+# Galeria CRM + troca de foto de perfil
 
-## Fragilidades da versão anterior e correcções
+## Galeria não abria
+Causa: openGaleria chamava ensureShell/openShell (funções privadas do IIFE ops-crm).
+Fix: ensureShell/openShell locais em media-galeria via ensureBpSheetModal/openBpSheetModal.
 
-### Galeria lazy
-| Antes | Agora |
-|-------|--------|
-| Observer no *viewport* (modal scroll ignorado) | `root` = contentor com overflow do modal |
-| `src`/data-src sem escape | `bpGalEscAttr` |
-| Re-render deixava observers em nós mortos | `bpGalDisconnect()` no início de `renderGaleria` |
-| data: e remote tratados igual | data: sempre eager; remote: 4 eager + resto lazy |
-| `src=""` possível | `bpGalSrc` + placeholder SVG estável |
-| onload em cache incompleto | `complete && naturalWidth` |
-| CSS misturava eager com opacity baixa | classes `pending` / `loaded` / `error` claras |
-
-### Fotos sync / ficha
-| Antes | Agora |
-|-------|--------|
-| `foto: null` no fromSupabase | removido |
-| merge podia perder data URL local | merge preserva `foto` data: e `foto_url` |
-| img no hero sem escape | atributo escapado + lazy |
-
-### Modal venda
-| Antes | Agora |
-|-------|--------|
-| `display:flex` sem limpar | `closeModal` limpa display |
-| backdrop frágil | só se `target` for o overlay; Escape fecha |
-
-### CRM
-Exports `open*` reais em BPOps/Equipa/Finance/Gestão/Marketing + acordeão.
-
-## Deploy
-app.bundle.js + index.html + login-carrinho-venda.css  
-Hard refresh / limpar cache SW.
+## Foto não substituía
+Causa: Storage usa o mesmo path entityId.jpg; URL pública igual → browser/CDN serviam a imagem antiga. Além disso mantinha-se foto_url antiga até ao upload.
+Fix:
+- Ao escolher nova foto: foto_url = null (UI usa data: local)
+- Após upload: foto_url com ?v=timestamp (cache-bust)
+- cacheControl Storage 60s
+- patchRowAvatar força ?v= se necessário

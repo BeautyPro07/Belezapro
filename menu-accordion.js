@@ -158,7 +158,10 @@
           }
           var ok = false;
           if (a === "galeria") {
-            ok = call(window.BPMedia && BPMedia.openGaleria) || call(window.openGaleria);
+            ok = call(window.openGaleria) || call(window.BPMedia && BPMedia.openGaleria);
+            if (!ok) {
+              console.warn("[menu] openGaleria ausente — BPMedia?", !!window.BPMedia);
+            }
           } else if (a === "stock") ok = call(window.BPOps && BPOps.openStock);
           else if (a === "forn") ok = call(window.BPOps && BPOps.openFornecedores);
           else if (a === "nps") ok = call(window.BPOps && BPOps.openNps);

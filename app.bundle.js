@@ -12576,7 +12576,10 @@ window.renderBarraMeta = renderBarraMeta;
           }
           var ok = false;
           if (a === "galeria") {
-            ok = call(window.BPMedia && BPMedia.openGaleria) || call(window.openGaleria);
+            ok = call(window.openGaleria) || call(window.BPMedia && BPMedia.openGaleria);
+            if (!ok) {
+              console.warn("[menu] openGaleria ausente — BPMedia?", !!window.BPMedia);
+            }
           } else if (a === "stock") ok = call(window.BPOps && BPOps.openStock);
           else if (a === "forn") ok = call(window.BPOps && BPOps.openFornecedores);
           else if (a === "nps") ok = call(window.BPOps && BPOps.openNps);
@@ -13059,7 +13062,7 @@ window.renderBarraMeta = renderBarraMeta;
       var res = await supabaseClient.storage.from("fotos").upload(path, blob, {
         contentType: "image/jpeg",
         upsert: true,
-        cacheControl: "3600"
+        cacheControl: "60"
       });
       if (res.error) {
         console.warn("[BPMedia] storage upload:", res.error.message || res.error);
@@ -13128,8 +13131,9 @@ window.renderBarraMeta = renderBarraMeta;
       patch.foto_url = null;
       _uploadToken["clientes:" + clienteId] = "cleared";
       removeFotoStorage("clientes", clienteId);
-    } else if (prev && prev.foto_url) {
-      patch.foto_url = prev.foto_url;
+    } else {
+      // Nova foto: anular URL antiga (evita cache CDN da mesma path .jpg)
+      patch.foto_url = null;
     }
     if (typeof updateCliente === "function") {
       await updateCliente(clienteId, patch);
@@ -13150,8 +13154,8 @@ window.renderBarraMeta = renderBarraMeta;
       patch.foto_url = null;
       _uploadToken["profissionais:" + profId] = "cleared";
       removeFotoStorage("profissionais", profId);
-    } else if (prev && prev.foto_url) {
-      patch.foto_url = prev.foto_url;
+    } else {
+      patch.foto_url = null;
     }
     if (typeof updateProfissional === "function") {
       await updateProfissional(profId, patch);
@@ -13194,20 +13198,24 @@ window.renderBarraMeta = renderBarraMeta;
         toastUploadOutcome(result || { url: null, error: "upload" }, { silentOk: true });
         return;
       }
-      var patch = { foto_url: url, foto: null, updated_at: new Date().toISOString() };
+      // Cache-bust: mesmo path .jpg no Storage mantém URL pública — forçar ?v=
+      var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
+      var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
       if (kind === "clientes") {
         var c = (state.clientes || []).find(function (x) { return x.id === entityId; });
-        if (!c || (c.foto && c.foto !== dataUrl && c.foto_url !== url)) {
-          // entidade mudou de foto entretanto — não sobrescrever
-          if (c && c.foto && c.foto !== dataUrl) return;
-        }
+        // Só cancelar se o utilizador já escolheu OUTRA foto mais recente
+        if (c && c.foto && c.foto !== dataUrl && String(c.foto).indexOf("data:") === 0) return;
         if (typeof updateCliente === "function") updateCliente(entityId, patch);
+        else if (c) { Object.assign(c, patch); if (typeof dbPut === "function") dbPut("clientes", c); }
         patchRowAvatar("clientes", entityId);
+        showPreview("bp-cli-foto-preview", bustUrl, entityId);
       } else if (kind === "profissionais") {
         var p = (state.profissionais || []).find(function (x) { return x.id === entityId; });
-        if (p && p.foto && p.foto !== dataUrl) return;
+        if (p && p.foto && p.foto !== dataUrl && String(p.foto).indexOf("data:") === 0) return;
         if (typeof updateProfissional === "function") updateProfissional(entityId, patch);
+        else if (p) { Object.assign(p, patch); if (typeof dbPut === "function") dbPut("profissionais", p); }
         patchRowAvatar("profissionais", entityId);
+        showPreview("bp-prof-foto-preview", bustUrl, entityId);
       }
       // Silencioso no sucesso cloud: UI já mostrou "Foto actualizada" no local
     });
@@ -13229,7 +13237,13 @@ window.renderBarraMeta = renderBarraMeta;
       if (!src) return;
       av.setAttribute("data-avatar-entity", String(entityId));
       av.classList.add("bp-avatar-img", "bp-avatar-done");
-      av.innerHTML = '<img src="' + src + '" alt="" loading="lazy" decoding="async" data-avatar-entity="' + entityId + '">';
+      // Forçar reload se URL http(s) (cache do browser na mesma path Storage)
+      var displaySrc = src;
+      if (displaySrc && (displaySrc.indexOf("http://") === 0 || displaySrc.indexOf("https://") === 0) && displaySrc.indexOf("?v=") < 0 && displaySrc.indexOf("&v=") < 0) {
+        displaySrc = displaySrc + (displaySrc.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
+      }
+      var safe = String(displaySrc).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      av.innerHTML = '<img src="' + safe + '" alt="" loading="lazy" decoding="async" data-avatar-entity="' + entityId + '">';
     } catch (e) {}
   }
 
@@ -13758,17 +13772,65 @@ window.renderBarraMeta = renderBarraMeta;
     document.head.appendChild(st);
   }
 
-  function openGaleria(profIdPreset) {
-    bpGalEnsureStyles();
-    ensureShell("modal-bp-galeria", "Galeria de serviços", "Media", "Fotos dos trabalhos, associadas a cada profissional.");
-    renderGaleria(profIdPreset);
-    openShell("modal-bp-galeria");
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        var body = document.getElementById("modal-bp-galeria-body");
-        bpGalObserve((body && body.querySelector(".bp-gal-grid")) || body);
-      });
+
+  /** Shell do modal — independe de BPOps (ensureShell lá é privado ao IIFE). */
+  function ensureShell(id, title, eyebrow, subtitle) {
+    if (typeof ensureBpSheetModal === "function") {
+      return ensureBpSheetModal(id, title, eyebrow, subtitle);
+    }
+    // Fallback mínimo se core-utils ainda não carregou
+    var el = document.getElementById(id);
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = id;
+    el.className = "modal-overlay";
+    el.setAttribute("role", "dialog");
+    el.innerHTML =
+      '<div class="modal-sheet bp-sheet">' +
+      '<div class="handle"></div>' +
+      '<div class="modal-title" id="' + id + '-title">' + (title || "Galeria") + "</div>" +
+      '<div class="bp-sheet-body" id="' + id + '-body"></div>' +
+      '<div class="modal-actions"><button type="button" class="btn btn-secondary" data-close="' + id + '">Fechar</button></div>' +
+      "</div>";
+    document.body.appendChild(el);
+    el.addEventListener("click", function (e) {
+      if (e.target === el || e.target.getAttribute("data-close") === id) {
+        if (typeof closeModal === "function") closeModal(id);
+        else el.classList.remove("open");
+      }
     });
+    return el;
+  }
+  function openShell(id) {
+    if (typeof openBpSheetModal === "function") openBpSheetModal(id);
+    else if (typeof openModal === "function") openModal(id);
+    else {
+      var el = document.getElementById(id);
+      if (el) {
+        el.classList.add("open");
+        el.style.display = "flex";
+      }
+    }
+  }
+
+  function openGaleria(profIdPreset) {
+    try {
+      bpGalEnsureStyles();
+      ensureShell("modal-bp-galeria", "Galeria de serviços", "Media", "Fotos dos trabalhos, associadas a cada profissional.");
+      renderGaleria(profIdPreset);
+      openShell("modal-bp-galeria");
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var body = document.getElementById("modal-bp-galeria-body");
+          bpGalObserve((body && body.querySelector(".bp-gal-grid")) || body);
+        });
+      });
+    } catch (err) {
+      console.error("[BPMedia] openGaleria", err);
+      if (typeof toastMsg === "function") toastMsg("Não foi possível abrir a galeria", "error");
+      else if (typeof toast === "function") toast("Não foi possível abrir a galeria", "error");
+      throw err;
+    }
   }
 
   function renderGaleria(profIdPreset) {
