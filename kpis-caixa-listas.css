@@ -556,3 +556,74 @@
   color: var(--text-secondary);
 }
 .kpi-temporal-row strong { color: var(--text-primary); font-weight: 600; }
+
+/* Cabeçalho executivo do gráfico */
+.dash-chart-exec {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-soft, #f7f4ef);
+  border: 1px solid var(--border-soft, #e8e4df);
+}
+.dash-chart-exec-dates {
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.dash-chart-exec-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 360px) {
+  .dash-chart-exec-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.dash-chart-exec-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.dash-chart-exec-k {
+  font-size: .58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.dash-chart-exec-v {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-chart-exec-v.is-up { color: var(--green, #2d6a4f); }
+.dash-chart-exec-v.is-down { color: var(--red, #b33a3a); }
+.dash-chart-exec-trend {
+  margin-top: 8px;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.dash-chart-empty {
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+  padding: 16px;
+}
+.dash-chart-empty-title {
+  display: block;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.dash-chart-empty-sub {
+  display: block;
+  font-size: .72rem;
+  color: var(--text-muted);
+  max-width: 240px;
+}

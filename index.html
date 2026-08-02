@@ -277,9 +277,35 @@
                   </button>
                 </div>
               </div>
+              <!-- Cabeçalho executivo (Fase 2) -->
+              <div class="dash-chart-exec" id="dash-chart-exec" aria-live="polite">
+                <div class="dash-chart-exec-dates" id="dash-chart-exec-dates">—</div>
+                <div class="dash-chart-exec-metrics">
+                  <div class="dash-chart-exec-metric">
+                    <span class="dash-chart-exec-k">Receita</span>
+                    <span class="dash-chart-exec-v" id="dash-chart-exec-rev">—</span>
+                  </div>
+                  <div class="dash-chart-exec-metric">
+                    <span class="dash-chart-exec-k">Vendas</span>
+                    <span class="dash-chart-exec-v" id="dash-chart-exec-n">—</span>
+                  </div>
+                  <div class="dash-chart-exec-metric">
+                    <span class="dash-chart-exec-k">Ticket</span>
+                    <span class="dash-chart-exec-v" id="dash-chart-exec-ticket">—</span>
+                  </div>
+                  <div class="dash-chart-exec-metric" id="dash-chart-exec-delta-wrap" hidden>
+                    <span class="dash-chart-exec-k">vs anterior</span>
+                    <span class="dash-chart-exec-v" id="dash-chart-exec-delta">—</span>
+                  </div>
+                </div>
+                <div class="dash-chart-exec-trend" id="dash-chart-exec-trend" hidden></div>
+              </div>
               <div class="dash-chart-canvas-wrap">
                 <canvas id="weekly-chart" width="400" height="140" style="width:100%;height:140px;display:block;touch-action:none;"></canvas>
-                <div id="dash-chart-empty" class="dash-chart-empty" hidden>Sem movimento neste período</div>
+                <div id="dash-chart-empty" class="dash-chart-empty" hidden>
+                  <strong class="dash-chart-empty-title">Ainda não existem vendas neste período</strong>
+                  <span class="dash-chart-empty-sub">Experimente selecionar outro intervalo com as opções acima.</span>
+                </div>
               </div>
             </div>
           </div>

@@ -34,6 +34,7 @@ const ORDER = [
   // --- UI render + fluxos ---
   'ui-render-dashboard-agenda.js',
   'ui-render-clientes-caixa-equipa.js',
+  'analise-temporal.js',
   'chart-module.js',
   'vendas-modais.js',
   'detalhes-acessibilidade.js',
