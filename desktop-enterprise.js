@@ -270,32 +270,30 @@
   function bindListMultiSelect() {
     if (document.body.dataset.bpMulti === '1') return;
     document.body.dataset.bpMulti = '1';
-    document.addEventListener(
-      'click',
-      function (e) {
-        if (!isDesktop()) return;
-        // só com Ctrl/Cmd/Shift — clique normal não é interceptado
-        if (!e.shiftKey && !e.ctrlKey && !e.metaKey) return;
-        var row = e.target.closest('.list-item[data-id], .bp-ag-card[data-id], tr[data-id]');
-        if (!row || e.target.closest('button, a, input, select, textarea, label')) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var id = row.getAttribute('data-id');
-        if (!id) return;
-        if (selectedIds[id]) {
-          delete selectedIds[id];
-          selectedCount = Math.max(0, selectedCount - 1);
-          row.classList.remove('is-multi-selected');
-        } else {
-          selectedIds[id] = true;
-          selectedCount += 1;
-          row.classList.add('is-multi-selected');
-        }
-        ensureSelectionBar();
-        updateSelectionBar();
-      },
-      true
-    );
+    document.addEventListener('click', function (e) {
+      if (!isDesktop()) return;
+      if (!e.shiftKey && !e.ctrlKey && !e.metaKey) return;
+      if (e.target.closest('button, a, input, select, textarea, label, [data-action]')) return;
+      var row = e.target.closest(
+        '.list-item[data-id], .list-item[data-agenda-id], .bp-ag-card[data-id], .bp-ag-card[data-agenda-id], tr[data-id]'
+      );
+      if (!row) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var id = row.getAttribute('data-id') || row.getAttribute('data-agenda-id');
+      if (!id) return;
+      if (selectedIds[id]) {
+        delete selectedIds[id];
+        selectedCount = Math.max(0, selectedCount - 1);
+        row.classList.remove('is-multi-selected');
+      } else {
+        selectedIds[id] = true;
+        selectedCount += 1;
+        row.classList.add('is-multi-selected');
+      }
+      ensureSelectionBar();
+      updateSelectionBar();
+    });
   }
 
   function bindDoubleClick() {
@@ -303,7 +301,7 @@
     document.body.dataset.bpDbl = '1';
     document.addEventListener('dblclick', function (e) {
       if (!isDesktop()) return;
-      var row = e.target.closest('.list-item[data-id], .bp-ag-card[data-id]');
+      var row = e.target.closest('.list-item[data-id], .list-item[data-agenda-id], .bp-ag-card[data-id], .bp-ag-card[data-agenda-id]');
       if (!row || e.target.closest('button, a, input')) return;
       // um único click sintético se o handler de linha não tiver corrido no 2.º clique
       try {
@@ -319,10 +317,10 @@
     document.body.dataset.bpCtx = '1';
     document.addEventListener('contextmenu', function (e) {
       if (!isDesktop()) return;
-      var row = e.target.closest('.list-item[data-id], .bp-ag-card[data-id]');
+      var row = e.target.closest('.list-item[data-id], .list-item[data-agenda-id], .bp-ag-card[data-id], .bp-ag-card[data-agenda-id]');
       if (!row) return;
       e.preventDefault();
-      var id = row.getAttribute('data-id') || '';
+      var id = row.getAttribute('data-id') || row.getAttribute('data-agenda-id') || '';
       showCtx(e.clientX, e.clientY, [
         {
           label: 'Abrir',

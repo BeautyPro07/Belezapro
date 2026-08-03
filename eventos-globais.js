@@ -28,13 +28,7 @@ document.getElementById('store-name-display')?.addEventListener('dblclick', () =
   if (equipaNav && equipaNav.style.display !== 'none') equipaNav.click();
 });
 
-// Ripple global
-document.addEventListener('click', function(e) {
-  const target = e.target.closest('.btn, .list-item, .card, .kpi-card, .nav-item, .venda-cta-bar, .fab, .prof-card');
-  if (target && !target.closest('.btn.is-loading')) {
-    /* ripple desactivado */
-  }
-});
+// Ripple global removido (listener vazio gerava ruído na cadeia de cliques).
 
 // ====================================================================
 //  MENU DE ACÇÕES DA LINHA (⋮)
@@ -114,12 +108,24 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
   else if (tipo === 'servico') openServicoModal(id);
 });
 // Confirm nativo substituído
+if (!document.body.dataset.bpGlobClick) {
+document.body.dataset.bpGlobClick = '1';
 document.addEventListener('click', async function(e) {
   const rowMenuBtn = e.target.closest('[data-action="row-menu"]');
   if (rowMenuBtn) {
     e.preventDefault();
     e.stopPropagation();
     abrirMenuLinha(rowMenuBtn, rowMenuBtn.dataset.tipo, rowMenuBtn.dataset.id);
+    return;
+  }
+
+  // Finalizar atendimento (delegação — não depende de listeners por render)
+  const finBtn = e.target.closest('[data-action="finalizar"]');
+  if (finBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = finBtn.dataset.id;
+    if (id && typeof abrirFinalizarAtendimento === 'function') abrirFinalizarAtendimento(id);
     return;
   }
 
@@ -265,7 +271,8 @@ document.addEventListener('click', async function(e) {
     if (confirmed) await deleteCliente(id);
     return;
   }
-}, true);
+}, false); // bubble: evita cortar outros handlers em capture
+}
 
 // ONLINE/OFFLINE — multi-dispositivo: indicador sempre legível
 window.addEventListener('online', () => {
