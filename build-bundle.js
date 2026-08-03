@@ -57,7 +57,8 @@ const ORDER = [
   'media-galeria.js',           // BPMedia · usa BPAvatars
   'agenda-polish.js',           // patches renderAgendaItem
   'avatars-listas.js',          // wraps renderClientes/Profissionais
-  'desktop-shell.js',           // shell ≥1024px
+  'desktop-shell.js',
+  'desktop-enterprise.js',           // shell ≥1024px
   // --- Hardening (último) ---
   'security-hardening.js',
 ];

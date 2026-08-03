@@ -84,17 +84,22 @@
   flex-wrap: wrap;
 }
 .sync-status {
-  display: flex;
+  display: none; /* só visível com fila / offline / erro */
   align-items: center;
-  gap: 6px;
-  background: var(--card-white);
-  padding: 4px 12px 4px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-soft);
+  gap: 4px;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  border: none;
   font-size: .65rem;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-muted);
+  max-width: 36vw;
 }
+.sync-status.is-visible {
+  display: flex;
+}
+.sync-status .sync-dot { display: none; }
 .sync-dot {
   width: 8px;
   height: 8px;
@@ -226,4 +231,34 @@
 }
 @keyframes fadeUp {
   to { opacity: 1; transform: translateY(0); }
+}
+/* Header: prioridades estáveis logo → nome → ações */
+.app-header-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+}
+.app-header .logo img {
+  height: 27px;
+  width: auto;
+  display: block;
+}
+.app-header .store-name {
+  max-width: min(36vw, 12rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+.app-header .header-actions {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }

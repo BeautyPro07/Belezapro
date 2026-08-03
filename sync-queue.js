@@ -92,39 +92,49 @@ function actualizarBannerOffline() {
 }
 
 function atualizarIndicadorSync() {
-  const dot  = document.getElementById('sync-dot');
   const text = document.getElementById('sync-text');
   const container = document.getElementById('sync-status-container');
-  const fila = getSyncQueue();
-  const pendentes = fila.filter(function (op) { return op.failed !== true; }).length;
-  const falhados = fila.filter(function (op) { return op.failed === true; }).length;
+  const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
+  const pendentes = fila.filter(function (op) { return op && op.failed !== true; }).length;
+  const falhados = fila.filter(function (op) { return op && op.failed === true; }).length;
+  const offline = (typeof navigator !== 'undefined' && !navigator.onLine);
 
-  if (dot && text) {
-    if (!navigator.onLine) {
-      dot.classList.remove('online');
-      text.textContent = pendentes > 0
-        ? ('Offline · ' + pendentes + ' pend.')
-        : 'Offline';
-    } else {
-      dot.classList.add('online');
-      if (pendentes > 0) {
-        text.textContent = pendentes + (pendentes === 1 ? ' pendente' : ' pendentes');
-      } else if (falhados > 0) {
-        text.textContent = falhados + (falhados === 1 ? ' falha' : ' falhas');
-      } else {
-        text.textContent = 'Sincronizado';
-      }
-    }
+  let stateKey = 'ok';
+  let label = '';
+  if (offline) {
+    stateKey = 'offline';
+    label = pendentes > 0 ? ('Offline · ' + pendentes + ' pend.') : 'Offline';
+  } else if (pendentes > 0) {
+    stateKey = 'pending';
+    label = pendentes === 1 ? '1 pendente' : (pendentes + ' pendentes');
+  } else if (falhados > 0) {
+    stateKey = 'error';
+    label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
   }
 
+  const show = stateKey !== 'ok';
+  if (text) text.textContent = label;
   if (container) {
-    container.style.display = 'flex';
-    container.setAttribute('data-state',
-      !navigator.onLine ? 'offline' : (pendentes > 0 ? 'pending' : (falhados > 0 ? 'error' : 'ok'))
-    );
+    container.classList.toggle('is-visible', show);
+    container.style.display = show ? 'flex' : 'none';
+    container.setAttribute('data-state', stateKey);
+    container.setAttribute('aria-hidden', show ? 'false' : 'true');
+    if (show) container.setAttribute('title', label);
+    else container.removeAttribute('title');
   }
+  // Evento único para outros módulos (sem DOM scraping)
+  try {
+    window.dispatchEvent(new CustomEvent('bp:sync-state', { detail: { state: stateKey, pendentes: pendentes, falhados: falhados, offline: offline } }));
+  } catch (_) {}
 
-  actualizarBannerOffline();
+  if (typeof actualizarBannerOffline === 'function') actualizarBannerOffline();
+}
+
+/** Alias estável — única API pública de UI de sync */
+function setSyncUi() { atualizarIndicadorSync(); }
+if (typeof window !== 'undefined') {
+  window.setSyncUi = setSyncUi;
+  window.atualizarIndicadorSync = atualizarIndicadorSync;
 }
 
 function addToSyncQueue(tabela, operacao, payload) {

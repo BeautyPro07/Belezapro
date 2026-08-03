@@ -73,34 +73,99 @@ function buildSerieTemporal(intervalo, movs, opts) {
   if (!intervalo || !intervalo.inicio || !intervalo.fim) return serie;
 
   if (opts.modoHora) {
-    var ds = intervalo.fim;
-    for (var h = 0; h < 12; h++) {
-      var hr = h * 2;
-      var vendas = (movs || []).filter(function (m) {
-        if (!m || m.tipo !== 'venda' || m.data !== ds || !m.hora) return false;
+    // Dia de referência: intervalo de 1 dia, senão opts.diaRef ou fim
+    var ds = opts.diaRef || intervalo.fim;
+    if (intervalo.inicio && intervalo.fim && intervalo.inicio === intervalo.fim) {
+      ds = intervalo.inicio;
+    }
+    // Dia anterior (mesmas faixas horárias)
+    var dPrev = _atParseISO(ds);
+    dPrev.setDate(dPrev.getDate() - 1);
+    var dsPrev = _atFmtISO(dPrev);
+
+    // Resolução 1h. janela típica de salão 7h–22h (16 barras legíveis);
+    // fora disto agrega em "06h" (madrugada) e "23h" (noite) se houver dados.
+    var horas = [];
+    for (var h = 7; h <= 22; h++) horas.push(h);
+
+    function vendasHora(diaIso, hora) {
+      return (movs || []).filter(function (m) {
+        if (!m || m.tipo !== 'venda' || m.data !== diaIso || !m.hora) return false;
         var mh = parseInt(String(m.hora).split(':')[0], 10);
-        return mh >= hr && mh < hr + 2;
+        if (!isFinite(mh)) return false;
+        if (hora === 7) return mh <= 7;       // 00–07 agregados no primeiro bucket
+        if (hora === 22) return mh >= 22;     // 22–23 no último
+        return mh === hora;
       });
+    }
+
+    for (var i = 0; i < horas.length; i++) {
+      var hr = horas[i];
+      var vendas = vendasHora(ds, hr);
       var t = _atTotais(vendas);
+      var vendasAnt = vendasHora(dsPrev, hr);
+      var tAnt = _atTotais(vendasAnt);
+      var delta = t.receita - tAnt.receita;
+      var pct = tAnt.receita > 0 ? (delta / tAnt.receita) * 100 : (t.receita > 0 ? 100 : null);
       serie.push({
         data: ds,
         label: String(hr).padStart(2, '0') + 'h',
+        hora: hr,
         receita: t.receita,
         nVendas: t.nVendas,
         ticket: t.ticket,
-        chave: ds + '-' + hr
+        chave: ds + '-' + hr,
+        anterior: {
+          data: dsPrev,
+          receita: tAnt.receita,
+          nVendas: tAnt.nVendas,
+          delta: delta,
+          pct: pct
+        }
       });
     }
     return serie;
   }
 
   var dias = _atDiasEntre(intervalo.inicio, intervalo.fim);
+
+  // Ano / períodos longos (>90 dias): agregar por mês civil (Jan, Fev…)
+  if (dias > 90) {
+    var cursor = _atParseISO(intervalo.inicio);
+    cursor.setDate(1);
+    var limF = _atParseISO(intervalo.fim);
+    while (cursor <= limF) {
+      var y = cursor.getFullYear();
+      var m = cursor.getMonth();
+      var mesIni = new Date(y, m, 1);
+      var mesFim = new Date(y, m + 1, 0);
+      if (mesIni < _atParseISO(intervalo.inicio)) mesIni = _atParseISO(intervalo.inicio);
+      if (mesFim > limF) mesFim = limF;
+      var isoI = _atFmtISO(mesIni);
+      var isoF = _atFmtISO(mesFim);
+      var vendasM = _atVendasNoIntervalo(movs, isoI, isoF);
+      var totM = _atTotais(vendasM);
+      var labM = mesIni.toLocaleDateString('pt-AO', { month: 'short' }).replace('.', '');
+      labM = labM.charAt(0).toUpperCase() + labM.slice(1);
+      serie.push({
+        data: isoI,
+        dataFim: isoF,
+        label: labM,
+        receita: totM.receita,
+        nVendas: totM.nVendas,
+        ticket: totM.ticket,
+        chave: y + '-' + String(m + 1).padStart(2, '0')
+      });
+      cursor = new Date(y, m + 1, 1);
+    }
+    return serie;
+  }
+
   var passo = dias > 31 ? Math.ceil(dias / 31) : 1;
   var d0 = _atParseISO(intervalo.inicio);
   for (var i = 0; i < dias; i += passo) {
     var d = new Date(d0.getTime() + i * 86400000);
     var iso = _atFmtISO(d);
-    // Agregar passo dias quando passo > 1
     var isoFim = iso;
     if (passo > 1) {
       var dF = new Date(d.getTime() + (passo - 1) * 86400000);
@@ -190,8 +255,54 @@ function buildAnaliseTemporal(intervalo, movs, opts) {
 
   var tendencia = anterior && anterior.pct != null ? _atTendencia(anterior.pct) : null;
 
+  // Em modo hora: totais do dia de referência; anterior = dia civil anterior
+  var diaRef = null;
+  if (opts.modoHora && serie.length) {
+    diaRef = serie[0].data;
+    var vendasDia = _atVendasNoIntervalo(movs, diaRef, diaRef);
+    totais = _atTotais(vendasDia);
+    var dAnt = _atParseISO(diaRef);
+    dAnt.setDate(dAnt.getDate() - 1);
+    var diaAntIso = _atFmtISO(dAnt);
+    var vendasDiaAnt = _atVendasNoIntervalo(movs, diaAntIso, diaAntIso);
+    var totAnt = _atTotais(vendasDiaAnt);
+    if (totAnt.nVendas > 0 || totais.nVendas > 0) {
+      var deltaD = totais.receita - totAnt.receita;
+      var pctD = totAnt.receita > 0 ? (deltaD / totAnt.receita) * 100 : (totais.receita > 0 ? 100 : null);
+      anterior = {
+        intervalo: { inicio: diaAntIso, fim: diaAntIso, label: 'Dia anterior' },
+        totais: totAnt,
+        delta: deltaD,
+        pct: pctD
+      };
+      tendencia = pctD != null ? _atTendencia(pctD) : null;
+    } else {
+      anterior = null;
+      tendencia = null;
+    }
+  }
+
+  var insights = [];
+  try {
+    insights = gerarInsightsTemporais({
+      intervalo: intervalo || null,
+      diaRef: diaRef,
+      serie: serie,
+      totais: totais,
+      anterior: anterior,
+      extremos: { melhorDia: melhor, piorDia: pior },
+      mediaDiaria: mediaDiaria,
+      mediaSerie: mediaSerie,
+      tendencia: tendencia,
+      tendenciaLabel: _atTendenciaLabel(tendencia),
+      hasData: totais.nVendas > 0 || totais.receita > 0,
+      modoHora: !!opts.modoHora
+    }, movs);
+  } catch (_ins) { insights = []; }
+
   return {
     intervalo: intervalo || null,
+    diaRef: diaRef,
     serie: serie,
     totais: totais,
     anterior: anterior,
@@ -200,12 +311,268 @@ function buildAnaliseTemporal(intervalo, movs, opts) {
     mediaSerie: mediaSerie,
     tendencia: tendencia,
     tendenciaLabel: _atTendenciaLabel(tendencia),
-    hasData: totais.nVendas > 0 || totais.receita > 0
+    hasData: totais.nVendas > 0 || totais.receita > 0,
+    modoHora: !!opts.modoHora,
+    insights: insights
+  };
+}
+
+
+/**
+ * Insights automáticos — apenas com evidência nos dados.
+ * Máx. 3 frases. Sem alarmismo.
+ */
+function gerarInsightsTemporais(analise, movs) {
+  var out = [];
+  if (!analise || !analise.hasData || !analise.serie || !analise.serie.length) return out;
+
+  var serie = analise.serie;
+  var totais = analise.totais;
+  var comReceita = serie.filter(function (p) { return p.receita > 0; });
+  if (comReceita.length < 1) return out;
+
+  // 1) Concentração no melhor bucket
+  var melhor = analise.extremos && analise.extremos.melhorDia;
+  if (melhor && totais.receita > 0 && melhor.receita > 0) {
+    var pctConc = Math.round((melhor.receita / totais.receita) * 100);
+    if (pctConc >= 25 && comReceita.length >= 2) {
+      if (analise.modoHora && melhor.hora != null) {
+        out.push('A faixa das ' + String(melhor.hora).padStart(2, '0') + 'h concentrou ' + pctConc + '% da receita do dia.');
+      } else {
+        out.push((melhor.label || 'O melhor dia') + ' concentrou ' + pctConc + '% da receita do período.');
+      }
+    }
+  }
+
+  // 2) Ticket vs período anterior
+  if (analise.anterior && analise.anterior.totais && analise.anterior.totais.nVendas > 0 && totais.nVendas > 0) {
+    var t0 = analise.anterior.totais.ticket;
+    var t1 = totais.ticket;
+    if (t0 > 0) {
+      var pctT = Math.round(((t1 - t0) / t0) * 1000) / 10;
+      if (Math.abs(pctT) >= 8) {
+        out.push(pctT >= 0
+          ? ('O ticket médio aumentou ' + pctT + '% relativamente ao período anterior.')
+          : ('O ticket médio desceu ' + Math.abs(pctT) + '% relativamente ao período anterior.'));
+      }
+    }
+  }
+
+  // 3) Tendência geral de receita
+  if (analise.anterior && analise.anterior.pct != null && Math.abs(analise.anterior.pct) >= 8) {
+    var p = Math.round(analise.anterior.pct * 10) / 10;
+    if (p >= 8) out.push('A receita está ' + p + '% acima do período anterior.');
+    else if (p <= -8) out.push('A receita está ' + Math.abs(p) + '% abaixo do período anterior.');
+  }
+
+  // 4) Dias acima da média (só série diária com >= 4 pontos com receita)
+  if (!analise.modoHora && comReceita.length >= 4 && analise.mediaSerie > 0) {
+    var acima = comReceita.filter(function (p) { return p.receita >= analise.mediaSerie; });
+    if (acima.length >= 2 && acima.length <= comReceita.length - 1) {
+      var nomes = acima.slice(0, 3).map(function (p) { return p.label; }).join(', ');
+      out.push('Movimento acima da média em: ' + nomes + (acima.length > 3 ? '…' : '') + '.');
+    }
+  }
+
+  // 5) Pico horário
+  if (analise.modoHora && melhor && melhor.hora != null && comReceita.length >= 3) {
+    // já pode ter concentração; se não, mencionar pico simples
+    var already = out.some(function (t) { return t.indexOf('faixa') >= 0; });
+    if (!already) {
+      out.push('O pico de receita foi por volta das ' + String(melhor.hora).padStart(2, '0') + 'h.');
+    }
+  }
+
+  // 6) Projecção fim do mês (só se estamos no mês corrente e há ritmo)
+  try {
+    if (!analise.modoHora && analise.intervalo && typeof hoje === 'function') {
+      var h = hoje();
+      var ini = analise.intervalo.inicio || '';
+      var fim = analise.intervalo.fim || '';
+      if (ini.slice(0, 7) === h.slice(0, 7) && fim.slice(0, 7) === h.slice(0, 7) && totais.receita > 0) {
+        var diaNum = parseInt(h.slice(8, 10), 10);
+        var fimMes = new Date(parseInt(h.slice(0, 4), 10), parseInt(h.slice(5, 7), 10), 0);
+        var diasMes = fimMes.getDate();
+        if (diaNum >= 5 && diaNum < diasMes) {
+          var ritmo = totais.receita / diaNum;
+          var proj = Math.round(ritmo * diasMes);
+          if (proj > totais.receita) {
+            out.push('Se mantiver este ritmo, a previsão aproximada para o final do mês é de ' +
+              (typeof fmtKz === 'function' ? fmtKz(proj) : String(proj)) + '.');
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 7) Top serviço no período (evidência em movimentos)
+  if (movs && movs.length && analise.intervalo && out.length < 3) {
+    var ini2 = analise.intervalo.inicio;
+    var fim2 = analise.intervalo.fim;
+    if (analise.modoHora && analise.diaRef) {
+      ini2 = fim2 = analise.diaRef;
+    }
+    var map = {};
+    (movs || []).forEach(function (m) {
+      if (!m || m.tipo !== 'venda' || !m.data || m.data < ini2 || m.data > fim2) return;
+      var nome = m.servico_nome || m.servico || m.descricao;
+      if (!nome) return;
+      map[nome] = (map[nome] || 0) + (Number(m.valor) || 0);
+    });
+    var top = Object.keys(map).map(function (k) { return { n: k, v: map[k] }; })
+      .sort(function (a, b) { return b.v - a.v; })[0];
+    if (top && totais.receita > 0 && top.v / totais.receita >= 0.3) {
+      out.push('A maior parte da receita veio de «' + top.n + '».');
+    }
+  }
+
+  // dedupe e máx 3
+  var seen = {};
+  var final = [];
+  for (var i = 0; i < out.length && final.length < 3; i++) {
+    if (seen[out[i]]) continue;
+    seen[out[i]] = 1;
+    final.push(out[i]);
+  }
+  return final;
+}
+
+
+if (typeof window !== 'undefined') {
+  window.buildAnaliseTemporal = buildAnaliseTemporal;
+  window.gerarInsightsTemporais = gerarInsightsTemporais;
+  window.analiseParaExport = function (analise) {
+    if (!analise) return null;
+    return {
+      meta: {
+        label: (analise.intervalo && analise.intervalo.label) || '',
+        inicio: (analise.intervalo && analise.intervalo.inicio) || '',
+        fim: (analise.intervalo && analise.intervalo.fim) || '',
+        modoHora: !!analise.modoHora,
+        diaRef: analise.diaRef || null
+      },
+      totais: analise.totais,
+      anterior: analise.anterior,
+      serie: (analise.serie || []).map(function (p) {
+        return { data: p.data, label: p.label, receita: p.receita, nVendas: p.nVendas, ticket: p.ticket, hora: p.hora };
+      }),
+      insights: analise.insights || []
+    };
+  };
+  window.buildSerieTemporal = buildSerieTemporal;
+  window.intervaloAnteriorEspelhado = intervaloAnteriorEspelhado;
+}
+
+
+/** Nome de profissional a partir do id (se helpers existirem). */
+function _atNomeProf(id, mov) {
+  if (typeof getProfissionalNome === 'function' && id) {
+    try { return getProfissionalNome(id) || null; } catch (_) {}
+  }
+  if (mov && mov.profissional) return String(mov.profissional);
+  return id ? String(id) : null;
+}
+
+function _atNomeServico(mov) {
+  if (!mov) return null;
+  return mov.servico_nome || mov.servico || mov.descricao || null;
+}
+
+/**
+ * Mini-relatório de um dia (ou bucket horário).
+ * @param {string} dataIso
+ * @param {Array} movs
+ * @param {{hora?:number, horaFim?:number}} opts  hora = filtro 1h (modo hora)
+ */
+function detalheDiaVendas(dataIso, movs, opts) {
+  opts = opts || {};
+  var vendas = (movs || []).filter(function (m) {
+    if (!m || m.tipo !== 'venda' || m.data !== dataIso) return false;
+    if (opts.hora != null && isFinite(opts.hora)) {
+      if (!m.hora) return false;
+      var mh = parseInt(String(m.hora).split(':')[0], 10);
+      if (!isFinite(mh)) return false;
+      var hr = Number(opts.hora);
+      if (hr === 7) return mh <= 7;
+      if (hr === 22) return mh >= 22;
+      return mh === hr;
+    }
+    return true;
+  });
+  // ordenar por hora
+  vendas = vendas.slice().sort(function (a, b) {
+    return String(a.hora || '').localeCompare(String(b.hora || ''));
+  });
+
+  var totais = _atTotais(vendas);
+  var byCliente = {};
+  var byServico = {};
+  var byProf = {};
+  var byPag = {};
+
+  for (var i = 0; i < vendas.length; i++) {
+    var m = vendas[i];
+    var cli = (m.cliente && String(m.cliente).trim()) || 'Avulso';
+    byCliente[cli] = byCliente[cli] || { nome: cli, receita: 0, n: 0 };
+    byCliente[cli].receita += Number(m.valor) || 0;
+    byCliente[cli].n += 1;
+
+    var srv = _atNomeServico(m) || 'Serviço';
+    byServico[srv] = byServico[srv] || { nome: srv, receita: 0, n: 0 };
+    byServico[srv].receita += Number(m.valor) || 0;
+    byServico[srv].n += 1;
+
+    var pid = m.profissional_id || m.profissional || '';
+    var pnome = _atNomeProf(m.profissional_id, m) || 'Sem profissional';
+    byProf[pid || pnome] = byProf[pid || pnome] || { id: pid, nome: pnome, receita: 0, n: 0 };
+    byProf[pid || pnome].receita += Number(m.valor) || 0;
+    byProf[pid || pnome].n += 1;
+
+    var pag = m.metodoPagamento || m.pagamento || 'Numerário';
+    byPag[pag] = byPag[pag] || { nome: pag, receita: 0, n: 0 };
+    byPag[pag].receita += Number(m.valor) || 0;
+    byPag[pag].n += 1;
+  }
+
+  function top(map, n) {
+    return Object.keys(map).map(function (k) { return map[k]; })
+      .sort(function (a, b) { return b.receita - a.receita; })
+      .slice(0, n || 5);
+  }
+
+  var topProf = top(byProf, 1)[0] || null;
+  var topSrv = top(byServico, 1)[0] || null;
+  var topPag = top(byPag, 1)[0] || null;
+
+  // mesmo dia da semana anterior (7 dias antes)
+  var d = _atParseISO(dataIso);
+  d.setDate(d.getDate() - 7);
+  var isoSem = _atFmtISO(d);
+  var vendasSem = _atVendasNoIntervalo(movs, isoSem, isoSem);
+  var totSem = _atTotais(vendasSem);
+  var vsSemana = null;
+  if (totSem.nVendas > 0 || totais.nVendas > 0) {
+    var delta = totais.receita - totSem.receita;
+    var pct = totSem.receita > 0 ? (delta / totSem.receita) * 100 : (totais.receita > 0 ? 100 : null);
+    vsSemana = { data: isoSem, totais: totSem, delta: delta, pct: pct };
+  }
+
+  return {
+    data: dataIso,
+    hora: opts.hora != null ? Number(opts.hora) : null,
+    vendas: vendas,
+    totais: totais,
+    topProfissional: topProf,
+    topServico: topSrv,
+    topPagamento: topPag,
+    porCliente: top(byCliente, 8),
+    porServico: top(byServico, 8),
+    porProfissional: top(byProf, 8),
+    porPagamento: top(byPag, 6),
+    vsMesmoDiaSemana: vsSemana
   };
 }
 
 if (typeof window !== 'undefined') {
-  window.buildAnaliseTemporal = buildAnaliseTemporal;
-  window.buildSerieTemporal = buildSerieTemporal;
-  window.intervaloAnteriorEspelhado = intervaloAnteriorEspelhado;
+  window.detalheDiaVendas = detalheDiaVendas;
 }

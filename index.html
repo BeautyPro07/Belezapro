@@ -186,17 +186,6 @@
 
             <!-- KPIs -->
             <div class="kpi-grid">
-              <!-- Espaço temporal — integrado na grelha dos KPIs (não no cabeçalho) -->
-              <div class="kpi-temporal-bar" style="grid-column: span 2;">
-                <div class="kpi-temporal-bar-text">
-                  <span class="kpi-temporal-bar-title">Desempenho</span>
-                  <span class="kpi-temporal-bar-hint" id="kpi-temporal-hint">Toque no gráfico para o espaço temporal</span>
-                </div>
-                <button type="button" class="kpi-mini-chart-btn" id="kpi-mini-chart-btn" aria-label="Espaço temporal dos KPIs" title="Espaço temporal">
-                  <canvas id="kpi-mini-chart" width="120" height="36" aria-hidden="true"></canvas>
-                  <span class="kpi-mini-chart-label" id="kpi-mini-chart-label">7 dias</span>
-                </button>
-              </div>
               <!-- Card 1: Faturamento -->
               <div class="kpi-card gold-accent" id="kpi-revenue-card" data-role="admin,gerente">
                 <div class="kpi-label">Faturamento</div>
@@ -300,13 +289,29 @@
                 </div>
                 <div class="dash-chart-exec-trend" id="dash-chart-exec-trend" hidden></div>
               </div>
-              <div class="dash-chart-canvas-wrap">
+              <div class="dash-chart-view-row">
+                <button type="button" class="dash-chart-export-btn" id="chart-export-csv" aria-label="Exportar CSV">CSV</button>
+                <div class="dash-chart-view-toggle" role="group" aria-label="Tipo de gráfico">
+                  <button type="button" class="dash-chart-view-btn is-active" data-chart-view="barras" aria-pressed="true">Barras</button>
+                  <button type="button" class="dash-chart-view-btn" data-chart-view="linha" aria-pressed="false">Linha</button>
+                  <button type="button" class="dash-chart-view-btn" data-chart-view="area" aria-pressed="false">Área</button>
+                </div>
+              </div>
+              <div class="dash-chart-canvas-wrap" id="dash-chart-canvas-wrap">
+                <div id="dash-chart-skeleton" class="dash-chart-skeleton" hidden aria-hidden="true">
+                  <div class="dash-chart-skel-bar"></div>
+                  <div class="dash-chart-skel-bar"></div>
+                  <div class="dash-chart-skel-bar"></div>
+                  <div class="dash-chart-skel-bar"></div>
+                  <div class="dash-chart-skel-bar"></div>
+                </div>
                 <canvas id="weekly-chart" width="400" height="140" style="width:100%;height:140px;display:block;touch-action:none;"></canvas>
                 <div id="dash-chart-empty" class="dash-chart-empty" hidden>
                   <strong class="dash-chart-empty-title">Ainda não existem vendas neste período</strong>
                   <span class="dash-chart-empty-sub">Experimente selecionar outro intervalo com as opções acima.</span>
                 </div>
               </div>
+              <ul class="dash-chart-insights" id="dash-chart-insights" hidden></ul>
             </div>
           </div>
         </div>
@@ -1309,6 +1314,23 @@
     <div class="bp-sheet-footer modal-actions">
       <button type="button" class="btn btn-secondary" data-close="modal-kpi-temporal">Fechar</button>
       <button type="button" class="btn btn-primary" id="kpi-temporal-apply">Aplicar</button>
+    </div>
+  </div>
+</div>
+
+  
+<!-- Drill-down do gráfico (Fase 5) -->
+<div id="modal-chart-drill" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-drill-title">
+  <div class="bp-sheet modal-sheet chart-drill-sheet">
+    <div class="bp-sheet-handle handle" aria-hidden="true"></div>
+    <div class="bp-sheet-header">
+      <div class="bp-sheet-eyebrow">Análise</div>
+      <h2 class="bp-sheet-title" id="chart-drill-title">Detalhe do dia</h2>
+      <p class="bp-sheet-subtitle" id="chart-drill-sub">—</p>
+    </div>
+    <div class="bp-sheet-body" id="chart-drill-body"></div>
+    <div class="bp-sheet-footer modal-actions">
+      <button type="button" class="btn btn-secondary" data-close="modal-chart-drill">Fechar</button>
     </div>
   </div>
 </div>
