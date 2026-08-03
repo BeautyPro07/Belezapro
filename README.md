@@ -1,17 +1,9 @@
-# Análise temporal — Fase 1 + 2
+# Ficheiros alterados — Desktop Enterprise (corrigido)
 
-## Fase 1 — Modelo
-- analise-temporal.js: buildAnaliseTemporal / buildSerieTemporal
-- Totais, série, período anterior espelhado, tendência, extremos
-- Sem DOM
+- desktop-enterprise.js — camada nova (corrigida)
+- desktop-responsive.css — estilos desktop + dialogs
+- app.bundle.js — rebuild (inclui desktop-enterprise)
+- build-bundle.js — ordem do módulo
 
-## Fase 2 — Cabeçalho executivo
-- No card do gráfico: datas, receita, vendas, ticket
-- vs anterior (%) só quando há contexto
-- Tendência neutra (crescimento / estável / queda)
-- Empty: título + sugestão
-
-## Ainda não (fases 3+)
-Tooltip rico, drill-down, linha média/meta, insights, modos linha/área
-
-Deploy: app.bundle.js + index.html + kpis-caixa-listas.css
+## Deploy
+Copiar para a raiz da app + hard refresh / limpar SW.

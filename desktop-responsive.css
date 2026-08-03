@@ -238,20 +238,20 @@
     padding: 16px 20px 24px;
   }
 
-  /* Dialogs instead of phone sheets */
-  .modal-overlay.bp-desk-dialog {
+  /* Dialogs instead of phone sheets — todos os overlays open (sem rewrap JS) */
+  .modal-overlay.open {
     align-items: center;
     justify-content: center;
     padding: 24px;
   }
-  .modal-overlay.bp-desk-dialog .bp-sheet,
-  .modal-overlay.bp-desk-dialog .modal-sheet,
-  .modal-overlay.bp-desk-dialog .modal-content {
+  .modal-overlay.open .bp-sheet,
+  .modal-overlay.open .modal-sheet,
+  .modal-overlay.open .modal-content,
+  .modal-overlay.open > div {
     max-height: min(90vh, 860px);
     width: min(720px, 96vw);
     border-radius: 16px;
-    margin: 0;
-    animation: none;
+    margin: 0 auto;
   }
 
   .list-item:hover,
