@@ -16610,9 +16610,9 @@ window.renderBarraMeta = renderBarraMeta;
       { id: 'eq', label: 'Ir para Equipa', keys: 'g e', run: function () { goTab('equipa'); } },
       { id: 'ia', label: 'Ir para IA', keys: 'g i', run: function () { goTab('ia'); } },
       { id: 'venda', label: 'Nova venda', keys: 'n', run: function () { triggerNovaVenda(); } },
-      { id: 'pop-a', label: 'Agenda noutra janela', keys: '', run: function () { popOut('agenda'); } },
-      { id: 'pop-x', label: 'Caixa noutra janela', keys: '', run: function () { popOut('caixa'); } },
-      { id: 'pop-r', label: 'Resumo noutra janela', keys: '', run: function () { popOut('dashboard'); } },
+      { id: 'pop-a', label: 'Agenda em outra janela', keys: '', run: function () { popOut('agenda'); } },
+      { id: 'pop-x', label: 'Caixa em outra janela', keys: '', run: function () { popOut('caixa'); } },
+      { id: 'pop-r', label: 'Resumo em outra janela', keys: '', run: function () { popOut('dashboard'); } },
       { id: 'side', label: 'Recolher / expandir menu', keys: '[', run: function () { toggleSidebar(); } },
       { id: 'den', label: 'Alternar densidade', keys: '', run: function () { toggleDensity(); } },
       { id: 'csv', label: 'Exportar análise CSV', keys: '', run: function () {
@@ -16635,7 +16635,7 @@ window.renderBarraMeta = renderBarraMeta;
     el.innerHTML =
       '<div class="bp-cmd-backdrop" data-cmd-close="1"></div>' +
       '<div class="bp-cmd-dialog" role="dialog" aria-modal="true" aria-label="Command palette">' +
-        '<input type="search" id="bp-cmd-input" class="bp-cmd-input" placeholder="Comando ou pesquisa…" autocomplete="off" />' +
+        '<input type="search" id="bp-cmd-input" class="bp-cmd-input" placeholder="Comando ou pesquisa..." autocomplete="off" />' +
         '<ul id="bp-cmd-list" class="bp-cmd-list" role="listbox"></ul>' +
         '<div class="bp-cmd-hint">↑↓ · Enter · Esc</div>' +
       '</div>';
@@ -16756,7 +16756,7 @@ window.renderBarraMeta = renderBarraMeta;
     var label = bar.querySelector('.bp-multi-count');
     if (label) {
       label.textContent =
-        selectedCount === 1 ? '1 seleccionado' : selectedCount + ' seleccionados';
+        selectedCount === 1 ? '1 selecionado' : selectedCount + ' selecionados';
     }
   }
 
@@ -16849,7 +16849,7 @@ window.renderBarraMeta = renderBarraMeta;
           }
         },
         '-',
-        { label: 'Clientes noutra janela', run: function () { popOut('clientes'); } }
+        { label: 'Clientes em outra janela', run: function () { popOut('clientes'); } }
       ]);
     });
     document.addEventListener('click', hideCtx);
