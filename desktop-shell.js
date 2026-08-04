@@ -97,12 +97,12 @@
   function setOpsOpen(wrap, open) {
     wrap.classList.toggle("is-open", open);
     var trigger = document.getElementById("bp-side-ops-trigger");
-    var body = document.getElementById("bp-side-ops-body");
+    var opsBody = document.getElementById("bp-side-ops-body");
     if (trigger) {
       trigger.setAttribute("aria-expanded", open ? "true" : "false");
     }
-    if (body) {
-      body.hidden = !open;
+    if (opsBody) {
+      opsBody.hidden = !open;
     }
   }
 
@@ -181,8 +181,8 @@
       else nav.appendChild(wrap);
     }
 
-    var body = document.getElementById("bp-side-ops-body");
-    if (body && !body.contains(dd)) body.appendChild(dd);
+    var opsBody = document.getElementById("bp-side-ops-body");
+    if (opsBody && !opsBody.contains(dd)) opsBody.appendChild(dd);
     styleDropdownAsSideMenu(dd);
 
     // Sair FORA da central (sempre visível)
@@ -243,19 +243,15 @@
     return null;
   }
 
-  function showAgendaDetail(ag) {
-    var detail = document.getElementById("bp-agenda-detail");
-    if (!detail || !ag) return;
-
+  function buildAgendaDetailHtml(ag) {
+    if (!ag) return "";
     var prof = "";
     try {
       if (typeof getProfissionalNome === "function") prof = getProfissionalNome(ag.profissional_id) || "";
     } catch (e) {}
     if (!prof) prof = ag.profissional || "—";
-
     var nota = ag.notas || ag.nota || ag.observacao || ag.obs || "";
-    detail.classList.remove("is-empty");
-    detail.innerHTML =
+    return (
       '<div class="bp-ad-time">' + esc(String(ag.hora || "").slice(0, 5)) + " · " + esc(ag.data || "") + "</div>" +
       '<div class="bp-ad-title">' + esc(ag.servico || "Agendamento") + "</div>" +
       '<div class="bp-ad-row"><span>Cliente</span><span>' + esc(ag.cliente || "—") + "</span></div>" +
@@ -265,25 +261,62 @@
       (nota
         ? '<div class="bp-ad-row bp-ad-nota"><span>Notas</span><span>' + esc(nota) + "</span></div>"
         : "") +
-      '<p class="bp-ad-hint">Use os botões no cartão para finalizar, reagendar ou cancelar.</p>';
+      '<p class="bp-ad-hint">Use os botões no cartão para finalizar, reagendar ou cancelar.</p>'
+    );
+  }
+
+  function showAgendaDetail(ag) {
+    var detail = document.getElementById("bp-agenda-detail");
+    if (!detail || !ag) return;
+    detail.classList.remove("is-empty");
+    detail.innerHTML = buildAgendaDetailHtml(ag);
+  }
+
+  function ensureMobileAgendaSheet() {
+    var el = document.getElementById("bp-ag-mobile-sheet");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "bp-ag-mobile-sheet";
+    el.className = "bp-ag-mobile-sheet";
+    el.hidden = true;
+    el.innerHTML =
+      '<div class="bp-ag-mobile-backdrop" data-ag-close="1"></div>' +
+      '<div class="bp-ag-mobile-panel" role="dialog" aria-modal="true" aria-label="Detalhe do agendamento">' +
+        '<div class="bp-ag-mobile-handle" aria-hidden="true"></div>' +
+        '<div class="bp-ag-mobile-body" id="bp-ag-mobile-body"></div>' +
+        '<button type="button" class="btn btn-secondary bp-ag-mobile-close" data-ag-close="1">Fechar</button>' +
+      "</div>";
+    document.body.appendChild(el);
+    el.addEventListener("click", function (ev) {
+      if (ev.target.closest("[data-ag-close]")) {
+        el.hidden = true;
+      }
+    });
+    return el;
+  }
+
+  function showAgendaDetailMobile(ag) {
+    var sheet = ensureMobileAgendaSheet();
+    var sheetBody = document.getElementById("bp-ag-mobile-body");
+    if (!sheetBody || !ag) return;
+    sheetBody.innerHTML = buildAgendaDetailHtml(ag);
+    sheet.hidden = false;
   }
 
   /**
-   * Cards de agenda usam data-agenda-id (não data-id).
-   * Clique no cartão (fora de botões) → painel de detalhe no desktop.
+   * Cards: data-agenda-id.
+   * Desktop → painel lateral; Mobile → sheet de detalhe.
    */
   function bindAgendaClicks() {
     if (document.body.dataset.bpAgDesk === "1") return;
     document.body.dataset.bpAgDesk = "1";
 
     document.addEventListener("click", function (e) {
-      // Botões de acção (finalizar, cancelar, etc.) — não interceptar
       if (e.target.closest("button, a, input, select, label, [data-action]")) return;
 
       var card = e.target.closest(".bp-ag-card[data-agenda-id], .list-item[data-agenda-id]");
       if (!card) return;
 
-      // Lista completa ou "próximos" no resumo
       var inAgenda =
         card.closest("#agenda-full-list") ||
         card.closest("#agenda-today-list");
@@ -293,7 +326,6 @@
       var ag = findAgendamentoById(id);
       if (!ag) return;
 
-      // Destaque visual
       document.querySelectorAll(".bp-ag-card.is-selected").forEach(function (el) {
         el.classList.remove("is-selected");
       });
@@ -302,6 +334,8 @@
       if (isDesktop()) {
         ensureAgendaWorkspace();
         showAgendaDetail(ag);
+      } else {
+        showAgendaDetailMobile(ag);
       }
     });
   }
@@ -398,6 +432,9 @@
   // Menu acordeão pode montar depois
   setTimeout(scheduleInit, 1000);
   setTimeout(scheduleInit, 3000);
+  document.addEventListener("bp-menu-accordion-ready", function () {
+    try { ensureSideModules(); } catch (e) {}
+  });
 
   window.addEventListener("resize", function () {
     removeLegacyTopbar();

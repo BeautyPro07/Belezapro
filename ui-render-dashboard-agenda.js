@@ -407,7 +407,7 @@ function renderDashboard() {
           }
         } catch (_) {}
         return `
-          <div class="list-item">
+          <div class="list-item bp-ag-card" data-agenda-id="${a.id}" style="cursor:pointer;">
             ${avHtml}
             <div class="info">
               <div class="title dash-next-title">${escHtml(a.servico || 'Serviço')}</div>

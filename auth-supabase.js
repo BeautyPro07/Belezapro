@@ -15,13 +15,64 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 //  (que já dispara o seu próprio toast no handler do botão "Sair").
 // ====================================================================
 let logoutVoluntarioEmCurso = false;
+
+/** Sessão local persistente — entrada offline sem re-login. */
+function bpMarkSessionLocal(salaoId) {
+  try {
+    if (salaoId) localStorage.setItem('bp_salao_id_cache', String(salaoId));
+    localStorage.setItem('bp_session_active', '1');
+    localStorage.removeItem('bp_logged_out');
+  } catch (_) {}
+}
+function bpClearSessionLocal() {
+  try {
+    localStorage.setItem('bp_logged_out', '1');
+    localStorage.removeItem('bp_session_active');
+    localStorage.removeItem('bp_salao_id_cache');
+  } catch (_) {}
+}
+function bpHasLocalSession() {
+  try {
+    if (localStorage.getItem('bp_logged_out') === '1') return false;
+    if (localStorage.getItem('bp_session_active') === '1' && localStorage.getItem('bp_salao_id_cache')) return true;
+  } catch (_) {}
+  return false;
+}
+function bpShowAppShell() {
+  try {
+    var login = document.getElementById('login-view');
+    var app = document.getElementById('app-view');
+    if (login) login.style.display = 'none';
+    if (app) app.style.display = 'flex';
+  } catch (_) {}
+  bpHideSplashNow();
+}
+function bpShowLoginShell() {
+  try {
+    var login = document.getElementById('login-view');
+    var app = document.getElementById('app-view');
+    if (app) app.style.display = 'none';
+    if (login) login.style.display = 'flex';
+  } catch (_) {}
+  bpHideSplashNow();
+}
+
 supabaseClient.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT' && !logoutVoluntarioEmCurso) {
-    // Sessão perdida sem ter sido o utilizador a pedir — expirou ou foi revogada.
-    document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
-    document.getElementById('app-view').style.display = 'none';
-    document.getElementById('login-view').style.display = 'flex';
-    toast('A sua sessão expirou. Inicie sessão novamente.', 'error');
+    // Offline: token pode "expirar" na lib — NÃO expulsar se há sessão local
+    if (!navigator.onLine && bpHasLocalSession()) {
+      console.warn('[auth] SIGNED_OUT offline ignorado — manter app local');
+      return;
+    }
+    // Online sem sessão local explícita: pedir login
+    if (!bpHasLocalSession()) {
+      document.querySelectorAll('.modal-overlay.active, .modal-overlay.open').forEach(function (m) {
+        m.classList.remove('active');
+        m.classList.remove('open');
+      });
+      bpShowLoginShell();
+      if (typeof toast === 'function') toast('A sua sessão expirou. Inicie sessão novamente.', 'error');
+    }
   }
   logoutVoluntarioEmCurso = false;
 });
@@ -68,86 +119,134 @@ async function bpLoadSalaoIdLocal() {
  * 3) Rede (perfil/config/pull) em background — sem bloquear
  */
 async function checkSession() {
-  try {
-    let session = null;
+  // 1) Entrada INSTANTÂNEA com cache local (sem esperar rede)
+  var cachedSalao = null;
+  try { cachedSalao = localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
+  if (!cachedSalao) {
+    try { cachedSalao = await bpLoadSalaoIdLocal(); } catch (_) {}
+  }
+  var forceLogin = false;
+  try { forceLogin = localStorage.getItem('bp_logged_out') === '1'; } catch (_) {}
+
+  if (!forceLogin && cachedSalao) {
+    state.config.salaoId = cachedSalao;
     try {
-      const res = await bpWithTimeout(
-        supabaseClient.auth.getSession(),
-        2500,
-        'getSession'
-      );
-      session = res && res.data ? res.data.session : null;
+      var role = localStorage.getItem('bp_user_role');
+      if (role) state.config.userRole = role;
+    } catch (_) {}
+    bpShowAppShell();
+    bpMarkSessionLocal(cachedSalao);
+
+    // Dados locais — não bloquear splash (já escondido)
+    try {
+      await loadState(false);
     } catch (e) {
-      console.warn('[boot] getSession timeout/offline — a usar cache local', e && e.message);
-      session = null;
-      try {
-        const { data } = await supabaseClient.auth.getSession();
-        session = data && data.session;
-      } catch (_) {}
+      console.warn('[boot] loadState local', e);
     }
+    try {
+      if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
+      if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+      if (typeof updateUI === 'function') updateUI();
+    } catch (_) {}
 
-    // Sem sessão de rede: tentar salão local (último login)
-    if (!session) {
-      const localSalao = await bpLoadSalaoIdLocal();
-      if (localSalao) {
-        state.config.salaoId = localSalao;
-        document.getElementById('login-view').style.display = 'none';
-        document.getElementById('app-view').style.display = 'flex';
-        try { await loadState(false); } catch (e) { console.warn('[boot] loadState local', e); }
-        if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
-        if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
-        bpHideSplashNow();
-        if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-        // Tentar revalidar sessão em background se online
-        if (navigator.onLine) {
-          setTimeout(function () {
-            if (typeof bpSilentPull === 'function') bpSilentPull(true);
-          }, 2000);
-        }
-        return;
-      }
-      bpHideSplashNow();
-      return; // fica no login
+    // Rede só em background, timeout curto, sem segundo getSession eterno
+    if (navigator.onLine) {
+      setTimeout(function () {
+        bpWithTimeout(supabaseClient.auth.getSession(), 1500, 'getSession_bg')
+          .then(function (res) {
+            var session = res && res.data ? res.data.session : null;
+            if (!session) return null;
+            return bpWithTimeout(
+              supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
+              2000,
+              'profile_bg'
+            );
+          })
+          .then(function (pr) {
+            if (!pr || !pr.data) return;
+            var profile = pr.data;
+            if (profile.salao_id) {
+              state.config.salaoId = profile.salao_id;
+              bpMarkSessionLocal(profile.salao_id);
+            }
+            if (profile.role) {
+              state.config.userRole = profile.role;
+              try { localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
+            }
+            if (profile.nome) state.config.storeName = profile.nome || state.config.storeName;
+            if (typeof saveConfig === 'function') return saveConfig();
+          })
+          .then(function () {
+            if (typeof sincronizarConfigDoServidor === 'function') return sincronizarConfigDoServidor();
+          })
+          .then(function () {
+            if (typeof bpSilentPull === 'function') return bpSilentPull(true);
+            if (typeof carregarDoSupabase === 'function') return carregarDoSupabase();
+          })
+          .then(function () {
+            if (typeof updateUI === 'function') updateUI();
+            if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+          })
+          .catch(function (err) {
+            console.warn('[boot] background (ignorado offline/lento)', err && err.message);
+          });
+      }, 300);
     }
+    return;
+  }
 
-    // Com sessão: mostrar app IMEDIATAMENTE com dados locais
-    document.getElementById('login-view').style.display = 'none';
-    document.getElementById('app-view').style.display = 'flex';
-
-    let profile = null;
-    let profileError = null;
+  // 2) Sem cache local: só aqui tentamos rede (timeout curto)
+  try {
+    var session = null;
     if (navigator.onLine) {
       try {
-        const pr = await bpWithTimeout(
-          supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
-          3000,
-          'profile'
-        );
-        profile = pr.data;
-        profileError = pr.error;
+        var res = await bpWithTimeout(supabaseClient.auth.getSession(), 1800, 'getSession');
+        session = res && res.data ? res.data.session : null;
       } catch (e) {
-        console.warn('[boot] profile timeout — cache local', e && e.message);
+        console.warn('[boot] getSession falhou/timeout', e && e.message);
+        session = null;
       }
     }
 
-    if (profile && !profileError) {
+    if (!session) {
+      // Offline e sem cache = login; online sem sessão = login
+      bpShowLoginShell();
+      return;
+    }
+
+    bpShowAppShell();
+
+    var profile = null;
+    try {
+      var pr = await bpWithTimeout(
+        supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
+        2500,
+        'profile'
+      );
+      profile = pr && pr.data;
+    } catch (e) {
+      console.warn('[boot] profile', e && e.message);
+    }
+
+    if (profile && profile.salao_id) {
       state.config.salaoId = profile.salao_id;
       state.config.storeName = profile.nome || state.config.storeName || 'Salão';
       state.config.userRole = profile.role;
       try { if (profile.role) localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
+      bpMarkSessionLocal(profile.salao_id);
       if (typeof saveConfig === 'function') {
         try { await saveConfig(); } catch (_) {}
       }
     } else {
-      // Offline ou timeout: usar salão já gravado
-      const localSalao = await bpLoadSalaoIdLocal();
-      if (localSalao) state.config.salaoId = localSalao;
-      if (!state.config.salaoId) {
-        toast('Sem dados locais do salão. Conecte-se uma vez para sincronizar.', 'warning');
+      var localSalao = cachedSalao || (await bpLoadSalaoIdLocal());
+      if (localSalao) {
+        state.config.salaoId = localSalao;
+        bpMarkSessionLocal(localSalao);
       }
     }
 
-    let trocouDeSalao = false;
+    var trocouDeSalao = false;
     try {
       if (typeof detetarTrocaDeSalao === 'function' && state.config.salaoId) {
         trocouDeSalao = await detetarTrocaDeSalao(state.config.salaoId);
@@ -155,69 +254,40 @@ async function checkSession() {
     } catch (_) {}
 
     if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
-
-    // Dados locais primeiro (rápido)
     try { await loadState(trocouDeSalao); } catch (e) { console.warn('[boot] loadState', e); }
     if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
-    bpHideSplashNow();
     if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 
-    // Rede em BACKGROUND — não bloqueia abertura
     if (navigator.onLine) {
       setTimeout(function () {
         Promise.resolve()
           .then(function () { return typeof sincronizarConfigDoServidor === 'function' ? sincronizarConfigDoServidor() : null; })
-          .then(function () { return typeof bpSilentPull === 'function' ? bpSilentPull(true) : (typeof carregarDoSupabase === 'function' ? carregarDoSupabase() : null); })
+          .then(function () { return typeof bpSilentPull === 'function' ? bpSilentPull(true) : null; })
           .then(function () {
             if (typeof updateUI === 'function') updateUI();
-            if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
           })
-          .catch(function (err) { console.warn('[boot] background sync', err); });
+          .catch(function () {});
       }, 400);
     }
-
-    if (typeof carregarHistoricoIA === 'function') {
-      setTimeout(function () { try { carregarHistoricoIA(); } catch (_) {} }, 1500);
-    }
-    if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
-
-    if (!localStorage.getItem('bp_onboarding_seen')) {
-      const splash = document.getElementById('splash-screen');
-      if (splash) {
-        splash.style.opacity = '0';
-        setTimeout(function () { splash.style.display = 'none'; }, 400);
-      }
-      const onbEl = document.getElementById('onboarding-screen');
-      if (onbEl) {
-        onbEl.style.display = 'flex';
-        onbEl.style.pointerEvents = 'none';
-        setTimeout(function () { onbEl.style.pointerEvents = 'auto'; }, 400);
-      }
-      if (typeof showOnboardingSlide === 'function') showOnboardingSlide(0);
-    }
   } catch (err) {
-    console.error('Erro na verificação de sessão:', err);
-    if (typeof Sentry !== 'undefined' && Sentry.captureException) {
-      Sentry.captureException(err, { tags: { action: 'checkSession' } });
-    }
-    // Último recurso offline: dados locais
+    console.error('[boot] checkSession', err);
+    // Último recurso: cache local mesmo com erro
     try {
-      const localSalao = await bpLoadSalaoIdLocal();
-      if (localSalao) {
-        state.config.salaoId = localSalao;
-        document.getElementById('login-view').style.display = 'none';
-        document.getElementById('app-view').style.display = 'flex';
-        await loadState(false);
+      var fallback = null;
+      try { fallback = localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
+      if (!fallback) fallback = await bpLoadSalaoIdLocal();
+      if (fallback && !forceLogin) {
+        state.config.salaoId = fallback;
+        bpShowAppShell();
+        try { await loadState(false); } catch (_) {}
         if (typeof ativarAbaAtiva === 'function') ativarAbaAtiva();
-        bpHideSplashNow();
         return;
       }
     } catch (_) {}
-    document.getElementById('login-view').style.display = 'flex';
-    document.getElementById('app-view').style.display = 'none';
-    bpHideSplashNow();
+    bpShowLoginShell();
   }
 }
+
 
 async function getAuthHeaders() {
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -328,6 +398,7 @@ document.getElementById('login-btn').addEventListener('click', async function() 
     state.config.salaoId   = profile.salao_id;
     state.config.storeName = profile.nome || 'Salão';
     state.config.userRole  = profile.role;
+    bpMarkSessionLocal(profile.salao_id);
     try { if (profile.role) localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
     const trocouDeSalao = await detetarTrocaDeSalao(profile.salao_id);
     aplicarPermissoes();

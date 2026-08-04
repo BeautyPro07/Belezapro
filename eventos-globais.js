@@ -108,9 +108,17 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
   else if (tipo === 'servico') openServicoModal(id);
 });
 // Confirm nativo substituído
-if (!document.body.dataset.bpGlobClick) {
-document.body.dataset.bpGlobClick = '1';
-document.addEventListener('click', async function(e) {
+(function bindBpGlobClick() {
+  var root = document.body;
+  if (!root) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bindBpGlobClick, { once: true });
+    }
+    return;
+  }
+  if (root.dataset.bpGlobClick === '1') return;
+  root.dataset.bpGlobClick = '1';
+  document.addEventListener('click', async function(e) {
   const rowMenuBtn = e.target.closest('[data-action="row-menu"]');
   if (rowMenuBtn) {
     e.preventDefault();
@@ -272,7 +280,8 @@ document.addEventListener('click', async function(e) {
     return;
   }
 }, false); // bubble: evita cortar outros handlers em capture
-}
+})();
+
 
 // ONLINE/OFFLINE — multi-dispositivo: indicador sempre legível
 window.addEventListener('online', () => {

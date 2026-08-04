@@ -251,7 +251,12 @@
   }
 
   function init() {
-    try { mount(); } catch (e) { console.warn("[menu-accordion]", e); }
+    try {
+      mount();
+      try {
+        document.dispatchEvent(new CustomEvent("bp-menu-accordion-ready"));
+      } catch (_) {}
+    } catch (e) { console.warn("[menu-accordion]", e); }
   }
 
   if (document.readyState === "loading") {

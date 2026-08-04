@@ -27,14 +27,17 @@ document.addEventListener('click', function(e) {
 });
 
 document.getElementById('logout-btn')?.addEventListener('click', async function() {
-  document.getElementById('menu-dropdown').style.display = 'none';
+  var dd = document.getElementById('menu-dropdown');
+  if (dd) dd.style.display = 'none';
   logoutVoluntarioEmCurso = true;
   const confirmed = await showConfirmModal('Sair da aplicação', 'Tem a certeza que quer sair?', false);
-  if (!confirmed) logoutVoluntarioEmCurso = false;
-  if (confirmed) {
-    await supabaseClient.auth.signOut();
-    location.reload();
+  if (!confirmed) {
+    logoutVoluntarioEmCurso = false;
+    return;
   }
+  if (typeof bpClearSessionLocal === 'function') bpClearSessionLocal();
+  try { await supabaseClient.auth.signOut(); } catch (_) {}
+  location.reload();
 });
 
 document.getElementById('nova-venda-hero-btn').addEventListener('click', openVendaModal);

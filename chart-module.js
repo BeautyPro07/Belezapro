@@ -27,8 +27,9 @@ function abrirChartDrill(dataIso, horaOpt) {
   });
   var title = document.getElementById('chart-drill-title');
   var sub = document.getElementById('chart-drill-sub');
-  var body = document.getElementById('chart-drill-body');
-  if (!body) return;
+  var drillBody = document.getElementById('chart-drill-body');
+  if (!drillBody) return;
+  if (!det || !det.totais) return;
 
   var dataLabel = dataIso;
   if (typeof formatarDataCurta === 'function') dataLabel = formatarDataCurta(dataIso);
@@ -80,7 +81,7 @@ function abrirChartDrill(dataIso, horaOpt) {
       _escChart(det.vsMesmoDiaSemana.data) + '): <strong>' + sign + (Math.round(p * 10) / 10) + '%</strong></p>';
   }
 
-  body.innerHTML =
+  drillBody.innerHTML =
     '<div class="chart-drill-kpis">' +
       '<div class="chart-drill-kpi"><span>Receita</span><strong>' + _escChart(_fmtChart(det.totais.receita)) + '</strong></div>' +
       '<div class="chart-drill-kpi"><span>Vendas</span><strong>' + det.totais.nVendas + '</strong></div>' +
