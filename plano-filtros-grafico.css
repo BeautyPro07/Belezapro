@@ -193,3 +193,10 @@
   opacity: 0.8;
   transform: scale(0.96);
 }
+
+/* Personalizado — faixa completa */
+.dash-periodo-opcao[data-periodo="custom"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  text-align: center;
+}

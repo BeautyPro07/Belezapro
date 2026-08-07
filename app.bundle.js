@@ -6292,17 +6292,21 @@ function renderizarGrafico() {
     if (window._chartShowMedia && media > 0 && maxVal > 0) {
       var yMed = baseY - (media / maxVal) * plotH;
       ctx.save();
-      ctx.strokeStyle = textMuted;
+      // Presente sem engrossar: contraste maior + menos transparência
+      ctx.strokeStyle = (typeof getComputedStyle === 'function'
+        ? (getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#c9a227')
+        : '#c9a227');
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.globalAlpha = 0.75;
+      ctx.setLineDash([5, 3]);
+      ctx.globalAlpha = 0.95;
       ctx.beginPath();
       ctx.moveTo(16, yMed + 0.5);
       ctx.lineTo(width - 16, yMed + 0.5);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.font = '8px system-ui, sans-serif';
-      ctx.fillStyle = textMuted;
+      ctx.font = '600 8px system-ui, sans-serif';
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.globalAlpha = 1;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillText('Média', 18, yMed - 2);
@@ -6827,56 +6831,64 @@ function _bpInitChartChrome() {
         var act = this.getAttribute('data-chart-more');
         var leg = document.getElementById('dash-chart-legend');
         var ins = document.getElementById('dash-chart-insights');
-        var wrap = document.getElementById('dash-chart-canvas-wrap');
-        function pulse(el) { _bpChartPulse(el); }
-        function setOn(btn, on) {
-          if (btn) btn.classList.toggle('is-on', !!on);
+        var mediaSpan = leg ? leg.querySelector('.dash-chart-leg-media') : null;
+
+        // Exclusivo: só uma acção activa de cada vez
+        var wasOn = this.classList.contains('is-on');
+        moreM.querySelectorAll('[data-chart-more]').forEach(function (b) {
+          b.classList.remove('is-on');
+        });
+        window._chartShowMedia = false;
+        window._chartShowComparar = false;
+        window._chartShowInsights = false;
+        if (ins) ins.hidden = true;
+        if (mediaSpan) mediaSpan.classList.remove('is-active');
+        if (leg) {
+          var cmp0 = document.getElementById('dash-chart-leg-cmp');
+          if (cmp0) cmp0.hidden = true;
         }
-        if (act === 'media') {
-          window._chartShowMedia = !window._chartShowMedia;
-          setOn(this, window._chartShowMedia);
-          if (leg) {
-            leg.hidden = !window._chartShowMedia;
-            var cmp = document.getElementById('dash-chart-leg-cmp');
-            if (cmp && !window._chartShowComparar) cmp.hidden = true;
-          }
+
+        if (wasOn) {
+          // desligar tudo
+          if (leg) leg.hidden = true;
           if (typeof renderizarGrafico === 'function') renderizarGrafico();
-          pulse(wrap || leg);
+          return;
+        }
+
+        this.classList.add('is-on');
+
+        if (act === 'media') {
+          window._chartShowMedia = true;
+          if (leg) leg.hidden = false;
+          if (mediaSpan) mediaSpan.classList.add('is-active');
+          if (typeof renderizarGrafico === 'function') renderizarGrafico();
         } else if (act === 'comparar') {
-          window._chartShowComparar = !window._chartShowComparar;
-          setOn(this, window._chartShowComparar);
+          window._chartShowComparar = true;
           if (leg) {
-            leg.hidden = !(window._chartShowMedia || window._chartShowComparar);
+            leg.hidden = false;
             var cmp = document.getElementById('dash-chart-leg-cmp');
             if (cmp) {
-              cmp.hidden = !window._chartShowComparar;
-              if (window._chartShowComparar && window.__bpUltimaAnaliseTemporal) {
-                var a = window.__bpUltimaAnaliseTemporal;
-                var pct = a.anterior && a.anterior.pct != null ? a.anterior.pct : null;
-                cmp.textContent = pct != null
-                  ? ((pct > 0 ? '+' : '') + (Math.round(pct * 10) / 10) + '% vs anterior')
-                  : 'Sem comparação';
-              }
+              cmp.hidden = false;
+              var a = window.__bpUltimaAnaliseTemporal;
+              var pct = a && a.anterior && a.anterior.pct != null ? a.anterior.pct : null;
+              cmp.textContent = pct != null
+                ? ((pct > 0 ? '+' : '') + (Math.round(pct * 10) / 10) + '% vs anterior')
+                : 'Sem comparação';
             }
           }
-          pulse(leg || wrap);
+          if (typeof renderizarGrafico === 'function') renderizarGrafico();
         } else if (act === 'insights') {
-          window._chartShowInsights = !window._chartShowInsights;
-          setOn(this, window._chartShowInsights);
+          window._chartShowInsights = true;
           if (ins) {
-            if (window._chartShowInsights) {
-              if (typeof actualizarDashChartInsights === 'function' && window.__bpUltimaAnaliseTemporal) {
-                try { actualizarDashChartInsights(window.__bpUltimaAnaliseTemporal); } catch (_) {}
-              }
-              ins.hidden = false;
-            } else {
-              ins.hidden = true;
+            if (typeof actualizarDashChartInsights === 'function' && window.__bpUltimaAnaliseTemporal) {
+              try { actualizarDashChartInsights(window.__bpUltimaAnaliseTemporal); } catch (_) {}
             }
+            ins.hidden = false;
           }
-          pulse(ins || wrap);
         }
       });
     });
+
   }
   document.addEventListener('click', function () {
     if (expM) expM.hidden = true;
