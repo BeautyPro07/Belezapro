@@ -829,6 +829,7 @@ function initChartControls() {
     if (btn.dataset.bound) return;
     btn.dataset.bound = '1';
     btn.addEventListener('click', function () {
+      try { _bpHaptic('toggle'); } catch (_) {}
       var v = this.getAttribute('data-chart-view') || 'barras';
       _chartViewMode = v;
       try { localStorage.setItem('bp_chart_view', v); } catch (_) {}
@@ -867,47 +868,8 @@ function initChartControls() {
 
 
 
-/**
- * Feedback visual 10s — Web Animations API (nativo).
- * Só transform + opacity (compositor / GPU). Sem dependências.
- */
-function _bpChartPulse(el) {
-  if (!el) return;
-  try {
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-  } catch (_) {}
-  try {
-    if (typeof el.animate === 'function') {
-      // cancela pulso anterior neste nó
-      if (el.getAnimations) {
-        el.getAnimations().forEach(function (a) {
-          if (a && a._bpChartPulse) a.cancel();
-        });
-      }
-      var anim = el.animate(
-        [
-          { opacity: 1, transform: 'translateZ(0) scale(1)' },
-          { opacity: 0.78, transform: 'translateZ(0) scale(1.012)' },
-          { opacity: 1, transform: 'translateZ(0) scale(1)' }
-        ],
-        {
-          duration: 1000,
-          iterations: 10,
-          easing: 'ease-in-out'
-        }
-      );
-      anim._bpChartPulse = true;
-      return;
-    }
-  } catch (_) {}
-  // fallback CSS
-  el.classList.remove('bp-chart-soft-pulse');
-  void el.offsetWidth;
-  el.classList.add('bp-chart-soft-pulse');
-  setTimeout(function () { el.classList.remove('bp-chart-soft-pulse'); }, 10000);
-}
+/** @deprecated feedback visual — anel CSS; mantido no-op seguro */
+function _bpChartPulse(el) { /* no-op */ }
 
 function _bpInitChartChrome() {
   if (window.__bpChartChromeBound) return;
@@ -940,6 +902,7 @@ function _bpInitChartChrome() {
         } catch (_) {}
       }
       markActive();
+      try { _bpHaptic('open'); } catch (_) {}
       if (typeof openModal === 'function') {
         openModal('modal-periodo-dashboard');
         placeSheetNearFilter();
@@ -1019,12 +982,14 @@ function _bpInitChartChrome() {
 
         if (wasOn) {
           // desligar tudo
+          try { _bpHaptic('toggle'); } catch (_) {}
           if (leg) leg.hidden = true;
           if (typeof renderizarGrafico === 'function') renderizarGrafico();
           return;
         }
 
         this.classList.add('is-on');
+        try { _bpHaptic('select'); } catch (_) {}
 
         if (act === 'media') {
           window._chartShowMedia = true;

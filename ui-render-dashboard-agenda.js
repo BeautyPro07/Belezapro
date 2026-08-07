@@ -527,6 +527,7 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
     if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
     try { _bpSyncPeriodLabels((this.textContent || '').trim()); } catch (_) {}
+    try { if (typeof _bpHaptic === 'function') _bpHaptic('select'); } catch (_) {}
     renderDashboard();
     if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
@@ -545,6 +546,7 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
   localStorage.setItem('bp_dash_custom_inicio', ini);
   localStorage.setItem('bp_dash_custom_fim', fim);
   closeModal('modal-periodo-dashboard');
+  try { if (typeof _bpHaptic === 'function') _bpHaptic('success'); } catch (_) {}
   try {
     var _civ = (typeof calcularIntervaloPeriodo === 'function')
       ? calcularIntervaloPeriodo('custom', 0)
