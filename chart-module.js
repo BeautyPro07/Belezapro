@@ -862,6 +862,49 @@ function initChartControls() {
 }
 
 
+
+/**
+ * Feedback visual 10s — Web Animations API (nativo).
+ * Só transform + opacity (compositor / GPU). Sem dependências.
+ */
+function _bpChartPulse(el) {
+  if (!el) return;
+  try {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+  } catch (_) {}
+  try {
+    if (typeof el.animate === 'function') {
+      // cancela pulso anterior neste nó
+      if (el.getAnimations) {
+        el.getAnimations().forEach(function (a) {
+          if (a && a._bpChartPulse) a.cancel();
+        });
+      }
+      var anim = el.animate(
+        [
+          { opacity: 1, transform: 'translateZ(0) scale(1)' },
+          { opacity: 0.78, transform: 'translateZ(0) scale(1.012)' },
+          { opacity: 1, transform: 'translateZ(0) scale(1)' }
+        ],
+        {
+          duration: 1000,
+          iterations: 10,
+          easing: 'ease-in-out'
+        }
+      );
+      anim._bpChartPulse = true;
+      return;
+    }
+  } catch (_) {}
+  // fallback CSS
+  el.classList.remove('bp-chart-soft-pulse');
+  void el.offsetWidth;
+  el.classList.add('bp-chart-soft-pulse');
+  setTimeout(function () { el.classList.remove('bp-chart-soft-pulse'); }, 10000);
+}
+
 function _bpInitChartChrome() {
   if (window.__bpChartChromeBound) return;
   window.__bpChartChromeBound = true;
@@ -954,13 +997,7 @@ function _bpInitChartChrome() {
         var leg = document.getElementById('dash-chart-legend');
         var ins = document.getElementById('dash-chart-insights');
         var wrap = document.getElementById('dash-chart-canvas-wrap');
-        function pulse(el) {
-          if (!el) return;
-          el.classList.remove('bp-chart-soft-pulse');
-          void el.offsetWidth;
-          el.classList.add('bp-chart-soft-pulse');
-          setTimeout(function () { el.classList.remove('bp-chart-soft-pulse'); }, 10000);
-        }
+        function pulse(el) { _bpChartPulse(el); }
         function setOn(btn, on) {
           if (btn) btn.classList.toggle('is-on', !!on);
         }

@@ -1557,18 +1557,18 @@
   width: 16px;
   height: 16px;
   transform-origin: center center;
-  animation: bpChartNudgeArrow 3.2s ease-in-out infinite !important;
-  will-change: transform, opacity;
+  animation: bpChartNudgeArrow 3.2s ease-in-out infinite;
+  /* sem will-change permanente — poupa memória GPU em mobile */
 }
 @keyframes bpChartNudgeArrow {
-  0%   { transform: rotate(0deg) translateX(0); opacity: 0.65; }
-  22%  { transform: rotate(360deg) translateX(0); opacity: 1; }
-  28%  { transform: rotate(360deg) translateX(0); opacity: 1; }
-  50%  { transform: rotate(0deg) translateX(0); opacity: 1; }
-  56%  { transform: rotate(0deg) translateX(0); opacity: 1; }
-  72%  { transform: rotate(0deg) translateX(-6px); opacity: 0.85; }
-  86%  { transform: rotate(0deg) translateX(6px); opacity: 1; }
-  100% { transform: rotate(0deg) translateX(0); opacity: 0.65; }
+  0%   { transform: translate3d(0,0,0) rotate(0deg); opacity: 0.65; }
+  22%  { transform: translate3d(0,0,0) rotate(360deg); opacity: 1; }
+  28%  { transform: translate3d(0,0,0) rotate(360deg); opacity: 1; }
+  50%  { transform: translate3d(0,0,0) rotate(0deg); opacity: 1; }
+  56%  { transform: translate3d(0,0,0) rotate(0deg); opacity: 1; }
+  72%  { transform: translate3d(-6px,0,0) rotate(0deg); opacity: 0.85; }
+  86%  { transform: translate3d(6px,0,0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(0,0,0) rotate(0deg); opacity: 0.65; }
 }
 .dash-chart-card.nudge-done .dash-chart-nudge,
 .dash-chart-card.nudge-done .dash-chart-nudge-arrow {
@@ -1625,12 +1625,13 @@
 }
 
 /* Feedback suave 10s */
+/* Pulse via WAAPI (JS) — CSS só fallback compositor-only */
 @keyframes bpChartSoftPulse {
-  0%, 100% { opacity: 1; filter: none; }
-  50% { opacity: 0.72; filter: drop-shadow(0 0 3px rgba(201,162,39,.45)); }
+  0%, 100% { opacity: 1; transform: translateZ(0) scale(1); }
+  50% { opacity: 0.78; transform: translateZ(0) scale(1.01); }
 }
 .bp-chart-soft-pulse {
-  animation: bpChartSoftPulse 1s ease-in-out 10 !important;
+  animation: bpChartSoftPulse 1s ease-in-out 10;
 }
 
 /* Modal filtro mais fino e discreto */
@@ -1672,4 +1673,25 @@
     opacity: 0.85 !important;
   }
   .bp-chart-soft-pulse { animation: none !important; }
+}
+
+
+/* ============================================================
+   FIX9 — performance animações (compositor + reduced-motion)
+   ============================================================ */
+.dash-chart-card .dash-chart-nudge {
+  contain: layout style;
+}
+.dash-chart-card .dash-chart-nudge-arrow {
+  backface-visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-chart-card .dash-chart-nudge-arrow {
+    animation: none !important;
+    opacity: 0.8 !important;
+    transform: none !important;
+  }
+  .bp-chart-soft-pulse {
+    animation: none !important;
+  }
 }
