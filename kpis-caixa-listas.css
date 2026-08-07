@@ -1231,25 +1231,7 @@
 /* ============================================================
    Chart UX — funil SVG, modal compacto, menu fixo, touch scroll
    ============================================================ */
-.dash-chart-card .dash-chart-nudge {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  pointer-events: none;
-  /* sem animação — não cobre o filtro */
-  animation: none !important;
-  transform: none !important;
-  opacity: 0.75;
-}
-.dash-chart-card .dash-chart-nudge-arrow,
-.dash-chart-card .dash-chart-nudge svg {
-  animation: none !important;
-  transform: none !important;
-}
+/* (removido: force animation:none no nudge — ver FIX8) */
 .dash-chart-card.nudge-done .dash-chart-nudge { opacity: 1; display: inline-flex; }
 
 .dash-chart-card .bp-icon-funnel {
@@ -1552,4 +1534,142 @@
 #modal-periodo-dashboard .dash-periodo-custom .btn {
   min-height: 36px;
   font-size: 0.78rem;
+}
+
+
+/* ============================================================
+   FIX8 — seta animada, toggles planos, feedback 10s, modal fino
+   ============================================================ */
+.dash-chart-card .dash-chart-nudge {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--gold, #c9a227);
+  pointer-events: none;
+  opacity: 1 !important;
+}
+.dash-chart-card .dash-chart-nudge-arrow,
+.dash-chart-card .dash-chart-nudge svg.dash-chart-nudge-arrow {
+  display: block !important;
+  width: 16px;
+  height: 16px;
+  transform-origin: center center;
+  animation: bpChartNudgeArrow 3.2s ease-in-out infinite !important;
+  will-change: transform, opacity;
+}
+@keyframes bpChartNudgeArrow {
+  0%   { transform: rotate(0deg) translateX(0); opacity: 0.65; }
+  22%  { transform: rotate(360deg) translateX(0); opacity: 1; }
+  28%  { transform: rotate(360deg) translateX(0); opacity: 1; }
+  50%  { transform: rotate(0deg) translateX(0); opacity: 1; }
+  56%  { transform: rotate(0deg) translateX(0); opacity: 1; }
+  72%  { transform: rotate(0deg) translateX(-6px); opacity: 0.85; }
+  86%  { transform: rotate(0deg) translateX(6px); opacity: 1; }
+  100% { transform: rotate(0deg) translateX(0); opacity: 0.65; }
+}
+.dash-chart-card.nudge-done .dash-chart-nudge,
+.dash-chart-card.nudge-done .dash-chart-nudge-arrow {
+  display: inline-flex !important;
+  opacity: 1 !important;
+  animation-name: bpChartNudgeArrow !important;
+  animation-duration: 3.2s !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* Barras / Linha / Área — sem caixa de fundo a cobrir o gráfico */
+.dash-chart-card .dash-chart-view-toggle--canvas {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 2px !important;
+  gap: 4px !important;
+}
+.dash-chart-card .dash-chart-view-toggle--canvas .dash-chart-view-btn {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--text-muted);
+  min-height: 32px;
+  min-width: 44px;
+  padding: 4px 8px !important;
+  font-size: 0.68rem !important;
+  border-radius: 6px;
+}
+.dash-chart-card .dash-chart-view-toggle--canvas .dash-chart-view-btn.is-active {
+  background: transparent !important;
+  color: var(--gold, #c9a227) !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--gold, #c9a227);
+}
+
+/* Menu ⋯ — sem painel pesado */
+.dash-chart-card .dash-chart-more-menu {
+  background: var(--card-white, #fff) !important;
+  border: 1px solid var(--border-soft) !important;
+  box-shadow: 0 4px 14px rgba(28,26,24,.08) !important;
+  border-radius: 8px !important;
+  padding: 4px !important;
+  min-width: 150px;
+}
+.dash-chart-card .dash-chart-more-item.is-on {
+  color: var(--gold-dark, #8a7020);
+  font-weight: 700;
+  background: var(--gold-50, #FFFBEB);
+}
+
+/* Feedback suave 10s */
+@keyframes bpChartSoftPulse {
+  0%, 100% { opacity: 1; filter: none; }
+  50% { opacity: 0.72; filter: drop-shadow(0 0 3px rgba(201,162,39,.45)); }
+}
+.bp-chart-soft-pulse {
+  animation: bpChartSoftPulse 1s ease-in-out 10 !important;
+}
+
+/* Modal filtro mais fino e discreto */
+#modal-periodo-dashboard .modal-sheet {
+  width: 200px !important;
+  max-width: 72vw !important;
+  max-height: 280px !important;
+  padding: 8px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 16px rgba(28,26,24,.1) !important;
+  border: 1px solid var(--border-soft) !important;
+}
+#modal-periodo-dashboard .modal-title {
+  font-size: 0.68rem !important;
+  font-weight: 600 !important;
+  color: var(--text-muted) !important;
+  margin-bottom: 6px !important;
+  padding-bottom: 4px !important;
+}
+#modal-periodo-dashboard .dash-periodo-opcao {
+  padding: 6px 4px !important;
+  font-size: 0.68rem !important;
+  min-height: 32px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+}
+#modal-periodo-dashboard .dash-periodo-opcao.active,
+#modal-periodo-dashboard .dash-periodo-opcao.is-active {
+  background: var(--gold-50, #FFFBEB) !important;
+  border-color: var(--border-soft) !important;
+  color: var(--gold-dark, #8a7020) !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-chart-card .dash-chart-nudge-arrow {
+    animation: none !important;
+    opacity: 0.85 !important;
+  }
+  .bp-chart-soft-pulse { animation: none !important; }
 }
