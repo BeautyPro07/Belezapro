@@ -5984,6 +5984,8 @@ function actualizarDashChartInsights(analise) {
     return;
   }
   ul.hidden = false;
+  if (window._chartShowInsights) ul.classList.add('is-live');
+  else ul.classList.remove('is-live');
   ul.innerHTML = list.map(function (t) {
     return '<li>' + _escChart(t) + '</li>';
   }).join('');
@@ -6806,7 +6808,7 @@ function _bpInitChartChrome() {
         window._chartShowMedia = false;
         window._chartShowComparar = false;
         window._chartShowInsights = false;
-        if (ins) ins.hidden = true;
+        if (ins) { ins.hidden = true; ins.classList.remove('is-live'); }
         if (mediaSpan) mediaSpan.classList.remove('is-active');
         if (leg) {
           var cmp0 = document.getElementById('dash-chart-leg-cmp');
@@ -6851,6 +6853,7 @@ function _bpInitChartChrome() {
               try { actualizarDashChartInsights(window.__bpUltimaAnaliseTemporal); } catch (_) {}
             }
             ins.hidden = false;
+            ins.classList.add('is-live');
           }
         }
       });
