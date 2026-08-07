@@ -3860,6 +3860,14 @@ const greetEl = document.getElementById('greeting');
 // ====================================================================
 document.getElementById('dash-filter-icon')?.addEventListener('click', function(e) {
   e.stopPropagation();
+  try {
+    var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
+    if (sheet) {
+      sheet.style.top = '64px';
+      sheet.style.left = '12px';
+      sheet.style.width = '';
+    }
+  } catch (_) {}
   document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     const ativa = btn.dataset.periodo === state.dashPeriodo &&
       (btn.dataset.periodo !== 'dia' || Number(btn.dataset.offset || 0) === state.dashOffset);
@@ -6684,19 +6692,35 @@ function _bpInitChartChrome() {
     toggle.dataset.boundKpiModal = '1';
     toggle.addEventListener('click', function (e) {
       e.stopPropagation();
-      var card = document.querySelector('.dash-chart-card');
-      if (card) card.classList.add('nudge-done');
-      // Reutiliza o mesmo modal e a mesma lógica dos KPIs
-      var kpiIcon = document.getElementById('dash-filter-icon');
-      if (kpiIcon) {
-        kpiIcon.click();
-      } else if (typeof openModal === 'function') {
+      function markActive() {
         document.querySelectorAll('.dash-periodo-opcao').forEach(function (btn) {
           var ativa = btn.dataset.periodo === state.dashPeriodo &&
             (btn.dataset.periodo !== 'dia' || Number(btn.dataset.offset || 0) === Number(state.dashOffset || 0));
           btn.classList.toggle('active', ativa);
         });
+      }
+      function placeSheetNearFilter() {
+        try {
+          var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
+          var btn = document.getElementById('chart-filter-toggle');
+          if (!sheet || !btn) return;
+          var r = btn.getBoundingClientRect();
+          var w = Math.min(220, window.innerWidth * 0.78);
+          var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+          var top = Math.min(r.bottom + 6, window.innerHeight - 120);
+          sheet.style.top = Math.round(top) + 'px';
+          sheet.style.left = Math.round(left) + 'px';
+          sheet.style.width = Math.round(w) + 'px';
+        } catch (_) {}
+      }
+      markActive();
+      if (typeof openModal === 'function') {
         openModal('modal-periodo-dashboard');
+        placeSheetNearFilter();
+        setTimeout(placeSheetNearFilter, 30);
+      } else {
+        var kpiIcon = document.getElementById('dash-filter-icon');
+        if (kpiIcon) kpiIcon.click();
       }
     });
   }

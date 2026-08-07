@@ -476,6 +476,14 @@ const greetEl = document.getElementById('greeting');
 // ====================================================================
 document.getElementById('dash-filter-icon')?.addEventListener('click', function(e) {
   e.stopPropagation();
+  try {
+    var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
+    if (sheet) {
+      sheet.style.top = '64px';
+      sheet.style.left = '12px';
+      sheet.style.width = '';
+    }
+  } catch (_) {}
   document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     const ativa = btn.dataset.periodo === state.dashPeriodo &&
       (btn.dataset.periodo !== 'dia' || Number(btn.dataset.offset || 0) === state.dashOffset);
