@@ -262,3 +262,17 @@
   gap: 6px;
   flex-shrink: 0;
 }
+
+
+/* Saúde do serviço (latência Supabase) — header sync */
+.sync-status[data-service-health="degraded"] .sync-dot,
+.sync-status[data-state="pending"] .sync-dot {
+  background: var(--gold, #c9a227);
+}
+.sync-status[data-service-health="critical"] .sync-dot,
+.sync-status[data-state="error"] .sync-dot {
+  background: var(--red-500, #c0392b);
+}
+.sync-status[data-service-health="ok"] .sync-dot {
+  background: var(--green-500, #22a06b);
+}

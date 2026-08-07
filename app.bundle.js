@@ -1271,6 +1271,332 @@ document.getElementById('login-btn').addEventListener('click', async function() 
   }
 });
 
+/* ===== FILE: supabase-resilience.js ===== */
+/**
+ * supabase-resilience.js
+ * Retry HTTP (backoff + jitter), timeout, latência e saúde do serviço Supabase.
+ * Só transporte — sem regras de negócio.
+ *
+ * --- Exemplos de chamada ---
+ *
+ * // 1) Stats de latência (consola ou UI)
+ * const s = bpGetSupabaseLatencyStats();
+ * // → { n, avg, p95, fail, lastMs }
+ *
+ * // 2) Saúde agregada
+ * const h = bpGetServiceHealth();
+ * // → { level: 'ok'|'degraded'|'critical'|'unknown', label, stats, reasons: [] }
+ *
+ * // 3) Fetch manual com retry
+ * const resp = await bpFetchSupabase(
+ *   `${SUPABASE_URL}/rest/v1/movimentos?select=id`,
+ *   { headers: await getAuthHeaders() },
+ *   { label: 'movimentos-probe', retries: 2, timeoutMs: 10000 }
+ * );
+ *
+ * // 4) Retry genérico em qualquer async
+ * await bpRetryExponential(async () => {
+ *   const r = await fetch(url, opts);
+ *   if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+ *   return r.json();
+ * }, { retries: 3, label: 'custom-job' });
+ *
+ * // 5) Arrancar monitor (já chamado uma vez no boot se main invocar bpStartHealthMonitor)
+ * bpStartHealthMonitor({ intervalMs: 30000 });
+ */
+(function (global) {
+  'use strict';
+
+  var LAT_MAX = 48;
+
+  /** Limiares de saúde (ms / rácios). Ajustáveis via bpConfigureHealthThresholds. */
+  var THRESHOLDS = {
+    warnAvgMs: 2500,
+    warnP95Ms: 4000,
+    critAvgMs: 5000,
+    critP95Ms: 8000,
+    warnFailRatio: 0.25,
+    critFailRatio: 0.5,
+    minSamples: 3
+  };
+
+  var _latencies = [];
+  var _lastHealthLevel = 'unknown';
+  var _monitorTimer = null;
+  var _alertCooldownUntil = 0;
+
+  function bpConfigureHealthThresholds(partial) {
+    if (!partial || typeof partial !== 'object') return Object.assign({}, THRESHOLDS);
+    Object.keys(partial).forEach(function (k) {
+      if (THRESHOLDS[k] != null && typeof partial[k] === 'number') THRESHOLDS[k] = partial[k];
+    });
+    return Object.assign({}, THRESHOLDS);
+  }
+
+  function bpLogError(contexto, err, extra) {
+    try {
+      var msg = err && err.message ? err.message : String(err || 'erro');
+      var payload = {
+        ts: new Date().toISOString(),
+        contexto: contexto || 'supabase',
+        message: msg,
+        status: err && err.status != null ? err.status : undefined,
+        extra: extra || undefined
+      };
+      if (typeof console !== 'undefined' && console.error) {
+        console.error('[BeautyPro]', payload.contexto, payload.message, payload);
+      }
+      global.__bpLastSupabaseError = payload;
+    } catch (_) {}
+  }
+
+  function _recordLatency(ms, ok, meta) {
+    try {
+      _latencies.push({
+        ms: Math.max(0, Math.round(ms)),
+        ok: !!ok,
+        t: Date.now(),
+        meta: meta || null
+      });
+      if (_latencies.length > LAT_MAX) _latencies.shift();
+    } catch (_) {}
+  }
+
+  function bpGetSupabaseLatencyStats() {
+    if (!_latencies.length) {
+      return { n: 0, avg: 0, p95: 0, fail: 0, lastMs: 0, failRatio: 0 };
+    }
+    var ms = _latencies.map(function (x) { return x.ms; }).sort(function (a, b) { return a - b; });
+    var fail = _latencies.filter(function (x) { return !x.ok; }).length;
+    var sum = ms.reduce(function (a, b) { return a + b; }, 0);
+    var p95 = ms[Math.min(ms.length - 1, Math.floor(ms.length * 0.95))];
+    var last = _latencies[_latencies.length - 1];
+    return {
+      n: ms.length,
+      avg: Math.round(sum / ms.length),
+      p95: p95,
+      fail: fail,
+      lastMs: last ? last.ms : 0,
+      failRatio: Math.round((fail / ms.length) * 100) / 100
+    };
+  }
+
+  /**
+   * Avalia saúde do serviço com base na janela de latência.
+   * level: unknown | ok | degraded | critical
+   */
+  function bpGetServiceHealth() {
+    var stats = bpGetSupabaseLatencyStats();
+    var reasons = [];
+    var level = 'unknown';
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return {
+        level: 'critical',
+        label: 'Sem rede',
+        stats: stats,
+        reasons: ['navigator.offline']
+      };
+    }
+
+    if (stats.n < THRESHOLDS.minSamples) {
+      return {
+        level: 'unknown',
+        label: 'A calibrar',
+        stats: stats,
+        reasons: ['amostras_insuficientes']
+      };
+    }
+
+    level = 'ok';
+    if (stats.failRatio >= THRESHOLDS.critFailRatio) {
+      level = 'critical';
+      reasons.push('falhas_' + Math.round(stats.failRatio * 100) + '%');
+    } else if (stats.failRatio >= THRESHOLDS.warnFailRatio) {
+      level = 'degraded';
+      reasons.push('falhas_' + Math.round(stats.failRatio * 100) + '%');
+    }
+
+    if (stats.p95 >= THRESHOLDS.critP95Ms || stats.avg >= THRESHOLDS.critAvgMs) {
+      level = 'critical';
+      reasons.push('latencia_p95_' + stats.p95 + 'ms');
+    } else if (stats.p95 >= THRESHOLDS.warnP95Ms || stats.avg >= THRESHOLDS.warnAvgMs) {
+      if (level !== 'critical') level = 'degraded';
+      reasons.push('latencia_avg_' + stats.avg + 'ms');
+    }
+
+    var label =
+      level === 'ok' ? 'Serviço OK' :
+      level === 'degraded' ? 'Serviço lento' :
+      level === 'critical' ? 'Serviço instável' : 'A calibrar';
+
+    return { level: level, label: label, stats: stats, reasons: reasons };
+  }
+
+  /** Emite alerta suave só quando o nível piora (cooldown 60s). */
+  function bpNotifyHealthIfNeeded(health) {
+    if (!health || !health.level) return;
+    var rank = { unknown: 0, ok: 1, degraded: 2, critical: 3 };
+    var prev = rank[_lastHealthLevel] != null ? rank[_lastHealthLevel] : 0;
+    var next = rank[health.level] != null ? rank[health.level] : 0;
+    var worsened = next > prev && next >= 2;
+    _lastHealthLevel = health.level;
+
+    try {
+      var container = document.getElementById('sync-status-container');
+      if (container) {
+        container.setAttribute('data-service-health', health.level);
+        if (health.level === 'degraded' || health.level === 'critical') {
+          container.classList.add('is-visible');
+        }
+      }
+    } catch (_) {}
+
+    if (!worsened) return;
+    if (Date.now() < _alertCooldownUntil) return;
+    _alertCooldownUntil = Date.now() + 60000;
+
+    var msg =
+      health.level === 'critical'
+        ? 'Ligação ao servidor instável. Os dados continuam seguros neste dispositivo.'
+        : 'Servidor mais lento que o habitual. A sincronização pode demorar.';
+    try {
+      if (typeof toast === 'function') toast(msg, health.level === 'critical' ? 'error' : 'info');
+    } catch (_) {}
+    try {
+      bpLogError('service-health', new Error(health.label), {
+        level: health.level,
+        reasons: health.reasons,
+        stats: health.stats
+      });
+    } catch (_) {}
+  }
+
+  function bpStartHealthMonitor(opts) {
+    opts = opts || {};
+    var intervalMs = opts.intervalMs != null ? opts.intervalMs : 30000;
+    if (_monitorTimer) {
+      try { clearInterval(_monitorTimer); } catch (_) {}
+      _monitorTimer = null;
+    }
+    var tick = function () {
+      try {
+        var h = bpGetServiceHealth();
+        bpNotifyHealthIfNeeded(h);
+        global.__bpServiceHealth = h;
+      } catch (_) {}
+    };
+    tick();
+    _monitorTimer = setInterval(tick, intervalMs);
+    return true;
+  }
+
+  function bpStopHealthMonitor() {
+    if (_monitorTimer) {
+      try { clearInterval(_monitorTimer); } catch (_) {}
+      _monitorTimer = null;
+    }
+  }
+
+  function _sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function _isRetryable(err) {
+    if (!err) return false;
+    if (err.name === 'AbortError' || err.name === 'TypeError') return true;
+    var s = err.status;
+    if (s === 429 || s === 408) return true;
+    if (s >= 500 && s <= 599) return true;
+    return false;
+  }
+
+  async function bpRetryExponential(fn, opts) {
+    opts = opts || {};
+    var retries = opts.retries != null ? opts.retries : 3;
+    var baseMs = opts.baseMs != null ? opts.baseMs : 400;
+    var maxMs = opts.maxMs != null ? opts.maxMs : 8000;
+    var label = opts.label || 'bpRetry';
+    var lastErr = null;
+    for (var attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await fn(attempt);
+      } catch (err) {
+        lastErr = err;
+        var retryable = _isRetryable(err);
+        if (!retryable || attempt >= retries) {
+          bpLogError(label, err, { attempt: attempt, retryable: retryable });
+          throw err;
+        }
+        var delay = Math.min(maxMs, baseMs * Math.pow(2, attempt)) + Math.random() * 200;
+        await _sleep(delay);
+      }
+    }
+    throw lastErr;
+  }
+
+  async function bpFetchSupabase(url, options, meta) {
+    meta = meta || {};
+    options = options || {};
+    var timeoutMs = meta.timeoutMs != null ? meta.timeoutMs : 12000;
+    var retries = meta.retries != null ? meta.retries : 2;
+    var label = meta.label || 'bpFetchSupabase';
+
+    return bpRetryExponential(async function () {
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = null;
+      var started = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      try {
+        if (ctrl) {
+          timer = setTimeout(function () {
+            try { ctrl.abort(); } catch (_) {}
+          }, timeoutMs);
+        }
+        var opts = {};
+        for (var k in options) {
+          if (Object.prototype.hasOwnProperty.call(options, k)) opts[k] = options[k];
+        }
+        if (ctrl) opts.signal = ctrl.signal;
+
+        var resp = await fetch(url, opts);
+        var ms = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - started);
+        var softOk = resp.ok || (resp.status >= 400 && resp.status < 500 && resp.status !== 429);
+        _recordLatency(ms, softOk, { label: label, status: resp.status });
+
+        if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
+          var e = new Error('HTTP ' + resp.status);
+          e.status = resp.status;
+          e.response = resp;
+          throw e;
+        }
+        return resp;
+      } catch (err) {
+        var ms2 = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - started);
+        _recordLatency(ms2, false, { label: label, error: err && err.name });
+        if (err && err.name === 'AbortError') {
+          var te = new Error('Timeout Supabase (' + timeoutMs + 'ms)');
+          te.status = 408;
+          te.name = 'AbortError';
+          throw te;
+        }
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }, { retries: retries, baseMs: 500, maxMs: 10000, label: label });
+  }
+
+  global.bpLogError = bpLogError;
+  global.bpRetryExponential = bpRetryExponential;
+  global.bpFetchSupabase = bpFetchSupabase;
+  global.bpGetSupabaseLatencyStats = bpGetSupabaseLatencyStats;
+  global.bpGetServiceHealth = bpGetServiceHealth;
+  global.bpNotifyHealthIfNeeded = bpNotifyHealthIfNeeded;
+  global.bpStartHealthMonitor = bpStartHealthMonitor;
+  global.bpStopHealthMonitor = bpStopHealthMonitor;
+  global.bpConfigureHealthThresholds = bpConfigureHealthThresholds;
+})(typeof window !== 'undefined' ? window : globalThis);
+
 /* ===== FILE: sync-queue.js ===== */
 // ====================================================================
 //  FILA DE SINCRONIZAÇÃO (extraído do app.js na Fase B da modularização)
@@ -1384,6 +1710,19 @@ function atualizarIndicadorSync() {
   } else if (falhados > 0) {
     stateKey = 'error';
     label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
+  } else if (typeof bpGetServiceHealth === 'function') {
+    // Saúde do serviço (latência / falhas HTTP) — só quando a fila está limpa
+    try {
+      var health = bpGetServiceHealth();
+      if (health && (health.level === 'degraded' || health.level === 'critical')) {
+        stateKey = health.level === 'critical' ? 'error' : 'pending';
+        label = health.label || (health.level === 'critical' ? 'Serviço instável' : 'Serviço lento');
+        if (health.stats && health.stats.avg) {
+          label += ' · ' + health.stats.avg + 'ms';
+        }
+      }
+      if (typeof bpNotifyHealthIfNeeded === 'function') bpNotifyHealthIfNeeded(health);
+    } catch (_) {}
   }
 
   const show = stateKey !== 'ok';
@@ -1681,7 +2020,7 @@ async function existeRegistroDuplicado(tabela, nome, salaoId, idIgnorar = null) 
   try {
     const authHeaders = await getAuthHeaders();
     const url = `${SUPABASE_URL}/rest/v1/${tabela}?salao_id=eq.${encodeURIComponent(salaoId)}&select=id,nome&nome=ilike.${encodeURIComponent(nome)}`;
-    const resp = await fetch(url, { headers: authHeaders });
+    const resp = await _bpRestFetch(url, { headers: authHeaders });
     if (!resp.ok) return false;
     const rows = await resp.json();
     if (idIgnorar) {
@@ -1696,6 +2035,15 @@ async function existeRegistroDuplicado(tabela, nome, salaoId, idIgnorar = null) 
 // ====================================================================
 //  FUNÇÕES REST ALTERADAS – COM TRATAMENTO DE ERROS ROBUSTO
 // ====================================================================
+
+
+/** Transporte resilient — usa bpFetchSupabase se existir. */
+async function _bpRestFetch(url, options, label) {
+  if (typeof bpFetchSupabase === 'function') {
+    return bpFetchSupabase(url, options || {}, { label: label || 'sync-rest', retries: 2, timeoutMs: 12000 });
+  }
+  return fetch(url, options || {});
+}
 
 async function supabaseUpsert(tabela, item) {
   try {
@@ -1723,7 +2071,7 @@ async function supabaseUpsert(tabela, item) {
     }
 
     async function postPayload(bodyObj) {
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+      const resp = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1787,7 +2135,7 @@ async function supabaseUpsert(tabela, item) {
         _bpSetSchemaFotoUrl(false);
         const authHeaders2 = await getAuthHeaders();
         const payload2 = _bpStripFotoUrl(toSupabaseFormat(tabela, item));
-        const resp2 = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+        const resp2 = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1815,7 +2163,7 @@ async function supabaseDelete(tabela, id) {
       throw new Error('Salão não identificado. Faça logout e login novamente.');
     }
 
-    const resp = await fetch(
+    const resp = await _bpRestFetch(
       `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
       {
         method: 'DELETE',
@@ -1836,7 +2184,7 @@ async function supabaseDelete(tabela, id) {
     }
 
     // Verificação: confirmar que o registo foi realmente eliminado
-    const checkResp = await fetch(
+    const checkResp = await _bpRestFetch(
       `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
       { headers: authHeaders }
     );
@@ -1858,7 +2206,7 @@ async function supabaseDelete(tabela, id) {
 async function supabaseGetAll(tabela, salaoId) {
   try {
     const authHeaders = await getAuthHeaders();
-    const resp = await fetch(
+    const resp = await _bpRestFetch(
       `${SUPABASE_URL}/rest/v1/${tabela}?salao_id=eq.${encodeURIComponent(salaoId)}&order=created_at.asc`,
       {
         headers: authHeaders,
@@ -2068,7 +2416,7 @@ async function supabaseDeactivate(tabela, id, extra) {
   if (tabela === 'profissionais' && !body.data_desativacao) {
     body.data_desativacao = new Date().toISOString();
   }
-  const resp = await fetch(
+  const resp = await _bpRestFetch(
     `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
     {
       method: 'PATCH',
@@ -2087,7 +2435,7 @@ async function supabaseDeactivate(tabela, id, extra) {
     throw new Error(`Supabase deactivate ${tabela}: ${resp.status} - ${errorBody}`);
   }
   // Verificar
-  const check = await fetch(
+  const check = await _bpRestFetch(
     `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}&select=id,ativo`,
     { headers: authHeaders }
   );
@@ -3304,13 +3652,18 @@ async function registarVenda(dados) {
 
     const descricao = dados.itens.map(i => i.nome).join(', ');
     const id = uuid();
+    // Comissão sobre valor líquido (total da venda); taxa do profissional
     let comissao = 0;
-    if (dados.profissional_id && typeof calcularComissao === 'function') {
-      try { comissao = Number(calcularComissao(dados.profissional_id, total)) || 0; } catch (e) { comissao = 0; }
-    } else if (dados.profissional_id && typeof getTaxaComissao === 'function') {
+    if (dados.profissional_id) {
       try {
-        const taxa = Number(getTaxaComissao(dados.profissional_id)) || 0;
-        comissao = Math.round((total * taxa) / 100);
+        var _taxa = (typeof getTaxaComissao === 'function')
+          ? Number(getTaxaComissao(dados.profissional_id)) || 0
+          : 0;
+        if (typeof calcularComissao === 'function') {
+          comissao = Number(calcularComissao(total, _taxa)) || 0;
+        } else if (_taxa > 0) {
+          comissao = Math.round((total * _taxa) / 100 * 100) / 100;
+        }
       } catch (e) { comissao = 0; }
     }
 
@@ -3331,6 +3684,7 @@ async function registarVenda(dados) {
         subtotal: Number(i.subtotal) || 0
       })),
       metodoPagamento: dados.metodoPagamento || 'Numerário',
+      pagamentos: Array.isArray(dados.pagamentos) ? dados.pagamentos : null,
       data: hoje(),
       hora: horaAgora(),
       reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
@@ -3368,6 +3722,53 @@ async function registarVenda(dados) {
     return null;
   }
 }
+
+async 
+/**
+ * Cancela uma venda e estorna a comissão (offline-first).
+ * Marca movimento status=cancelado e zera comissao_gerada (guarda valor em comissao_estornada).
+ */
+async function cancelarVenda(movimentoId, motivo) {
+  try {
+    if (!movimentoId || typeof state === 'undefined') return false;
+    const mov = (state.movimentos || []).find(function (m) { return m.id === movimentoId; });
+    if (!mov || mov.tipo !== 'venda') {
+      if (typeof toast === 'function') toast('Venda não encontrada', 'error');
+      return false;
+    }
+    if (mov.status === 'cancelado') {
+      if (typeof toast === 'function') toast('Venda já estava cancelada', 'warning');
+      return false;
+    }
+    const estorno = Number(mov.comissao_gerada) || 0;
+    const updated = Object.assign({}, mov, {
+      status: 'cancelado',
+      comissao_estornada: estorno,
+      comissao_gerada: 0,
+      cancelado_em: (typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10)),
+      cancelado_motivo: motivo || '',
+      updated_at: new Date().toISOString()
+    });
+    if (typeof window.AppStore !== 'undefined' && AppStore.updateInList) {
+      AppStore.updateInList('movimentos', movimentoId, updated);
+    } else {
+      const mi = state.movimentos.findIndex(function (x) { return x.id === movimentoId; });
+      if (mi !== -1) state.movimentos[mi] = updated;
+    }
+    try { await dbPut('movimentos', updated); } catch (e) {}
+    if (typeof enqueueSync === 'function') {
+      try { enqueueSync('movimentos', 'upsert', updated); } catch (e) {}
+    }
+    if (typeof toast === 'function') toast('Venda cancelada' + (estorno ? ' · comissão estornada' : ''), 'warning');
+    if (typeof updateUI === 'function') updateUI();
+    return true;
+  } catch (err) {
+    if (typeof logContexto === 'function') logContexto('cancelarVenda', err);
+    if (typeof toast === 'function') toast('Erro ao cancelar venda', 'error');
+    return false;
+  }
+}
+if (typeof window !== 'undefined') window.cancelarVenda = cancelarVenda;
 
 async function addMovimento(mov) {
   const n = { ...mov, id: uuid(), data: hoje(), hora: horaAgora() };
@@ -3911,6 +4312,7 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
     if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
     try { _bpSyncPeriodLabels((this.textContent || '').trim()); } catch (_) {}
+    try { if (typeof _bpHaptic === 'function') _bpHaptic('select'); } catch (_) {}
     renderDashboard();
     if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
@@ -3929,6 +4331,7 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
   localStorage.setItem('bp_dash_custom_inicio', ini);
   localStorage.setItem('bp_dash_custom_fim', fim);
   closeModal('modal-periodo-dashboard');
+  try { if (typeof _bpHaptic === 'function') _bpHaptic('success'); } catch (_) {}
   try {
     var _civ = (typeof calcularIntervaloPeriodo === 'function')
       ? calcularIntervaloPeriodo('custom', 0)
@@ -5042,6 +5445,7 @@ function renderProfissionais() {
         <div class="cliente-stats">
           ${statExtra}
           ${p.taxa_comissao != null || p.taxa != null ? `<span class="cliente-stat">${Number(p.taxa_comissao != null ? p.taxa_comissao : p.taxa) || 0}%</span>` : ''}
+          ${typeof renderBarraMeta === 'function' ? renderBarraMeta(p.id) : ''}
         </div>
       </div>
       <div class="actions">
@@ -8719,13 +9123,31 @@ if (vendaSaveBtn) {
           if (hit) clienteId = hit.id;
         }
       } catch (e) {}
+      // F13 — pagamento dividido (se activo)
+      var pagamentosSplit = null;
+      var metodoFinal = metodoPagamento;
+      if (metodoPagamento === '__split__' && typeof window.BPFinance !== 'undefined' && BPFinance.lerPagamentosSplit) {
+        var sp = BPFinance.lerPagamentosSplit();
+        var tot = typeof BPFinance.totalCarrinho === 'function' ? BPFinance.totalCarrinho() : 0;
+        if (!sp || !sp.list || !sp.list.length) {
+          toast('Indique os valores do pagamento dividido', 'error');
+          return;
+        }
+        if (tot > 0 && Math.abs(sp.sum - tot) > 0.5) {
+          toast('A soma dos pagamentos (' + sp.sum + ') deve igualar o total (' + tot + ')', 'error');
+          return;
+        }
+        pagamentosSplit = sp.list;
+        metodoFinal = 'Split';
+      }
       const idVenda = await registarVenda({
         cliente,
         cliente_id: clienteId,
         profissional: profissionalNome,
         profissional_id: profissionalId || null,
         itens: [...cartItems],
-        metodoPagamento
+        metodoPagamento: metodoFinal,
+        pagamentos: pagamentosSplit
       });
       if (idVenda) {
         closeModal('modal-venda');
@@ -10366,6 +10788,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // O HTML tem "Offline" fixo por defeito (index.html), por isso sem esta
   // chamada antecipada o texto ficava errado durante todo o checkSession().
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+  try { if (typeof bpStartHealthMonitor === 'function') bpStartHealthMonitor({ intervalMs: 30000 }); } catch (_) {}
   if (typeof initStoreBindings === 'function') initStoreBindings();
 
   // ============================================================
@@ -10572,6 +10995,14 @@ if ('serviceWorker' in navigator) {
 // Offline-first — sem dependência de Supabase nesta etapa
 // ================================================================
 
+
+function _movVendaContaComissao(m) {
+  if (!m || m.tipo !== 'venda') return false;
+  var st = String(m.status || '').toLowerCase();
+  if (st === 'cancelado' || st === 'anulado') return false;
+  return true;
+}
+
 function calcularComissao(valorLiquido, taxa) {
   const v = Number(valorLiquido) || 0;
   const t = Number(taxa) || 0;
@@ -10588,7 +11019,7 @@ function getTaxaComissao(profissionalId) {
 function getSaldoComissao(profissionalId) {
   if (!profissionalId || typeof state === 'undefined') return 0;
   return (state.movimentos || [])
-    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId)
+    .filter(m => _movVendaContaComissao(m) && m.profissional_id === profissionalId)
     .reduce((s, m) => s + (Number(m.comissao_gerada) || 0), 0);
 }
 
@@ -10597,7 +11028,7 @@ function getComissaoMesAtual(profissionalId) {
   const agora = hoje(); // YYYY-MM-DD
   const ym = agora.slice(0, 7);
   return (state.movimentos || [])
-    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
+    .filter(m => _movVendaContaComissao(m) && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
     .reduce((s, m) => s + (Number(m.comissao_gerada) || 0), 0);
 }
 
@@ -10610,7 +11041,7 @@ function getProgressoMeta(profissionalId) {
   const agora = typeof hoje === 'function' ? hoje() : '';
   const ym = agora.slice(0, 7);
   const volume = (state.movimentos || [])
-    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
+    .filter(m => _movVendaContaComissao(m) && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
     .reduce((s, m) => s + (Number(m.valor) || 0), 0);
   const pct = Math.min(100, Math.round((volume / meta) * 100));
   return { meta, volume, pct, atingida: volume >= meta };
@@ -11137,6 +11568,36 @@ window.renderBarraMeta = renderBarraMeta;
     sel.parentNode.appendChild(box);
     sel.addEventListener('change', function () {
       box.style.display = sel.value === '__split__' ? 'block' : 'none';
+      if (sel.value === '__split__') {
+        try {
+          var tot = totalCarrinho();
+          var inputs = box.querySelectorAll('.split-valor');
+          if (inputs.length >= 2 && tot > 0) {
+            var half = Math.round(tot / 2);
+            if (!inputs[0].value) inputs[0].value = half;
+            if (!inputs[1].value) inputs[1].value = tot - half;
+          }
+        } catch (e) {}
+      }
+    });
+    box.addEventListener('input', function () {
+      var hint = document.getElementById('split-hint');
+      if (!hint) return;
+      var sp = lerPagamentosSplit();
+      var tot = totalCarrinho();
+      if (!sp || !tot) {
+        hint.textContent = 'A soma deve igualar o total da venda.';
+        hint.style.color = '';
+        return;
+      }
+      var diff = Math.round((sp.sum - tot) * 100) / 100;
+      if (Math.abs(diff) < 0.5) {
+        hint.textContent = 'Soma correcta: ' + sp.sum + ' Kz';
+        hint.style.color = 'var(--green-600, #236040)';
+      } else {
+        hint.textContent = 'Soma ' + sp.sum + ' Kz · falta ' + (Math.round((tot - sp.sum) * 100) / 100) + ' Kz';
+        hint.style.color = 'var(--red-600, #922F3B)';
+      }
     });
   }
 

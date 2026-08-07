@@ -490,6 +490,36 @@
     sel.parentNode.appendChild(box);
     sel.addEventListener('change', function () {
       box.style.display = sel.value === '__split__' ? 'block' : 'none';
+      if (sel.value === '__split__') {
+        try {
+          var tot = totalCarrinho();
+          var inputs = box.querySelectorAll('.split-valor');
+          if (inputs.length >= 2 && tot > 0) {
+            var half = Math.round(tot / 2);
+            if (!inputs[0].value) inputs[0].value = half;
+            if (!inputs[1].value) inputs[1].value = tot - half;
+          }
+        } catch (e) {}
+      }
+    });
+    box.addEventListener('input', function () {
+      var hint = document.getElementById('split-hint');
+      if (!hint) return;
+      var sp = lerPagamentosSplit();
+      var tot = totalCarrinho();
+      if (!sp || !tot) {
+        hint.textContent = 'A soma deve igualar o total da venda.';
+        hint.style.color = '';
+        return;
+      }
+      var diff = Math.round((sp.sum - tot) * 100) / 100;
+      if (Math.abs(diff) < 0.5) {
+        hint.textContent = 'Soma correcta: ' + sp.sum + ' Kz';
+        hint.style.color = 'var(--green-600, #236040)';
+      } else {
+        hint.textContent = 'Soma ' + sp.sum + ' Kz · falta ' + (Math.round((tot - sp.sum) * 100) / 100) + ' Kz';
+        hint.style.color = 'var(--red-600, #922F3B)';
+      }
     });
   }
 

@@ -76,7 +76,7 @@ async function existeRegistroDuplicado(tabela, nome, salaoId, idIgnorar = null) 
   try {
     const authHeaders = await getAuthHeaders();
     const url = `${SUPABASE_URL}/rest/v1/${tabela}?salao_id=eq.${encodeURIComponent(salaoId)}&select=id,nome&nome=ilike.${encodeURIComponent(nome)}`;
-    const resp = await fetch(url, { headers: authHeaders });
+    const resp = await _bpRestFetch(url, { headers: authHeaders });
     if (!resp.ok) return false;
     const rows = await resp.json();
     if (idIgnorar) {
@@ -91,6 +91,15 @@ async function existeRegistroDuplicado(tabela, nome, salaoId, idIgnorar = null) 
 // ====================================================================
 //  FUNÇÕES REST ALTERADAS – COM TRATAMENTO DE ERROS ROBUSTO
 // ====================================================================
+
+
+/** Transporte resilient — usa bpFetchSupabase se existir. */
+async function _bpRestFetch(url, options, label) {
+  if (typeof bpFetchSupabase === 'function') {
+    return bpFetchSupabase(url, options || {}, { label: label || 'sync-rest', retries: 2, timeoutMs: 12000 });
+  }
+  return fetch(url, options || {});
+}
 
 async function supabaseUpsert(tabela, item) {
   try {
@@ -118,7 +127,7 @@ async function supabaseUpsert(tabela, item) {
     }
 
     async function postPayload(bodyObj) {
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+      const resp = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -182,7 +191,7 @@ async function supabaseUpsert(tabela, item) {
         _bpSetSchemaFotoUrl(false);
         const authHeaders2 = await getAuthHeaders();
         const payload2 = _bpStripFotoUrl(toSupabaseFormat(tabela, item));
-        const resp2 = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+        const resp2 = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -210,7 +219,7 @@ async function supabaseDelete(tabela, id) {
       throw new Error('Salão não identificado. Faça logout e login novamente.');
     }
 
-    const resp = await fetch(
+    const resp = await _bpRestFetch(
       `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
       {
         method: 'DELETE',
@@ -231,7 +240,7 @@ async function supabaseDelete(tabela, id) {
     }
 
     // Verificação: confirmar que o registo foi realmente eliminado
-    const checkResp = await fetch(
+    const checkResp = await _bpRestFetch(
       `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
       { headers: authHeaders }
     );
@@ -253,7 +262,7 @@ async function supabaseDelete(tabela, id) {
 async function supabaseGetAll(tabela, salaoId) {
   try {
     const authHeaders = await getAuthHeaders();
-    const resp = await fetch(
+    const resp = await _bpRestFetch(
       `${SUPABASE_URL}/rest/v1/${tabela}?salao_id=eq.${encodeURIComponent(salaoId)}&order=created_at.asc`,
       {
         headers: authHeaders,
@@ -463,7 +472,7 @@ async function supabaseDeactivate(tabela, id, extra) {
   if (tabela === 'profissionais' && !body.data_desativacao) {
     body.data_desativacao = new Date().toISOString();
   }
-  const resp = await fetch(
+  const resp = await _bpRestFetch(
     `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}`,
     {
       method: 'PATCH',
@@ -482,7 +491,7 @@ async function supabaseDeactivate(tabela, id, extra) {
     throw new Error(`Supabase deactivate ${tabela}: ${resp.status} - ${errorBody}`);
   }
   // Verificar
-  const check = await fetch(
+  const check = await _bpRestFetch(
     `${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&salao_id=eq.${encodeURIComponent(salaoId)}&select=id,ativo`,
     { headers: authHeaders }
   );

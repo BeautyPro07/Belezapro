@@ -789,13 +789,18 @@ async function registarVenda(dados) {
 
     const descricao = dados.itens.map(i => i.nome).join(', ');
     const id = uuid();
+    // Comissão sobre valor líquido (total da venda); taxa do profissional
     let comissao = 0;
-    if (dados.profissional_id && typeof calcularComissao === 'function') {
-      try { comissao = Number(calcularComissao(dados.profissional_id, total)) || 0; } catch (e) { comissao = 0; }
-    } else if (dados.profissional_id && typeof getTaxaComissao === 'function') {
+    if (dados.profissional_id) {
       try {
-        const taxa = Number(getTaxaComissao(dados.profissional_id)) || 0;
-        comissao = Math.round((total * taxa) / 100);
+        var _taxa = (typeof getTaxaComissao === 'function')
+          ? Number(getTaxaComissao(dados.profissional_id)) || 0
+          : 0;
+        if (typeof calcularComissao === 'function') {
+          comissao = Number(calcularComissao(total, _taxa)) || 0;
+        } else if (_taxa > 0) {
+          comissao = Math.round((total * _taxa) / 100 * 100) / 100;
+        }
       } catch (e) { comissao = 0; }
     }
 
@@ -816,6 +821,7 @@ async function registarVenda(dados) {
         subtotal: Number(i.subtotal) || 0
       })),
       metodoPagamento: dados.metodoPagamento || 'Numerário',
+      pagamentos: Array.isArray(dados.pagamentos) ? dados.pagamentos : null,
       data: hoje(),
       hora: horaAgora(),
       reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
@@ -853,6 +859,53 @@ async function registarVenda(dados) {
     return null;
   }
 }
+
+async 
+/**
+ * Cancela uma venda e estorna a comissão (offline-first).
+ * Marca movimento status=cancelado e zera comissao_gerada (guarda valor em comissao_estornada).
+ */
+async function cancelarVenda(movimentoId, motivo) {
+  try {
+    if (!movimentoId || typeof state === 'undefined') return false;
+    const mov = (state.movimentos || []).find(function (m) { return m.id === movimentoId; });
+    if (!mov || mov.tipo !== 'venda') {
+      if (typeof toast === 'function') toast('Venda não encontrada', 'error');
+      return false;
+    }
+    if (mov.status === 'cancelado') {
+      if (typeof toast === 'function') toast('Venda já estava cancelada', 'warning');
+      return false;
+    }
+    const estorno = Number(mov.comissao_gerada) || 0;
+    const updated = Object.assign({}, mov, {
+      status: 'cancelado',
+      comissao_estornada: estorno,
+      comissao_gerada: 0,
+      cancelado_em: (typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10)),
+      cancelado_motivo: motivo || '',
+      updated_at: new Date().toISOString()
+    });
+    if (typeof window.AppStore !== 'undefined' && AppStore.updateInList) {
+      AppStore.updateInList('movimentos', movimentoId, updated);
+    } else {
+      const mi = state.movimentos.findIndex(function (x) { return x.id === movimentoId; });
+      if (mi !== -1) state.movimentos[mi] = updated;
+    }
+    try { await dbPut('movimentos', updated); } catch (e) {}
+    if (typeof enqueueSync === 'function') {
+      try { enqueueSync('movimentos', 'upsert', updated); } catch (e) {}
+    }
+    if (typeof toast === 'function') toast('Venda cancelada' + (estorno ? ' · comissão estornada' : ''), 'warning');
+    if (typeof updateUI === 'function') updateUI();
+    return true;
+  } catch (err) {
+    if (typeof logContexto === 'function') logContexto('cancelarVenda', err);
+    if (typeof toast === 'function') toast('Erro ao cancelar venda', 'error');
+    return false;
+  }
+}
+if (typeof window !== 'undefined') window.cancelarVenda = cancelarVenda;
 
 async function addMovimento(mov) {
   const n = { ...mov, id: uuid(), data: hoje(), hora: horaAgora() };

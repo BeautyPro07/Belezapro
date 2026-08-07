@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // O HTML tem "Offline" fixo por defeito (index.html), por isso sem esta
   // chamada antecipada o texto ficava errado durante todo o checkSession().
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+  try { if (typeof bpStartHealthMonitor === 'function') bpStartHealthMonitor({ intervalMs: 30000 }); } catch (_) {}
   if (typeof initStoreBindings === 'function') initStoreBindings();
 
   // ============================================================

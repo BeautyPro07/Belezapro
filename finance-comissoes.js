@@ -3,6 +3,14 @@
 // Offline-first — sem dependência de Supabase nesta etapa
 // ================================================================
 
+
+function _movVendaContaComissao(m) {
+  if (!m || m.tipo !== 'venda') return false;
+  var st = String(m.status || '').toLowerCase();
+  if (st === 'cancelado' || st === 'anulado') return false;
+  return true;
+}
+
 function calcularComissao(valorLiquido, taxa) {
   const v = Number(valorLiquido) || 0;
   const t = Number(taxa) || 0;
@@ -19,7 +27,7 @@ function getTaxaComissao(profissionalId) {
 function getSaldoComissao(profissionalId) {
   if (!profissionalId || typeof state === 'undefined') return 0;
   return (state.movimentos || [])
-    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId)
+    .filter(m => _movVendaContaComissao(m) && m.profissional_id === profissionalId)
     .reduce((s, m) => s + (Number(m.comissao_gerada) || 0), 0);
 }
 
@@ -28,7 +36,7 @@ function getComissaoMesAtual(profissionalId) {
   const agora = hoje(); // YYYY-MM-DD
   const ym = agora.slice(0, 7);
   return (state.movimentos || [])
-    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
+    .filter(m => _movVendaContaComissao(m) && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
     .reduce((s, m) => s + (Number(m.comissao_gerada) || 0), 0);
 }
 
@@ -41,7 +49,7 @@ function getProgressoMeta(profissionalId) {
   const agora = typeof hoje === 'function' ? hoje() : '';
   const ym = agora.slice(0, 7);
   const volume = (state.movimentos || [])
-    .filter(m => m.tipo === 'venda' && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
+    .filter(m => _movVendaContaComissao(m) && m.profissional_id === profissionalId && String(m.data || '').startsWith(ym))
     .reduce((s, m) => s + (Number(m.valor) || 0), 0);
   const pct = Math.min(100, Math.round((volume / meta) * 100));
   return { meta, volume, pct, atingida: volume >= meta };

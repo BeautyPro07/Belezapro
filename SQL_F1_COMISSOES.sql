@@ -1,0 +1,6 @@
+-- F1 Comissões (aplicar no Supabase quando autorizado)
+-- ALTER TABLE profissionais ADD COLUMN IF NOT EXISTS taxa_comissao DECIMAL DEFAULT 0;
+-- ALTER TABLE profissionais ADD COLUMN IF NOT EXISTS meta_mensal NUMERIC;
+-- ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS comissao_gerada NUMERIC DEFAULT 0;
+-- ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS comissao_estornada NUMERIC DEFAULT 0;
+-- ALTER TABLE movimentos ADD COLUMN IF NOT EXISTS status TEXT;

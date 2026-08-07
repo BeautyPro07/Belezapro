@@ -450,6 +450,7 @@ function renderProfissionais() {
         <div class="cliente-stats">
           ${statExtra}
           ${p.taxa_comissao != null || p.taxa != null ? `<span class="cliente-stat">${Number(p.taxa_comissao != null ? p.taxa_comissao : p.taxa) || 0}%</span>` : ''}
+          ${typeof renderBarraMeta === 'function' ? renderBarraMeta(p.id) : ''}
         </div>
       </div>
       <div class="actions">

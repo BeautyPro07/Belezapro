@@ -110,6 +110,19 @@ function atualizarIndicadorSync() {
   } else if (falhados > 0) {
     stateKey = 'error';
     label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
+  } else if (typeof bpGetServiceHealth === 'function') {
+    // Saúde do serviço (latência / falhas HTTP) — só quando a fila está limpa
+    try {
+      var health = bpGetServiceHealth();
+      if (health && (health.level === 'degraded' || health.level === 'critical')) {
+        stateKey = health.level === 'critical' ? 'error' : 'pending';
+        label = health.label || (health.level === 'critical' ? 'Serviço instável' : 'Serviço lento');
+        if (health.stats && health.stats.avg) {
+          label += ' · ' + health.stats.avg + 'ms';
+        }
+      }
+      if (typeof bpNotifyHealthIfNeeded === 'function') bpNotifyHealthIfNeeded(health);
+    } catch (_) {}
   }
 
   const show = stateKey !== 'ok';

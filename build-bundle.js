@@ -27,6 +27,7 @@ const ORDER = [
   'core-store.js',
   'db-indexeddb.js',
   'auth-supabase.js',
+  'supabase-resilience.js',
   'sync-queue.js',
   'sync-rest.js',
   'plano-limites.js',

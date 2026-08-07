@@ -123,13 +123,31 @@ if (vendaSaveBtn) {
           if (hit) clienteId = hit.id;
         }
       } catch (e) {}
+      // F13 — pagamento dividido (se activo)
+      var pagamentosSplit = null;
+      var metodoFinal = metodoPagamento;
+      if (metodoPagamento === '__split__' && typeof window.BPFinance !== 'undefined' && BPFinance.lerPagamentosSplit) {
+        var sp = BPFinance.lerPagamentosSplit();
+        var tot = typeof BPFinance.totalCarrinho === 'function' ? BPFinance.totalCarrinho() : 0;
+        if (!sp || !sp.list || !sp.list.length) {
+          toast('Indique os valores do pagamento dividido', 'error');
+          return;
+        }
+        if (tot > 0 && Math.abs(sp.sum - tot) > 0.5) {
+          toast('A soma dos pagamentos (' + sp.sum + ') deve igualar o total (' + tot + ')', 'error');
+          return;
+        }
+        pagamentosSplit = sp.list;
+        metodoFinal = 'Split';
+      }
       const idVenda = await registarVenda({
         cliente,
         cliente_id: clienteId,
         profissional: profissionalNome,
         profissional_id: profissionalId || null,
         itens: [...cartItems],
-        metodoPagamento
+        metodoPagamento: metodoFinal,
+        pagamentos: pagamentosSplit
       });
       if (idVenda) {
         closeModal('modal-venda');
