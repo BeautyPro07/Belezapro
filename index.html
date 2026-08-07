@@ -246,58 +246,76 @@
 
             <!-- GRÁFICO -->
             <div class="card mt-3 dash-chart-card" data-role="admin,gerente">
-              <div class="dash-chart-toolbar">
-                <span class="dash-chart-periodo-label">Período</span>
-                <div class="dash-chart-seg" role="group" aria-label="Período do gráfico">
+              <!-- Linha: seta + período + export + menu -->
+              <div class="dash-chart-topbar">
+                <span class="dash-chart-nudge" id="chart-filter-nudge" aria-hidden="true">
+                  <svg class="dash-chart-nudge-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>
+                </span>
+                <div class="dash-chart-period-wrap">
+                  <button type="button" class="dash-chart-period-btn" id="chart-filter-toggle" aria-expanded="false" aria-controls="modal-periodo-dashboard" aria-label="Filtrar período" title="Filtrar período">
+                    <svg class="bp-icon bp-icon-funnel" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                      <line x1="4" y1="7" x2="20" y2="7"/>
+                      <line x1="7" y1="12" x2="17" y2="12"/>
+                      <line x1="10" y1="17" x2="14" y2="17"/>
+                    </svg>
+                    <span class="dash-chart-period-v" id="chart-period-label">Esta semana</span>
+                  </button>
+                </div>
+                <div class="dash-chart-top-actions">
+                  <div class="dash-chart-export-wrap">
+                    <button type="button" class="dash-chart-ghost-btn" id="chart-export-toggle" aria-expanded="false" aria-haspopup="true" title="Exportar">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      <span class="sr-only">Exportar</span>
+                    </button>
+                    <div class="dash-chart-export-menu" id="chart-export-menu" hidden role="menu">
+                      <button type="button" class="dash-chart-export-item" id="chart-export-csv" role="menuitem">CSV</button>
+                      <button type="button" class="dash-chart-export-item" id="chart-export-pdf" role="menuitem">PDF</button>
+                    </div>
+                  </div>
+                  <div class="dash-chart-more-wrap">
+                    <button type="button" class="dash-chart-ghost-btn" id="chart-more-toggle" aria-expanded="false" aria-haspopup="true" title="Mais opções">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                    </button>
+                    <div class="dash-chart-more-menu" id="chart-more-menu" hidden role="menu">
+                      <button type="button" class="dash-chart-more-item" data-chart-more="media" role="menuitem">Média no gráfico</button>
+                      <button type="button" class="dash-chart-more-item" data-chart-more="comparar" role="menuitem">Comparar período</button>
+                      <button type="button" class="dash-chart-more-item" data-chart-more="insights" role="menuitem">Sinais do período</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Saúde (discreta) -->
+              <div class="dash-chart-health-line" id="dash-chart-health" data-level="" aria-label="Estado do período">
+                <strong class="dash-chart-health-value" id="dash-chart-health-value">—</strong>
+                <span class="dash-chart-health-status" id="dash-chart-status"></span>
+              </div>
+
+              <!-- IDs legados ocultos (não regredir JS) -->
+              <div class="dash-chart-legacy-controls" hidden aria-hidden="true">
+                <div class="dash-chart-seg">
                   <button type="button" class="chart-filter" data-periodo="dia">Dia</button>
                   <button type="button" class="chart-filter is-active" data-periodo="semana">Semana</button>
                   <button type="button" class="chart-filter" data-periodo="mes">Mês</button>
                   <button type="button" class="chart-filter" data-periodo="hora">Hora</button>
                 </div>
-                <div class="dash-chart-nav">
-                  <button type="button" class="dash-chart-nav-btn" id="chart-prev" aria-label="Anterior">‹</button>
-                  <span class="dash-chart-nav-label" id="chart-period-label">Últimos 7 dias</span>
-                  <button type="button" class="dash-chart-nav-btn" id="chart-next" aria-label="Seguinte">›</button>
-                  <button type="button" class="dash-chart-eye" id="chart-eye-toggle" aria-label="Mostrar valores">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                      <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                  </button>
-                </div>
+                <button type="button" id="chart-prev" aria-label="Anterior"></button>
+                <button type="button" id="chart-next" aria-label="Seguinte"></button>
               </div>
-              <!-- Cabeçalho executivo (Fase 2) -->
-              <div class="dash-chart-exec" id="dash-chart-exec" aria-live="polite">
-                <div class="dash-chart-exec-dates" id="dash-chart-exec-dates">—</div>
-                <div class="dash-chart-exec-metrics">
-                  <div class="dash-chart-exec-metric">
-                    <span class="dash-chart-exec-k">Receita</span>
-                    <span class="dash-chart-exec-v" id="dash-chart-exec-rev">—</span>
-                  </div>
-                  <div class="dash-chart-exec-metric">
-                    <span class="dash-chart-exec-k">Vendas</span>
-                    <span class="dash-chart-exec-v" id="dash-chart-exec-n">—</span>
-                  </div>
-                  <div class="dash-chart-exec-metric">
-                    <span class="dash-chart-exec-k">Ticket</span>
-                    <span class="dash-chart-exec-v" id="dash-chart-exec-ticket">—</span>
-                  </div>
-                  <div class="dash-chart-exec-metric" id="dash-chart-exec-delta-wrap" hidden>
-                    <span class="dash-chart-exec-k">vs anterior</span>
-                    <span class="dash-chart-exec-v" id="dash-chart-exec-delta">—</span>
-                  </div>
-                </div>
-                <div class="dash-chart-exec-trend" id="dash-chart-exec-trend" hidden></div>
-              </div>
-              <div class="dash-chart-view-row">
-                <button type="button" class="dash-chart-export-btn" id="chart-export-csv" aria-label="Exportar CSV">CSV</button>
-                <div class="dash-chart-view-toggle" role="group" aria-label="Tipo de gráfico">
+
+              <!-- Canvas + olho + tipo -->
+              <div class="dash-chart-canvas-wrap" id="dash-chart-canvas-wrap">
+                <button type="button" class="dash-chart-eye dash-chart-eye--canvas" id="chart-eye-toggle" aria-label="Camadas do gráfico" title="Camadas">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+                <div class="dash-chart-view-toggle dash-chart-view-toggle--canvas" role="group" aria-label="Tipo de gráfico">
                   <button type="button" class="dash-chart-view-btn is-active" data-chart-view="barras" aria-pressed="true">Barras</button>
                   <button type="button" class="dash-chart-view-btn" data-chart-view="linha" aria-pressed="false">Linha</button>
                   <button type="button" class="dash-chart-view-btn" data-chart-view="area" aria-pressed="false">Área</button>
                 </div>
-              </div>
-              <div class="dash-chart-canvas-wrap" id="dash-chart-canvas-wrap">
                 <div id="dash-chart-skeleton" class="dash-chart-skeleton" hidden aria-hidden="true">
                   <div class="dash-chart-skel-bar"></div>
                   <div class="dash-chart-skel-bar"></div>
@@ -305,14 +323,19 @@
                   <div class="dash-chart-skel-bar"></div>
                   <div class="dash-chart-skel-bar"></div>
                 </div>
-                <canvas id="weekly-chart" width="400" height="140" style="width:100%;height:140px;display:block;touch-action:none;"></canvas>
+                <canvas id="weekly-chart" width="400" height="220" style="width:100%;height:220px;display:block;touch-action:pan-y;"></canvas>
                 <div id="dash-chart-empty" class="dash-chart-empty" hidden>
-                  <strong class="dash-chart-empty-title">Ainda não existem vendas neste período</strong>
-                  <span class="dash-chart-empty-sub">Experimente selecionar outro intervalo com as opções acima.</span>
+                  <strong class="dash-chart-empty-title">Sem vendas neste período</strong>
+                  <span class="dash-chart-empty-sub">Altere o intervalo no filtro.</span>
                 </div>
               </div>
+
+              <div class="dash-chart-legend" id="dash-chart-legend" hidden>
+                <span class="dash-chart-leg-media">Média <strong id="dash-chart-leg-media-val">—</strong></span>
+                <span class="dash-chart-leg-cmp" id="dash-chart-leg-cmp" hidden></span>
+              </div>
               <ul class="dash-chart-insights" id="dash-chart-insights" hidden></ul>
-            </div>
+</div>
           </div>
         </div>
 
@@ -700,6 +723,7 @@
         <button class="dash-periodo-opcao" type="button" data-periodo="7dias" data-offset="0">Últimos 7 dias</button>
         <button class="dash-periodo-opcao" type="button" data-periodo="mes" data-offset="0">Este mês</button>
         <button class="dash-periodo-opcao" type="button" data-periodo="30dias" data-offset="0">Últimos 30 dias</button>
+        <button class="dash-periodo-opcao" type="button" data-periodo="90dias" data-offset="0">Últimos 90 dias</button>
         <button class="dash-periodo-opcao" type="button" data-periodo="ano" data-offset="0">Este ano</button>
         <button class="dash-periodo-opcao" type="button" data-periodo="custom">Personalizado</button>
       </div>

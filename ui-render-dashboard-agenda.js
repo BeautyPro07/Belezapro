@@ -161,6 +161,14 @@ function calcularIntervaloPeriodo(tipo, offset) {
     inicio = formatarDataISO(iniD);
     fim = formatarDataISO(fimD);
     label = 'Últimos 7 dias';
+  } else if (tipo === '90dias') {
+    const fimD = new Date(base);
+    fimD.setDate(fimD.getDate() - offset * 90);
+    const iniD = new Date(fimD);
+    iniD.setDate(iniD.getDate() - 89);
+    inicio = formatarDataISO(iniD);
+    fim = formatarDataISO(fimD);
+    label = 'Últimos 90 dias';
   } else if (tipo === 'mes') {
     const ano = base.getFullYear();
     const mes = base.getMonth() - offset;
@@ -199,6 +207,24 @@ function getIntervaloDashAtual() {
   return calcularIntervaloPeriodo(state.dashPeriodo, state.dashOffset);
 }
 
+/** Sincroniza rótulos de período (KPI + gráfico) a partir do intervalo activo. */
+function _bpSyncPeriodLabels(label) {
+  try {
+    var lab = (label || '').trim();
+    if (!lab && typeof getIntervaloDashAtual === 'function') {
+      var iv = getIntervaloDashAtual();
+      lab = (iv && iv.label) ? String(iv.label) : '';
+    }
+    if (!lab) return;
+    var todayEl = document.getElementById('today-date');
+    if (todayEl) todayEl.textContent = lab;
+    var chartLab = document.getElementById('chart-period-label');
+    if (chartLab) chartLab.textContent = lab;
+  } catch (_) {}
+}
+
+
+
 // ====================================================================
 //  RENDER DASHBOARD — modelo de verdade unificado (Fase A1+A2)
 //  Um período (dashPeriodo) alimenta KPIs, sparkline e gráfico.
@@ -236,6 +262,7 @@ function renderDashboard() {
 
   const todayEl = document.getElementById('today-date');
   if (todayEl) todayEl.textContent = intervalo.label;
+  try { _bpSyncPeriodLabels(intervalo.label); } catch (_) {}
 
   animateKpi('kpi-revenue', fmtKz(totalRev));
   const revenueCount = document.getElementById('kpi-revenue-count');
@@ -491,6 +518,7 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     closeModal('modal-periodo-dashboard');
     // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
     if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
+    try { _bpSyncPeriodLabels((this.textContent || '').trim()); } catch (_) {}
     renderDashboard();
     if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
@@ -509,6 +537,12 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
   localStorage.setItem('bp_dash_custom_inicio', ini);
   localStorage.setItem('bp_dash_custom_fim', fim);
   closeModal('modal-periodo-dashboard');
+  try {
+    var _civ = (typeof calcularIntervaloPeriodo === 'function')
+      ? calcularIntervaloPeriodo('custom', 0)
+      : null;
+    _bpSyncPeriodLabels(_civ && _civ.label ? _civ.label : (ini + ' — ' + fim));
+  } catch (_) {}
   state.chartPeriodo = 'semana';
   renderDashboard();
   if (typeof renderizarGrafico === 'function') renderizarGrafico();
