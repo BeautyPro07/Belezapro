@@ -1577,8 +1577,8 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
 /* ===== GRÁFICO ===== */
 .chart-tooltip {
   position: fixed;
-  background: var(--text-primary);
-  color: #fff;
+  background: var(--card-white, #fff);
+  color: var(--text-primary);
   padding: 4px 8px;
   border-radius: 6px;
   font-size: .65rem;

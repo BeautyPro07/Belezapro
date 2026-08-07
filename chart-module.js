@@ -76,14 +76,20 @@ function abrirChartDrill(dataIso, horaOpt) {
   function listBlock(titulo, rows, nameKey) {
     nameKey = nameKey || 'nome';
     if (!rows || !rows.length) {
-      return '<div class="chart-drill-section"><h3>' + _escChart(titulo) + '</h3><p class="chart-drill-empty">Sem dados</p></div>';
+      return '<div class="chart-drill-section"><div class="chart-drill-sec-head">' + _escChart(titulo) + '</div><p class="chart-drill-empty">Sem dados neste período</p></div>';
     }
     var lis = rows.map(function (r) {
-      return '<li><span>' + _escChart(r[nameKey] || r.nome || '—') +
-        '<div class="muted">' + (r.n || 0) + ' · ' + _escChart(_fmtChart(r.receita)) + '</div></span>' +
-        '<strong>' + _escChart(_fmtChart(r.receita)) + '</strong></li>';
+      var n = r.n || 0;
+      var meta = n === 1 ? '1 registo' : (n + ' registos');
+      return '<li class="chart-drill-row">' +
+        '<div class="chart-drill-row-main">' +
+          '<span class="chart-drill-row-name">' + _escChart(r[nameKey] || r.nome || '—') + '</span>' +
+          '<span class="chart-drill-row-meta">' + meta + '</span>' +
+        '</div>' +
+        '<strong class="chart-drill-row-val">' + _escChart(_fmtChart(r.receita)) + '</strong>' +
+      '</li>';
     }).join('');
-    return '<div class="chart-drill-section"><h3>' + _escChart(titulo) + '</h3><ul class="chart-drill-list">' + lis + '</ul></div>';
+    return '<div class="chart-drill-section"><div class="chart-drill-sec-head">' + _escChart(titulo) + '</div><ul class="chart-drill-list">' + lis + '</ul></div>';
   }
 
   var vendasLis = (det.vendas || []).map(function (m) {
@@ -93,18 +99,25 @@ function abrirChartDrill(dataIso, horaOpt) {
     var prof = (typeof getProfissionalNome === 'function' && m.profissional_id)
       ? getProfissionalNome(m.profissional_id)
       : (m.profissional || '');
-    return '<li><span>' + _escChart(hora + ' · ' + srv) +
-      '<div class="muted">' + _escChart(cli) + (prof ? (' · ' + _escChart(prof)) : '') +
-      ' · ' + _escChart(m.metodoPagamento || m.pagamento || '') + '</div></span>' +
-      '<strong>' + _escChart(_fmtChart(m.valor)) + '</strong></li>';
+    var pay = m.metodoPagamento || m.pagamento || '';
+    var meta = [cli, prof, pay].filter(Boolean).join(' · ');
+    return '<li class="chart-drill-row">' +
+      '<div class="chart-drill-row-main">' +
+        '<span class="chart-drill-row-name">' + _escChart((hora ? hora + ' · ' : '') + srv) + '</span>' +
+        (meta ? '<span class="chart-drill-row-meta">' + _escChart(meta) + '</span>' : '') +
+      '</div>' +
+      '<strong class="chart-drill-row-val">' + _escChart(_fmtChart(m.valor)) + '</strong>' +
+    '</li>';
   }).join('');
 
   var vsHtml = '';
   if (det.vsMesmoDiaSemana && det.vsMesmoDiaSemana.pct != null) {
     var p = det.vsMesmoDiaSemana.pct;
     var sign = p >= 0 ? '+' : '';
-    vsHtml = '<p class="chart-drill-empty">Vs mesmo dia da semana anterior (' +
-      _escChart(det.vsMesmoDiaSemana.data) + '): <strong>' + sign + (Math.round(p * 10) / 10) + '%</strong></p>';
+    vsHtml = '<div class="chart-drill-vs">' +
+      '<span>Vs mesmo dia da semana</span>' +
+      '<strong class="' + (p >= 0 ? 'is-up' : 'is-down') + '">' + sign + (Math.round(p * 10) / 10) + '%</strong>' +
+    '</div>';
   }
 
   drillBody.innerHTML =
@@ -114,7 +127,7 @@ function abrirChartDrill(dataIso, horaOpt) {
       '<div class="chart-drill-kpi"><span>Ticket</span><strong>' + _escChart(_fmtChart(det.totais.ticket)) + '</strong></div>' +
     '</div>' +
     vsHtml +
-    '<div class="chart-drill-section"><h3>Vendas</h3>' +
+    '<div class="chart-drill-section"><div class="chart-drill-sec-head">Vendas</div>' +
       (vendasLis
         ? '<ul class="chart-drill-list">' + vendasLis + '</ul>'
         : '<p class="chart-drill-empty">Nenhuma venda neste intervalo</p>') +
