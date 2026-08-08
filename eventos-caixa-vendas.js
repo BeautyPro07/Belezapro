@@ -295,8 +295,13 @@ async function confirmarFechoCaixa() {
   };
 
   await dbPut('fechos_caixa', registro);
-  // Atualizar o estado local
-  state.fechos_caixa.push(registro);
+  // Atualizar o estado local (Store quando disponível — notifica subscribers)
+  if (window.BeautyStore && window.BeautyStore.pushToList) {
+    window.BeautyStore.pushToList('fechos_caixa', registro);
+  } else {
+    if (!Array.isArray(state.fechos_caixa)) state.fechos_caixa = [];
+    state.fechos_caixa.push(registro);
+  }
   toast('Caixa fechado com sucesso', 'success');
   closeModal('modal-fecho');
   updateUI();

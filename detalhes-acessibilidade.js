@@ -174,10 +174,12 @@ if (originalCloseModal) {
 // IA OFFLINE E SVGs
 // ====================================================================
 function atualizarIAOffline() {
- const overlay = document.getElementById('ia-offline-overlay');
- if (!overlay) return;
- const isOnline = navigator.onLine;
- overlay.style.display = isOnline ? 'none' : 'flex';
+  var overlay = document.getElementById('ia-offline-overlay');
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
+    try { overlay.remove(); } catch (_) {}
+  }
 }
 
 const svgCalendario = `<svg width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="var(--neutral-300)" stroke-width="1.5"><rect x="16" y="20" width="48" height="48" rx="4"/><line x1="16" y1="32" x2="64" y2="32"/><line x1="28" y1="16" x2="28" y2="24"/><line x1="52" y1="16" x2="52" y2="24"/><circle cx="40" cy="44" r="6"/></svg>`;
@@ -210,13 +212,20 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   if (tab === 'agenda') renderAgendaFull();
   if (tab === 'clientes') renderClientes();
   if (tab === 'caixa') renderCaixa();
-  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'dashboard') {
+    renderDashboard();
+    if (typeof renderizarGrafico === 'function') {
+      setTimeout(function () { renderizarGrafico(); }, 40);
+      setTimeout(function () { renderizarGrafico(); }, 200);
+    }
+  }
   if (tab === 'equipa') { renderProfissionais(); renderServicos(); }
   if (tab === 'ia') {
    if (typeof actualizarContadorIA === 'function') actualizarContadorIA();
-   renderPlanoInfo();
-   atualizarIAOffline();
-   renderIAResumo();
+   if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+   if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
+   if (typeof renderIAResumo === 'function') renderIAResumo();
+   if (typeof carregarHistoricoIA === 'function') carregarHistoricoIA();
   }
   aplicarAcessibilidade();
   aplicarPermissoes();

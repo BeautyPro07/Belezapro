@@ -14,7 +14,7 @@
   /* ---- Fontes ---- */
   --font-serif: 'Playfair Display', 'Inter', serif;
   --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas, monospace;
 
   /* ---- Dourado — 4 passos (auditoria 1.1 / 1.2) ---- */
   --gold-50:   #FBF6E9;   /* fundo / light */

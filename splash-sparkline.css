@@ -85,14 +85,14 @@
 .kpi-trend .trend-up,
 .kpi-trend .trend-down {
   font-family: var(--font-sans);
-  font-size: 0.9rem;
+  font-size: 0.7rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 2px 7px;
+  padding: 1px 6px;
   border-radius: var(--radius-full);
 }
 .kpi-trend .trend-up {
@@ -105,7 +105,7 @@
 }
 .kpi-trend .trend-up .trend-arrow,
 .kpi-trend .trend-down .trend-arrow {
-  font-size: 1.1rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: currentColor;
   line-height: 1;
@@ -129,7 +129,7 @@
 .revenue-detail-total,
 .detalhe-item-row .sub,
 #sucesso-valor {
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }

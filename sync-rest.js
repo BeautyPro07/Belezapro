@@ -699,11 +699,28 @@ async function carregarDoSupabase() {
       return resultado;
     };
 
-    state.clientes      = mergeTable(state.clientes, clientesRemotos, 'clientes');
-    state.agendamentos  = mergeTable(state.agendamentos, agendamentosRemotos, 'agendamentos');
-    state.movimentos    = mergeTable(state.movimentos, movimentosRemotos, 'movimentos');
-    state.profissionais = mergeTable(state.profissionais, profsRemotos, 'profissionais');
-    state.servicos      = mergeTable(state.servicos, servicosRemotos, 'servicos');
+    const mergedClientes = mergeTable(state.clientes, clientesRemotos, 'clientes');
+    const mergedAgendamentos = mergeTable(state.agendamentos, agendamentosRemotos, 'agendamentos');
+    const mergedMovimentos = mergeTable(state.movimentos, movimentosRemotos, 'movimentos');
+    const mergedProfissionais = mergeTable(state.profissionais, profsRemotos, 'profissionais');
+    const mergedServicos = mergeTable(state.servicos, servicosRemotos, 'servicos');
+    if (window.BeautyStore && window.BeautyStore.setList) {
+      const applyLists = function () {
+        window.BeautyStore.setList('clientes', mergedClientes);
+        window.BeautyStore.setList('agendamentos', mergedAgendamentos);
+        window.BeautyStore.setList('movimentos', mergedMovimentos);
+        window.BeautyStore.setList('profissionais', mergedProfissionais);
+        window.BeautyStore.setList('servicos', mergedServicos);
+      };
+      if (window.BeautyStore.batch) window.BeautyStore.batch(applyLists);
+      else applyLists();
+    } else {
+      state.clientes = mergedClientes;
+      state.agendamentos = mergedAgendamentos;
+      state.movimentos = mergedMovimentos;
+      state.profissionais = mergedProfissionais;
+      state.servicos = mergedServicos;
+    }
 
     // Fingerprint antes/depois para evitar updateUI sem mudanças
     const fpBefore = window._bpDataFp || '';

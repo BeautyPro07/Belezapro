@@ -2643,11 +2643,28 @@ async function carregarDoSupabase() {
       return resultado;
     };
 
-    state.clientes      = mergeTable(state.clientes, clientesRemotos, 'clientes');
-    state.agendamentos  = mergeTable(state.agendamentos, agendamentosRemotos, 'agendamentos');
-    state.movimentos    = mergeTable(state.movimentos, movimentosRemotos, 'movimentos');
-    state.profissionais = mergeTable(state.profissionais, profsRemotos, 'profissionais');
-    state.servicos      = mergeTable(state.servicos, servicosRemotos, 'servicos');
+    const mergedClientes = mergeTable(state.clientes, clientesRemotos, 'clientes');
+    const mergedAgendamentos = mergeTable(state.agendamentos, agendamentosRemotos, 'agendamentos');
+    const mergedMovimentos = mergeTable(state.movimentos, movimentosRemotos, 'movimentos');
+    const mergedProfissionais = mergeTable(state.profissionais, profsRemotos, 'profissionais');
+    const mergedServicos = mergeTable(state.servicos, servicosRemotos, 'servicos');
+    if (window.BeautyStore && window.BeautyStore.setList) {
+      const applyLists = function () {
+        window.BeautyStore.setList('clientes', mergedClientes);
+        window.BeautyStore.setList('agendamentos', mergedAgendamentos);
+        window.BeautyStore.setList('movimentos', mergedMovimentos);
+        window.BeautyStore.setList('profissionais', mergedProfissionais);
+        window.BeautyStore.setList('servicos', mergedServicos);
+      };
+      if (window.BeautyStore.batch) window.BeautyStore.batch(applyLists);
+      else applyLists();
+    } else {
+      state.clientes = mergedClientes;
+      state.agendamentos = mergedAgendamentos;
+      state.movimentos = mergedMovimentos;
+      state.profissionais = mergedProfissionais;
+      state.servicos = mergedServicos;
+    }
 
     // Fingerprint antes/depois para evitar updateUI sem mudanças
     const fpBefore = window._bpDataFp || '';
@@ -3723,7 +3740,6 @@ async function registarVenda(dados) {
   }
 }
 
-async 
 /**
  * Cancela uma venda e estorna a comissão (offline-first).
  * Marca movimento status=cancelado e zera comissao_gerada (guarda valor em comissao_estornada).
@@ -3749,16 +3765,13 @@ async function cancelarVenda(movimentoId, motivo) {
       cancelado_motivo: motivo || '',
       updated_at: new Date().toISOString()
     });
-    if (typeof window.AppStore !== 'undefined' && AppStore.updateInList) {
-      AppStore.updateInList('movimentos', movimentoId, updated);
+    if (window.BeautyStore && window.BeautyStore.updateInList) {
+      window.BeautyStore.updateInList('movimentos', movimentoId, updated);
     } else {
       const mi = state.movimentos.findIndex(function (x) { return x.id === movimentoId; });
       if (mi !== -1) state.movimentos[mi] = updated;
     }
     try { await dbPut('movimentos', updated); } catch (e) {}
-    if (typeof enqueueSync === 'function') {
-      try { enqueueSync('movimentos', 'upsert', updated); } catch (e) {}
-    }
     if (typeof toast === 'function') toast('Venda cancelada' + (estorno ? ' · comissão estornada' : ''), 'warning');
     if (typeof updateUI === 'function') updateUI();
     return true;
@@ -4125,7 +4138,14 @@ function renderDashboard() {
       const variacao = ((totalRev - totalPrev) / totalPrev) * 100;
       const subiu = variacao >= 0;
       percentEl.className = subiu ? 'trend-up' : 'trend-down';
-      percentEl.innerHTML = `<span class="trend-arrow">${subiu ? '↑' : '↓'}</span> ${Math.abs(variacao).toFixed(1)}%`;
+      const _absVar = Math.abs(variacao);
+      let _pctTxt;
+      if (!_absVar) {
+        _pctTxt = '0';
+      } else {
+        _pctTxt = _absVar.toFixed(1).replace(/\.0$/, '');
+      }
+      percentEl.innerHTML = `<span class="trend-arrow">${subiu ? '↑' : '↓'}</span> ${_pctTxt}%`;
       percentEl.style.display = 'inline-flex';
       percentEl.setAttribute('title', 'Receita vs período anterior equivalente');
     } else if (totalRev > 0 && totalPrev === 0) {
@@ -6234,6 +6254,67 @@ if (typeof window !== 'undefined') {
 
 /* ===== FILE: chart-module.js ===== */
 
+
+function actualizarDashChartExec(analise) {
+  try {
+    var elRev = document.getElementById('dash-chart-exec-rev');
+    var elN = document.getElementById('dash-chart-exec-n');
+    var elTicket = document.getElementById('dash-chart-exec-ticket');
+    var elDelta = document.getElementById('dash-chart-exec-delta');
+    if (!elRev && !elN && !elTicket && !elDelta) return;
+
+    var fmt = function (n) {
+      var v = Number(n);
+      if (!isFinite(v)) v = 0;
+      try {
+        if (typeof fmtKz === 'function') return fmtKz(v);
+      } catch (_) {}
+      try {
+        return Math.round(v).toLocaleString('pt-AO') + ' Kz';
+      } catch (_e2) {
+        return Math.round(v) + ' Kz';
+      }
+    };
+
+    var totais = analise && analise.totais ? analise.totais : null;
+    if (!totais) {
+      if (elRev) elRev.textContent = '—';
+      if (elN) elN.textContent = '—';
+      if (elTicket) elTicket.textContent = '—';
+      if (elDelta) {
+        elDelta.textContent = '—';
+        elDelta.removeAttribute('data-trend');
+      }
+      return;
+    }
+
+    if (elRev) elRev.textContent = fmt(totais.receita);
+    if (elN) elN.textContent = String(totais.nVendas != null ? totais.nVendas : 0);
+    if (elTicket) elTicket.textContent = fmt(totais.ticket);
+
+    if (elDelta) {
+      var ant = analise && analise.anterior ? analise.anterior : null;
+      var pct = null;
+      if (ant) {
+        if (ant.pct != null) pct = Number(ant.pct);
+        else if (ant.totais && totais.receita != null && ant.totais.receita > 0) {
+          pct = ((Number(totais.receita) - Number(ant.totais.receita)) / Number(ant.totais.receita)) * 100;
+        }
+      }
+      if (pct == null || !isFinite(pct)) {
+        elDelta.textContent = '—';
+        elDelta.removeAttribute('data-trend');
+      } else {
+        var rounded = Math.round(pct * 10) / 10;
+        elDelta.textContent = (rounded > 0 ? '+' : '') + rounded + '%';
+        elDelta.setAttribute('data-trend', rounded > 0 ? 'up' : (rounded < 0 ? 'down' : 'flat'));
+      }
+    }
+  } catch (e) {
+    try { console.warn('[chart-exec]', e); } catch (_) {}
+  }
+}
+
 function _bpUpdateChartHealth(analise) {
   var el = document.getElementById('dash-chart-health');
   var val = document.getElementById('dash-chart-health-value');
@@ -6482,17 +6563,49 @@ function exportarAnaliseCsv(analise) {
 }
 
 function renderizarGrafico() {
-
-
   const canvas = document.getElementById('weekly-chart');
   if (!canvas) return;
+  const parent = canvas.parentElement;
+  const tabDash = document.getElementById('tab-dashboard');
+  const tabVisivel = !tabDash || tabDash.classList.contains('active');
+  let parentWidth = 0;
+  try {
+    parentWidth = parent ? parent.getBoundingClientRect().width : 0;
+  } catch (_) { parentWidth = 0; }
+  /* Tab oculta ou layout ainda a 0 → adiar (evita gráfico “desaparecido”) */
+  if (tabVisivel && parentWidth < 40) {
+    if (!renderizarGrafico._retry) {
+      renderizarGrafico._retry = true;
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          renderizarGrafico._retry = false;
+          renderizarGrafico();
+        });
+      });
+    }
+    return;
+  }
+  if (!tabVisivel) {
+    /* Guarda pedido para quando a aba Resumo voltar a abrir */
+    renderizarGrafico._pending = true;
+    return;
+  }
+  renderizarGrafico._pending = false;
+
   const ctx = canvas.getContext('2d');
-  const parentWidth = canvas.parentElement.getBoundingClientRect().width || 400;
-  const width = Math.max(parentWidth, 200);
+  const width = Math.max(parentWidth || 0, 200);
   const height = 220;
   canvas.width = width;
   canvas.height = height;
-  try { canvas.style.touchAction = 'pan-y'; } catch (_ta) {}
+  try {
+    canvas.style.width = '100%';
+    canvas.style.height = height + 'px';
+    canvas.style.display = 'block';
+    canvas.style.touchAction = 'pan-y';
+  } catch (_ta) {}
+  if (parent) {
+    try { parent.style.minHeight = height + 'px'; } catch (_) {}
+  }
   ctx.clearRect(0, 0, width, height);
 
   const intervalo = (typeof getIntervaloDashAtual === 'function')
@@ -6570,13 +6683,17 @@ function renderizarGrafico() {
   const baseY = height - 22;
   const plotH = height - 40;
 
-  // Baseline discreta
-  ctx.strokeStyle = mutedBar;
+  // Baseline: nítida e legível, sem engrossar
+  ctx.save();
+  ctx.strokeStyle = textPrimary;
+  ctx.globalAlpha = 0.32;
   ctx.lineWidth = 1;
+  ctx.lineCap = 'butt';
   ctx.beginPath();
   ctx.moveTo(16, baseY + 0.5);
   ctx.lineTo(width - 16, baseY + 0.5);
   ctx.stroke();
+  ctx.restore();
 
   // Geometria de hit-test (partilhada com hover)
   const stepX = barW + gap;
@@ -6711,21 +6828,19 @@ function renderizarGrafico() {
     if (window._chartShowMedia && media > 0 && maxVal > 0) {
       var yMed = baseY - (media / maxVal) * plotH;
       ctx.save();
-      // Presente sem engrossar: contraste maior + menos transparência
-      ctx.strokeStyle = (typeof getComputedStyle === 'function'
-        ? (getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#c9a227')
-        : '#c9a227');
+      // Média: preta, nítida, mesma espessura
+      ctx.strokeStyle = textPrimary;
       ctx.lineWidth = 1;
-      ctx.setLineDash([5, 3]);
-      ctx.globalAlpha = 0.95;
+      ctx.lineCap = 'butt';
+      ctx.setLineDash([4, 3]);
+      ctx.globalAlpha = 1;
       ctx.beginPath();
       ctx.moveTo(16, yMed + 0.5);
       ctx.lineTo(width - 16, yMed + 0.5);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.font = '600 8px system-ui, sans-serif';
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.globalAlpha = 1;
+      ctx.fillStyle = textPrimary;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillText('Média', 18, yMed - 2);
@@ -6983,6 +7098,48 @@ function _bpSetChartFilterActive(periodo) {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
 }
+/** Olho só no modo Barras (valores nas barras). */
+function _bpSyncChartEye() {
+  var eye = document.getElementById('chart-eye-toggle');
+  if (!eye) return;
+  var mode = (typeof _chartViewMode !== 'undefined' && _chartViewMode) ? _chartViewMode : 'barras';
+  var show = mode === 'barras';
+  eye.hidden = !show;
+  eye.setAttribute('aria-hidden', show ? 'false' : 'true');
+  try { eye.style.display = show ? '' : 'none'; } catch (_) {}
+}
+
+
+/* Mantém o canvas legível após navegação / rotação / volta à aba Resumo */
+function _bpEnsureChartResizeObserver() {
+  if (_bpEnsureChartResizeObserver._done) return;
+  var wrap = document.getElementById('dash-chart-canvas-wrap') || document.getElementById('weekly-chart');
+  if (!wrap) return;
+  var target = wrap.id === 'weekly-chart' && wrap.parentElement ? wrap.parentElement : wrap;
+  _bpEnsureChartResizeObserver._done = true;
+  var t = null;
+  function schedule() {
+    if (t) clearTimeout(t);
+    t = setTimeout(function () {
+      if (typeof renderizarGrafico === 'function') renderizarGrafico();
+    }, 60);
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    try {
+      var ro = new ResizeObserver(function () { schedule(); });
+      ro.observe(target);
+    } catch (_) {}
+  }
+  window.addEventListener('resize', schedule);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) schedule();
+  });
+}
+try { _bpEnsureChartResizeObserver(); } catch (_) {}
+document.addEventListener('DOMContentLoaded', function () {
+  try { _bpEnsureChartResizeObserver(); } catch (_) {}
+});
+
 function initChartControls() {
   if (_chartControlsBound) return;
   _chartControlsBound = true;
@@ -7088,6 +7245,7 @@ function initChartControls() {
         b.classList.toggle('is-active', on);
         b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
+      if (typeof _bpSyncChartEye === 'function') _bpSyncChartEye();
       renderizarGrafico();
     });
   });
@@ -7097,6 +7255,7 @@ function initChartControls() {
     b.classList.toggle('is-active', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+  if (typeof _bpSyncChartEye === 'function') _bpSyncChartEye();
 
   const eyeToggle = document.getElementById('chart-eye-toggle');
   if (eyeToggle) {
@@ -7115,8 +7274,6 @@ function initChartControls() {
     });
   }
 }
-
-
 
 /** @deprecated feedback visual — anel CSS; mantido no-op seguro */
 function _bpChartPulse(el) { /* no-op */ }
@@ -8157,13 +8314,20 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   if (tab === 'agenda') renderAgendaFull();
   if (tab === 'clientes') renderClientes();
   if (tab === 'caixa') renderCaixa();
-  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'dashboard') {
+    renderDashboard();
+    if (typeof renderizarGrafico === 'function') {
+      setTimeout(function () { renderizarGrafico(); }, 40);
+      setTimeout(function () { renderizarGrafico(); }, 200);
+    }
+  }
   if (tab === 'equipa') { renderProfissionais(); renderServicos(); }
   if (tab === 'ia') {
    if (typeof actualizarContadorIA === 'function') actualizarContadorIA();
-   renderPlanoInfo();
-   atualizarIAOffline();
-   renderIAResumo();
+   if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+   if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
+   if (typeof renderIAResumo === 'function') renderIAResumo();
+   if (typeof carregarHistoricoIA === 'function') carregarHistoricoIA();
   }
   aplicarAcessibilidade();
   aplicarPermissoes();
@@ -9295,8 +9459,13 @@ async function confirmarFechoCaixa() {
   };
 
   await dbPut('fechos_caixa', registro);
-  // Atualizar o estado local
-  state.fechos_caixa.push(registro);
+  // Atualizar o estado local (Store quando disponível — notifica subscribers)
+  if (window.BeautyStore && window.BeautyStore.pushToList) {
+    window.BeautyStore.pushToList('fechos_caixa', registro);
+  } else {
+    if (!Array.isArray(state.fechos_caixa)) state.fechos_caixa = [];
+    state.fechos_caixa.push(registro);
+  }
   toast('Caixa fechado com sucesso', 'success');
   closeModal('modal-fecho');
   updateUI();
@@ -9834,6 +10003,46 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
 //  Carregar depois de core-*.js, db-indexeddb.js, sync-*.js, auth-supabase.js
 // ====================================================================
 // ====================================================================
+
+/** Limita texto sem cortar a meio da última palavra. */
+function _bpIaTrimTexto(s, max) {
+  s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  if (!max || s.length <= max) return s;
+  var cut = s.slice(0, max);
+  var sp = cut.lastIndexOf(' ');
+  if (sp > max * 0.6) cut = cut.slice(0, sp);
+  return cut.replace(/[\s,;:.-]+$/, '') + '…';
+}
+
+/** Histórico compacto para API (estilo contexto Grok: recente + curto). */
+function _bpIaHistoricoCompacto(hist, maxTurns, maxCharsEach) {
+  maxTurns = maxTurns || 4;
+  maxCharsEach = maxCharsEach || 320;
+  var list = Array.isArray(hist) ? hist.slice(-maxTurns) : [];
+  return list.map(function (t) {
+    return {
+      pergunta: _bpIaTrimTexto(t && t.pergunta, 180),
+      resposta: _bpIaTrimTexto(t && t.resposta, maxCharsEach),
+      fonte: (t && t.fonte) || undefined
+    };
+  });
+}
+
+/** Contexto de salão compacto — evita payloads gigantes que truncam a resposta. */
+function _bpIaContextoCompacto(ctxRaw) {
+  if (ctxRaw == null) return '';
+  if (typeof ctxRaw === 'object' && ctxRaw.erro) return ctxRaw;
+  var s = typeof ctxRaw === 'string' ? ctxRaw : String(ctxRaw);
+  /* Preferir cabeçalho operacional; cortar listas longas de clientes */
+  if (s.length > 3500) {
+    s = s.replace(/Top clientes por valor gasto[\s\S]*?(?=\n\s*PROFISSIONAIS|$)/i, 'Top clientes: (omitido — lista longa)\n\n');
+  }
+  if (s.length > 2800) {
+    s = _bpIaTrimTexto(s, 2800);
+  }
+  return s;
+}
+
 function buildContextoIA() {
   if (!state.movimentos || !Array.isArray(state.movimentos) || !state.agendamentos || !Array.isArray(state.agendamentos)) {
     return { erro: 'Dados ainda não carregados. Tente novamente em instantes.' };
@@ -9842,9 +10051,10 @@ function buildContextoIA() {
   const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
   const despHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa');
   const agHoje = state.agendamentos.filter(a => a.data === hojeStr);
-  const d30 = new Date();
-  d30.setDate(d30.getDate() - 29);
-  const d30str = d30.toISOString().split('T')[0];
+  const d30str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-29) : (function () {
+    var d = new Date(); d.setDate(d.getDate() - 29);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  })();
   const vendas30 = state.movimentos.filter(m => m.data >= d30str && m.tipo === 'venda');
 
   // CORRIGIDO: agrupa por profissional_id
@@ -9860,28 +10070,31 @@ function buildContextoIA() {
   vendas30.forEach(v => { if (v.itens) v.itens.forEach(i => { byServ[i.nome] = (byServ[i.nome] || 0) + (i.quantidade || 1); }); });
   const totalVendas30 = vendas30.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const ticketMedio = vendas30.length > 0 ? Math.round(totalVendas30 / vendas30.length) : 0;
-  const totalVendasHoje = vendasHoje.reduce((s, v) => s + v.valor, 0);
-  const totalDespHoje = despHoje.reduce((s, d) => s + d.valor, 0);
+  const totalVendasHoje = vendasHoje.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+  const totalDespHoje = despHoje.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const clientesUnicos = new Set(vendasHoje.map(v => v.cliente)).size;
 
-  const hojeD = new Date(hojeStr + 'T00:00:00');
-  const iniSemanaAtual = new Date(hojeD); iniSemanaAtual.setDate(hojeD.getDate() - 6);
-  const iniSemanaAtualStr = iniSemanaAtual.toISOString().split('T')[0];
-  const iniSemanaAnterior = new Date(hojeD); iniSemanaAnterior.setDate(hojeD.getDate() - 13);
-  const iniSemanaAnteriorStr = iniSemanaAnterior.toISOString().split('T')[0];
-  const fimSemanaAnterior = new Date(hojeD); fimSemanaAnterior.setDate(hojeD.getDate() - 7);
-  const fimSemanaAnteriorStr = fimSemanaAnterior.toISOString().split('T')[0];
+  const hojeD = new Date(hojeStr + 'T12:00:00');
+  const iniSemanaAtualStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-6) : hojeStr;
+  const iniSemanaAnteriorStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-13) : hojeStr;
+  const fimSemanaAnteriorStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-7) : hojeStr;
   const vendasSemanaAtual = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= iniSemanaAtualStr && m.data <= hojeStr);
   const vendasSemanaAnterior = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= iniSemanaAnteriorStr && m.data <= fimSemanaAnteriorStr);
-  const totalSemanaAtual = vendasSemanaAtual.reduce((s, v) => s + v.valor, 0);
-  const totalSemanaAnterior = vendasSemanaAnterior.reduce((s, v) => s + v.valor, 0);
+  const totalSemanaAtual = vendasSemanaAtual.reduce((s, v) => s + _bpIaNum(v.valor), 0);
+  const totalSemanaAnterior = vendasSemanaAnterior.reduce((s, v) => s + _bpIaNum(v.valor), 0);
 
-  const fim7 = new Date(hojeD); fim7.setDate(hojeD.getDate() + 7);
-  const fim7Str = fim7.toISOString().split('T')[0];
-  const ag7dias = state.agendamentos.filter(a => a.data >= hojeStr && a.data <= fim7Str && a.status !== 'cancelado');
+  const fim7Str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(7) : hojeStr;
+  const ag7dias = state.agendamentos.filter(a => {
+    if (!(a.data >= hojeStr && a.data <= fim7Str)) return false;
+    var st = (typeof _bpIaSt === 'function') ? _bpIaSt(a) : String(a.status || a.estado || '').toLowerCase();
+    return st !== 'cancelado';
+  });
 
   const ag30 = state.agendamentos.filter(a => a.data >= d30str && a.data <= hojeStr);
-  const ag30Cancelados = ag30.filter(a => a.status === 'cancelado').length;
+  const ag30Cancelados = ag30.filter(a => {
+    var st = (typeof _bpIaSt === 'function') ? _bpIaSt(a) : String(a.status || a.estado || '').toLowerCase();
+    return st === 'cancelado';
+  }).length;
   const taxaCancelamento = ag30.length > 0 ? Math.round((ag30Cancelados / ag30.length) * 100) : 0;
 
   const servicosOrdenados = Object.entries(byServ).sort((a, b) => a[1] - b[1]);
@@ -9952,125 +10165,398 @@ function buildContextoIA() {
 // ====================================================================
 let iaHistorico = [];
 
-function renderIAResumo() {
-  if (!state.movimentos || !Array.isArray(state.movimentos) || !state.agendamentos || !Array.isArray(state.agendamentos)) return;
-  const hojeStr = hoje();
-  const hojeD = new Date(hojeStr + 'T00:00:00');
-  const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
-  const totalHoje = vendasHoje.reduce((s, v) => s + (Number(v.valor) || 0), 0);
-  const agHoje = state.agendamentos.filter(a => a.data === hojeStr);
-  const pendentesHoje = agHoje.filter(a => a.status !== 'realizado' && a.status !== 'cancelado').length;
-  const clientesHoje = new Set(vendasHoje.map(v => v.cliente)).size;
+function _bpIaDataOffset(dias) {
+  /* Data local YYYY-MM-DD relativa a hoje() — evita UTC de toISOString */
+  var base = (typeof hoje === 'function') ? hoje() : null;
+  var d = base ? new Date(base + 'T12:00:00') : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  d.setDate(d.getDate() + (Number(dias) || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _bpIaSt(a) {
+  if (typeof _statusAg === 'function') return _statusAg(a);
+  return String((a && (a.status || a.estado)) || 'agendado').toLowerCase();
+}
+function _bpIaNum(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+function _bpIaItemValor(it) {
+  if (!it) return 0;
+  var sub = _bpIaNum(it.subtotal);
+  if (sub) return sub;
+  var q = _bpIaNum(it.quantidade); if (!q) q = 1;
+  var pu = it.precoUnit != null ? it.precoUnit : (it.preco != null ? it.preco : 0);
+  return q * _bpIaNum(pu);
+}
 
-  const elFat = document.getElementById('ia-resumo-fat');
-  if (elFat) elFat.textContent = fmtKz(totalHoje);
-  const dias7 = [];
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = d.toISOString().split('T')[0];
-    dias7.push(state.movimentos.filter(m => m.data === ds && m.tipo === 'venda').reduce((s, v) => s + (Number(v.valor) || 0), 0));
+/** Soma valor de movimentos com filtro opcional (evita loops duplicados). */
+function _bpIaSomaMovs(movs, pred) {
+  var s = 0;
+  var list = movs || [];
+  for (var i = 0; i < list.length; i++) {
+    var m = list[i];
+    if (pred && !pred(m)) continue;
+    s += _bpIaNum(m.valor);
   }
-  const media7 = dias7.reduce((s, v) => s + v, 0) / 7;
-  const fatTrendEl = document.getElementById('ia-resumo-fat-trend');
+  return s;
+}
+
+/** Fluxo de um dia: vendas, despesas, fluxo. Fallback 0 se sem dados. */
+function _bpIaFluxoDia(movs, dataStr) {
+  var v = 0, d = 0;
+  var list = movs || [];
+  for (var i = 0; i < list.length; i++) {
+    var m = list[i];
+    if (!m || m.data !== dataStr) continue;
+    if (m.tipo === 'venda') v += _bpIaNum(m.valor);
+    else if (m.tipo === 'despesa') d += _bpIaNum(m.valor);
+  }
+  return { vendas: v, despesas: d, fluxo: v - d };
+}
+
+/** Métricas base do dia com fallback seguro (nunca NaN/undefined). */
+function _bpIaMetricasBase() {
+  var movs = (state && Array.isArray(state.movimentos)) ? state.movimentos : [];
+  var ags = (state && Array.isArray(state.agendamentos)) ? state.agendamentos : [];
+  var hojeStr = (typeof hoje === 'function') ? hoje() : _bpIaDataOffset(0);
+  var fluxo = _bpIaFluxoDia(movs, hojeStr);
+  var fundo = _bpIaNum(state && state.config && state.config.fundo);
+  return {
+    movs: movs,
+    ags: ags,
+    hojeStr: hojeStr,
+    vendas: fluxo.vendas,
+    despesas: fluxo.despesas,
+    fluxo: fluxo.fluxo,
+    fundo: fundo,
+    saldoEst: fundo + fluxo.fluxo,
+    pronto: !!(state && Array.isArray(state.movimentos) && Array.isArray(state.agendamentos))
+  };
+}
+
+function renderIAResumo() {
+  var base = _bpIaMetricasBase();
+  if (!base.pronto) {
+    var listaWait = document.getElementById('ia-insights-list');
+    if (listaWait) {
+      listaWait.innerHTML = '<div class="ia-insight-row"><span>A carregar dados do salão…</span></div>';
+    }
+    return;
+  }
+  var movs = base.movs;
+  var ags = base.ags;
+  var hojeStr = base.hojeStr;
+  var hojeD = new Date(hojeStr + 'T12:00:00');
+  var vendasHoje = movs.filter(function (m) { return m.data === hojeStr && m.tipo === 'venda'; });
+  var totalHoje = base.vendas;
+  var totalDespHoje = base.despesas;
+  var fundo = base.fundo;
+  var fluxoHoje = base.fluxo;
+  var saldoEst = base.saldoEst;
+
+  var agHoje = ags.filter(function (a) { return a.data === hojeStr; });
+  var pendentesHoje = agHoje.filter(function (a) {
+    var st = _bpIaSt(a);
+    return st === 'agendado' || (!st);
+  }).length;
+  var clientesHoje = new Set(vendasHoje.map(function (v) { return v.cliente; }).filter(Boolean)).size;
+
+  var elFat = document.getElementById('ia-resumo-fat');
+  if (elFat) elFat.textContent = fmtKz(totalHoje);
+
+  var dias7Fat = [];
+  for (var i = 1; i <= 7; i++) {
+    dias7Fat.push(_bpIaFluxoDia(movs, _bpIaDataOffset(-i)).vendas);
+  }
+  var media7 = dias7Fat.reduce(function (s, v) { return s + v; }, 0) / 7;
+  var fatTrendEl = document.getElementById('ia-resumo-fat-trend');
   if (fatTrendEl) {
     if (media7 > 0) {
-      const variacaoFat = Math.round(((totalHoje - media7) / media7) * 100);
-      fatTrendEl.innerHTML = `<span style="color:${variacaoFat >= 0 ? 'var(--green)' : 'var(--red)'}">${variacaoFat >= 0 ? '↑' : '↓'} ${Math.abs(variacaoFat)}%</span> vs média 7 dias`;
+      var variacaoFat = Math.round(((totalHoje - media7) / media7) * 100);
+      fatTrendEl.innerHTML = '<span style="color:' + (variacaoFat >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+        (variacaoFat >= 0 ? '↑' : '↓') + ' ' + Math.abs(variacaoFat) + '%</span> vs média 7 dias';
     } else {
-      fatTrendEl.textContent = 'comparado com ontem';
+      fatTrendEl.textContent = totalHoje > 0 ? 'sem histórico de 7 dias' : 'sem vendas recentes';
     }
   }
 
-  const elCli = document.getElementById('ia-resumo-clientes');
+  var elCli = document.getElementById('ia-resumo-clientes');
   if (elCli) elCli.textContent = String((state.clientes || []).length);
-  const elCliSub = document.getElementById('ia-resumo-clientes-sub');
+  var elCliSub = document.getElementById('ia-resumo-clientes-sub');
   if (elCliSub) elCliSub.textContent = clientesHoje + (clientesHoje === 1 ? ' atendido hoje' : ' atendidos hoje');
 
-  const elAg = document.getElementById('ia-resumo-ag');
+  var elAg = document.getElementById('ia-resumo-ag');
   if (elAg) elAg.textContent = String(agHoje.length);
-  const elAgSub = document.getElementById('ia-resumo-ag-sub');
+  var elAgSub = document.getElementById('ia-resumo-ag-sub');
   if (elAgSub) elAgSub.textContent = pendentesHoje + (pendentesHoje === 1 ? ' pendente' : ' pendentes');
 
-  // ---- Insights automáticos (todos calculados a partir de dados reais já existentes) ----
-  const insights = [];
-
-  const ticketHoje = vendasHoje.length > 0 ? totalHoje / vendasHoje.length : 0;
-  const ticketsDias7 = [];
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = d.toISOString().split('T')[0];
-    const vd = state.movimentos.filter(m => m.data === ds && m.tipo === 'venda');
-    if (vd.length > 0) ticketsDias7.push(vd.reduce((s, v) => s + v.valor, 0) / vd.length);
+  /* ---- Insights: prioridade (1 atenção → 3 info), máx. 5 ---- */
+  var insights = [];
+  function pushIns(prio, icone, cor, texto) {
+    insights.push({ prio: prio, icone: icone, cor: cor, texto: texto });
   }
-  if (ticketHoje > 0 && ticketsDias7.length > 0) {
-    const mediaTicket7 = ticketsDias7.reduce((s, v) => s + v, 0) / ticketsDias7.length;
-    if (mediaTicket7 > 0) {
-      const variacaoTicket = Math.round(((ticketHoje - mediaTicket7) / mediaTicket7) * 100);
-      insights.push({ icone: 'trend', cor: variacaoTicket >= 0 ? 'var(--green)' : 'var(--red)',
-        texto: `Hoje o seu ticket médio ${variacaoTicket >= 0 ? 'aumentou' : 'diminuiu'} <strong>${Math.abs(variacaoTicket)}%</strong> em relação à média dos últimos 7 dias.` });
+
+  /* Ticket médio hoje vs dias com venda nos últimos 7 */
+  var ticketHoje = vendasHoje.length > 0 ? totalHoje / vendasHoje.length : 0;
+  var ticketsDias7 = [];
+  for (var t = 1; t <= 7; t++) {
+    var dts = _bpIaDataOffset(-t);
+    var vd = movs.filter(function (m) { return m.data === dts && m.tipo === 'venda'; });
+    if (vd.length > 0) {
+      var sum = vd.reduce(function (s, v) { return s + _bpIaNum(v.valor); }, 0);
+      ticketsDias7.push(sum / vd.length);
     }
   }
+  if (ticketHoje > 0 && ticketsDias7.length > 0) {
+    var mediaTicket7 = ticketsDias7.reduce(function (s, v) { return s + v; }, 0) / ticketsDias7.length;
+    if (mediaTicket7 > 0) {
+      var variacaoTicket = Math.round(((ticketHoje - mediaTicket7) / mediaTicket7) * 100);
+      var down = variacaoTicket < -8;
+      pushIns(down ? 1 : 2, 'trend', variacaoTicket >= 0 ? 'var(--green)' : 'var(--red)',
+        'Hoje o ticket médio ' + (variacaoTicket >= 0 ? 'subiu' : 'desceu') +
+        ' <strong>' + Math.abs(variacaoTicket) + '%</strong> face à média dos últimos dias com vendas.');
+    }
+  } else if (totalHoje === 0 && media7 > 0) {
+    pushIns(1, 'trend', 'var(--text-secondary)',
+      'Ainda <strong>sem vendas hoje</strong>. A média dos últimos 7 dias foi ' + fmtKz(Math.round(media7)) + '.');
+  }
 
-  const ultimaCompraPorCliente = {};
-  state.movimentos.filter(m => m.tipo === 'venda' && m.cliente).forEach(v => {
-    if (!ultimaCompraPorCliente[v.cliente] || v.data > ultimaCompraPorCliente[v.cliente]) ultimaCompraPorCliente[v.cliente] = v.data;
+  /* Clientes inactivos > 30 dias */
+  var ultimaCompraPorCliente = {};
+  movs.forEach(function (v) {
+    if (v.tipo !== 'venda' || !v.cliente) return;
+    var nome = String(v.cliente).trim();
+    if (!nome) return;
+    if (!ultimaCompraPorCliente[nome] || v.data > ultimaCompraPorCliente[nome]) {
+      ultimaCompraPorCliente[nome] = v.data;
+    }
   });
-  const inativos = Object.entries(ultimaCompraPorCliente).filter(([nome, data]) => Math.floor((hojeD - new Date(data + 'T00:00:00')) / 86400000) > 30).length;
+  var inativos = 0;
+  Object.keys(ultimaCompraPorCliente).forEach(function (nome) {
+    var data = ultimaCompraPorCliente[nome];
+    var dias = Math.floor((hojeD - new Date(data + 'T12:00:00')) / 86400000);
+    if (dias > 30) inativos++;
+  });
   if (inativos > 0) {
-    insights.push({ icone: 'user', cor: 'var(--text-secondary)',
-      texto: inativos === 1 ? `Existe <strong>1 cliente</strong> que não regressa há mais de 30 dias.` : `Existem <strong>${inativos} clientes</strong> que não regressam há mais de 30 dias.` });
+    pushIns(1, 'user', 'var(--text-secondary)',
+      inativos === 1
+        ? 'Existe <strong>1 cliente</strong> sem regressar há mais de 30 dias — oportunidade de reactivação.'
+        : 'Existem <strong>' + inativos + ' clientes</strong> sem regressar há mais de 30 dias — priorize contacto.');
   }
 
-  const iniSemana = new Date(hojeD); iniSemana.setDate(hojeD.getDate() - 6);
-  const iniSemanaStr = iniSemana.toISOString().split('T')[0];
-  const vendasSemana = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= iniSemanaStr && m.data <= hojeStr);
-  const receitaPorServico = {};
-  let receitaSemanaTotal = 0;
-  vendasSemana.forEach(v => {
-    receitaSemanaTotal += v.valor;
-    if (v.itens && Array.isArray(v.itens)) v.itens.forEach(it => { receitaPorServico[it.nome] = (receitaPorServico[it.nome] || 0) + (it.subtotal || 0); });
+  /* Serviço campeão da semana — % sobre soma dos itens (consistente) */
+  var iniSemanaStr = _bpIaDataOffset(-6);
+  var vendasSemana = movs.filter(function (m) {
+    return m.tipo === 'venda' && m.data >= iniSemanaStr && m.data <= hojeStr;
   });
-  const servicosOrdenadosReceita = Object.entries(receitaPorServico).sort((a, b) => b[1] - a[1]);
-  if (servicosOrdenadosReceita.length > 0 && receitaSemanaTotal > 0) {
-    const [nomeServico, receitaServico] = servicosOrdenadosReceita[0];
-    const pct = Math.round((receitaServico / receitaSemanaTotal) * 100);
-    insights.push({ icone: 'star', cor: 'var(--gold-dark)', texto: `O serviço "<strong>${escHtml(nomeServico)}</strong>" representa <strong>${pct}%</strong> da receita desta semana.` });
+  var receitaPorServico = {};
+  var receitaItensSemana = 0;
+  var receitaSemanaTotal = 0;
+  vendasSemana.forEach(function (v) {
+    receitaSemanaTotal += _bpIaNum(v.valor);
+    if (v.itens && Array.isArray(v.itens) && v.itens.length) {
+      v.itens.forEach(function (it) {
+        if (!it || !it.nome) return;
+        var val = _bpIaItemValor(it);
+        receitaPorServico[it.nome] = (receitaPorServico[it.nome] || 0) + val;
+        receitaItensSemana += val;
+      });
+    }
+  });
+  var servicosOrdenados = Object.keys(receitaPorServico).map(function (k) {
+    return [k, receitaPorServico[k]];
+  }).sort(function (a, b) { return b[1] - a[1]; });
+  var baseServ = receitaItensSemana > 0 ? receitaItensSemana : receitaSemanaTotal;
+  if (servicosOrdenados.length > 0 && baseServ > 0) {
+    var nomeServico = servicosOrdenados[0][0];
+    var receitaServico = servicosOrdenados[0][1];
+    var pct = Math.round((receitaServico / baseServ) * 100);
+    if (pct > 100) pct = 100;
+    var conc = pct >= 45;
+    pushIns(conc ? 1 : 2, 'star', 'var(--gold-dark)',
+      'O serviço "<strong>' + escHtml(nomeServico) + '</strong>" concentra <strong>' + pct + '%</strong> da receita de itens desta semana' +
+      (conc ? ' — dependência elevada num único serviço.' : '.'));
+  } else if (receitaSemanaTotal > 0) {
+    pushIns(2, 'star', 'var(--text-secondary)',
+      'Há receita esta semana, mas as vendas sem linhas de item limitam o ranking de serviços.');
   }
 
-  const saldos30 = [];
-  for (let i = 0; i <= 29; i++) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = d.toISOString().split('T')[0];
-    const v = state.movimentos.filter(m => m.data === ds && m.tipo === 'venda').reduce((s, x) => s + x.valor, 0);
-    const de = state.movimentos.filter(m => m.data === ds && m.tipo === 'despesa').reduce((s, x) => s + x.valor, 0);
-    saldos30.push(v - de);
+  /* Fluxo diário (vendas − despesas) vs média 30 dias — explícito, não confunde com fundo */
+  var fluxos30 = [];
+  for (var f = 0; f <= 29; f++) {
+    fluxos30.push(_bpIaFluxoDia(movs, _bpIaDataOffset(-f)).fluxo);
   }
-  const saldoHoje30 = saldos30[0];
-  const media30 = saldos30.slice(1).reduce((s, v) => s + v, 0) / 29;
-  if (saldos30.some(s => s !== 0)) {
-    insights.push({ icone: 'wallet', cor: saldoHoje30 >= media30 ? 'var(--green)' : 'var(--red)',
-      texto: `O caixa de hoje está <strong>${saldoHoje30 >= media30 ? 'acima' : 'abaixo'}</strong> da média dos últimos 30 dias.` });
+  var fluxo0 = fluxos30[0];
+  var mediaFluxo = fluxos30.slice(1).reduce(function (s, v) { return s + v; }, 0) / 29;
+  var temMov30 = fluxos30.some(function (s) { return s !== 0; });
+  if (temMov30) {
+    var abaixo = fluxo0 < mediaFluxo;
+    pushIns(abaixo ? 1 : 2, 'wallet', abaixo ? 'var(--red)' : 'var(--green)',
+      'O fluxo de hoje (vendas − despesas) está <strong>' + (abaixo ? 'abaixo' : 'acima') +
+      '</strong> da média dos últimos 30 dias' +
+      (fundo ? ' · saldo estimado com fundo: ' + fmtKz(saldoEst) : '') + '.');
+  } else if (fundo > 0 && totalHoje === 0) {
+    pushIns(2, 'wallet', 'var(--text-secondary)',
+      'Sem movimentos hoje. Fundo de caixa: <strong>' + fmtKz(fundo) + '</strong>.');
   }
 
-  const amanha = new Date(hojeD); amanha.setDate(hojeD.getDate() + 1);
-  const amanhaStr = amanha.toISOString().split('T')[0];
-  const agAmanha = state.agendamentos.filter(a => a.data === amanhaStr && a.status !== 'cancelado');
-  insights.push({ icone: 'calendar', cor: 'var(--text-secondary)',
-    texto: agAmanha.length > 0 ? `Amanhã tem <strong>${agAmanha.length} ${agAmanha.length === 1 ? 'agendamento' : 'agendamentos'}</strong> marcados.` : `Ainda não há agendamentos para amanhã.` });
+  /* Agenda amanhã — status via _statusAg */
+  var amanhaStr = _bpIaDataOffset(1);
+  var agAmanha = ags.filter(function (a) {
+    if (a.data !== amanhaStr) return false;
+    var st = _bpIaSt(a);
+    return st !== 'cancelado';
+  });
+  var agAmanhaActivos = agAmanha.filter(function (a) {
+    var st = _bpIaSt(a);
+    return st === 'agendado';
+  });
+  if (agAmanhaActivos.length > 0) {
+    pushIns(2, 'calendar', 'var(--text-secondary)',
+      'Amanhã tem <strong>' + agAmanhaActivos.length +
+      (agAmanhaActivos.length === 1 ? ' agendamento</strong> activo.' : ' agendamentos</strong> activos.'));
+  } else {
+    pushIns(1, 'calendar', 'var(--text-secondary)',
+      'Ainda <strong>não há agendamentos activos</strong> para amanhã — preencha a agenda.');
+  }
 
-  const iconesSvg = {
+  /* Pendentes de hoje em atraso (hora já passou e ainda agendado) */
+  var agora = new Date();
+  var atrasados = agHoje.filter(function (a) {
+    if (_bpIaSt(a) !== 'agendado') return false;
+    var hora = String(a.hora || '00:00').slice(0, 5);
+    var ad = new Date(a.data + 'T' + hora + ':00');
+    return !isNaN(ad.getTime()) && ad < agora;
+  }).length;
+  if (atrasados > 0) {
+    pushIns(1, 'calendar', 'var(--red)',
+      atrasados === 1
+        ? 'Há <strong>1 marcação de hoje</strong> em atraso por finalizar ou actualizar.'
+        : 'Há <strong>' + atrasados + ' marcações de hoje</strong> em atraso por finalizar ou actualizar.');
+  }
+
+  insights.sort(function (a, b) { return a.prio - b.prio; });
+  if (insights.length > 5) insights = insights.slice(0, 5);
+
+  var iconesSvg = {
     trend: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
     user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
     star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 22 12 18 5.5 22 7 14.5 2 9.5 9 9"/></svg>',
     wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
-    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="15" height="15" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'
   };
-  const listaEl = document.getElementById('ia-insights-list');
+  var listaEl = document.getElementById('ia-insights-list');
   if (listaEl) {
-    const bgPorCor = { 'var(--green)': 'var(--green-50)', 'var(--red)': 'var(--red-50)', 'var(--gold-dark)': 'var(--gold-50)', 'var(--text-secondary)': 'var(--neutral-75)' };
-    listaEl.innerHTML = insights.map(ins => `<div class="ia-insight-row"><span class="ia-insight-icone" style="color:${ins.cor};background:${bgPorCor[ins.cor] || 'var(--neutral-75)'}">${iconesSvg[ins.icone]}</span><span>${ins.texto}</span></div>`).join('')
-      || '<div class="ia-insight-row"><span>Ainda sem dados suficientes para gerar insights.</span></div>';
+    var bgPorCor = {
+      'var(--green)': 'var(--green-50)',
+      'var(--red)': 'var(--red-50)',
+      'var(--gold-dark)': 'var(--gold-50)',
+      'var(--text-secondary)': 'var(--neutral-75)'
+    };
+    listaEl.innerHTML = insights.map(function (ins) {
+      return '<div class="ia-insight-row"><span class="ia-insight-icone" style="color:' + ins.cor +
+        ';background:' + (bgPorCor[ins.cor] || 'var(--neutral-75)') + '">' +
+        (iconesSvg[ins.icone] || '') + '</span><span>' + ins.texto + '</span></div>';
+    }).join('') || '<div class="ia-insight-row"><span>Ainda sem dados suficientes para gerar insights.</span></div>';
   }
+
+  var fim7 = _bpIaDataOffset(7);
+  var agProximos = ags.filter(function (a) {
+    if (!a.data || a.data < hojeStr || a.data > fim7) return false;
+    return _bpIaSt(a) === 'agendado';
+  }).length;
+
+  if (typeof renderIASugestoesAdaptativas === 'function') {
+    renderIASugestoesAdaptativas({
+      totalHoje: totalHoje,
+      totalDespHoje: totalDespHoje,
+      fluxoHoje: fluxoHoje,
+      media7: media7,
+      inativos: inativos,
+      pendentesHoje: pendentesHoje,
+      atrasados: atrasados,
+      agAmanha: agAmanhaActivos.length,
+      agProximos: agProximos,
+      ticketHoje: ticketHoje,
+      temServicoTop: servicosOrdenados.length > 0
+    });
+  }
+}
+
+function renderIASugestoesAdaptativas(ctx) {
+  var grid = document.querySelector('#tab-ia .ia-sugestoes-grid');
+  if (!grid || !ctx) return;
+
+  var pool = [];
+  function add(score, label, pergunta, tone) {
+    pool.push({ score: score, label: label, pergunta: pergunta, tone: tone || 'ia-sug-graphite' });
+  }
+
+  /* Atenção primeiro */
+  if (ctx.atrasados > 0) {
+    add(100, 'Marcações em atraso', 'Quais marcações de hoje estão pendentes?', 'ia-sug-gold');
+  }
+  if (ctx.totalHoje === 0 && ctx.media7 > 0) {
+    add(95, 'Receita hoje', 'Qual foi a minha receita hoje?', 'ia-sug-green');
+  } else {
+    add(40, 'Receita hoje', 'Qual foi a minha receita hoje?', 'ia-sug-green');
+  }
+  if (ctx.inativos > 0) {
+    add(90, 'Clientes inactivos', 'Quais clientes estão inativos?', 'ia-sug-gold');
+  } else {
+    add(35, 'Clientes VIP', 'Quem são os meus clientes VIP?', 'ia-sug-gold');
+  }
+  if (ctx.agAmanha === 0) {
+    add(88, 'Agenda amanhã', 'O que tenho agendado para amanhã?', 'ia-sug-green');
+  } else {
+    add(50, 'Agenda amanhã', 'O que tenho agendado para amanhã?', 'ia-sug-green');
+  }
+  if (ctx.fluxoHoje < 0 || ctx.totalDespHoje > ctx.totalHoje) {
+    add(85, 'Fluxo de caixa', 'Como está o fluxo de caixa?', 'ia-sug-gold');
+  } else {
+    add(45, 'Fluxo de caixa', 'Como está o fluxo de caixa?', 'ia-sug-gold');
+  }
+  if (ctx.temServicoTop) {
+    add(55, 'Serviço campeão', 'Qual é o meu serviço mais vendido?', 'ia-sug-graphite');
+  }
+  add(42, 'Ticket médio', 'Qual é o meu ticket médio?', 'ia-sug-graphite');
+  if (ctx.pendentesHoje > 0) {
+    add(60, 'Agenda de hoje', 'Como está a minha agenda?', 'ia-sug-green');
+  }
+  /* Calendário externo (.ics) — reutiliza BPOps.downloadIcs se existir */
+  if (ctx.agProximos > 0 && window.BPOps && typeof window.BPOps.downloadIcs === 'function') {
+    add(72, 'Exportar calendário', '__bp_export_ics__', 'ia-sug-graphite');
+  } else if (ctx.agAmanha > 0 && window.BPOps && typeof window.BPOps.downloadIcs === 'function') {
+    add(65, 'Exportar calendário', '__bp_export_ics__', 'ia-sug-graphite');
+  }
+
+  pool.sort(function (a, b) { return b.score - a.score; });
+  /* Intercalar: evitar dois tons iguais seguidos quando possível */
+  var picked = [];
+  var usedLabel = {};
+  for (var i = 0; i < pool.length && picked.length < 6; i++) {
+    var c = pool[i];
+    if (usedLabel[c.label]) continue;
+    if (picked.length && picked[picked.length - 1].tone === c.tone) {
+      var swap = null;
+      for (var j = i + 1; j < pool.length; j++) {
+        if (!usedLabel[pool[j].label] && pool[j].tone !== c.tone) { swap = pool[j]; pool[j] = c; break; }
+      }
+      if (swap) c = swap;
+    }
+    usedLabel[c.label] = true;
+    picked.push(c);
+  }
+
+  var svg = {
+    'ia-sug-green': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 18 8.5 10.5 13.5 15.5 23 6"/><polyline points="17 6 23 6 23 12"/></svg>',
+    'ia-sug-gold': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    'ia-sug-graphite': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 22 12 18 5.5 22 7 14.5 2 9.5 9 9"/></svg>'
+  };
+  grid.innerHTML = picked.map(function (c) {
+    return '<button type="button" class="ia-sugestao-card" data-pergunta="' +
+      String(c.pergunta).replace(/"/g, '&quot;') + '">' +
+      '<span class="ia-sugestao-icone ' + c.tone + '">' + (svg[c.tone] || svg['ia-sug-graphite']) + '</span>' +
+      '<span>' + c.label + '</span></button>';
+  }).join('');
 }
 
 function chaveIAPerguntas() {
@@ -10086,16 +10572,86 @@ function setUsoIAHoje(n) {
   actualizarContadorIA();
 }
 
+
+/** Estado real da aba IA — nunca “Online” falso. */
+function _bpIaIsOnline() {
+  try { return navigator.onLine !== false; } catch (_) { return true; }
+}
+function _bpIaSetComposerStatus(text) {
+  var el = document.getElementById('ia-status');
+  if (el) el.textContent = text || '';
+}
+function _bpIaSetHeaderStatus(kind, detail) {
+  var line = document.getElementById('ia-status-line-text');
+  var root = document.querySelector('#tab-ia .ia-status-line');
+  if (!line && root) {
+    /* fallback: actualiza texto do nó de linha */
+    var sep = root.querySelector('.ia-status-sep');
+    if (sep && sep.nextSibling) {
+      /* ignore */
+    }
+  }
+  if (line) {
+    if (kind === 'offline') line.textContent = 'Offline — respostas locais quando possível';
+    else if (kind === 'busy') line.textContent = detail || 'A processar…';
+    else if (kind === 'error') line.textContent = detail || 'Indisponível de momento';
+    else if (kind === 'local') line.textContent = 'Dados locais do salão';
+    else line.textContent = 'Pronta a analisar o seu negócio';
+  }
+  if (root) {
+    root.setAttribute('data-ia-conn', kind === 'offline' ? 'offline' : (kind === 'error' ? 'error' : 'ok'));
+    var dot = root.querySelector('.ia-status-dot');
+    if (dot) {
+      dot.setAttribute('data-state', kind === 'offline' ? 'offline' : (kind === 'busy' ? 'busy' : (kind === 'error' ? 'error' : 'ok')));
+    }
+  }
+  var label = document.getElementById('ia-status-line-label');
+  if (label) {
+    if (kind === 'offline') label.textContent = 'Offline';
+    else if (kind === 'busy') label.textContent = 'A trabalhar';
+    else if (kind === 'error') label.textContent = 'Aviso';
+    else label.textContent = 'Ligado';
+  }
+}
+function atualizarIAOffline() {
+  var online = _bpIaIsOnline();
+  var overlay = document.getElementById('ia-offline-overlay');
+  if (overlay) {
+    overlay.style.display = online ? 'none' : 'flex';
+    overlay.setAttribute('aria-hidden', online ? 'true' : 'false');
+  }
+  if (!_iaBusy) {
+    if (!online) {
+      _bpIaSetHeaderStatus('offline');
+      _bpIaSetComposerStatus('Modo local');
+    } else {
+      _bpIaSetHeaderStatus('ok');
+      _bpIaSetComposerStatus('IA pronta');
+    }
+  }
+  return online;
+}
+try {
+  window.addEventListener('online', function () { try { atualizarIAOffline(); } catch (_) {} });
+  window.addEventListener('offline', function () { try { atualizarIAOffline(); } catch (_) {} });
+} catch (_) {}
+
 function actualizarContadorIA() {
   const cont = document.getElementById('ia-contador');
   if (!cont) return;
   const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
   const info = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano] : { iaDia: 0 };
-  if (!info.iaDia || info.iaDia === 0) {
-    cont.textContent = '0';
+  const usadas = getUsoIAHoje();
+  const lim = info.iaDia;
+  if (!lim || lim === 0) {
+    cont.textContent = usadas + ' · plano sem cota IA';
     return;
   }
-  cont.textContent = String(getUsoIAHoje());
+  if (lim === Infinity) {
+    cont.textContent = String(usadas) + ' hoje';
+    return;
+  }
+  cont.textContent = usadas + ' / ' + lim;
 }
 
 function normalizarPerguntaIA(q) {
@@ -10190,6 +10746,7 @@ function responderIALocal(pergunta) {
 }
 
 let _iaBusy = false;
+window.__bpIaLastMeta = { fonte: null };
 
 async function perguntarIA(pergunta) {
   const q = String(pergunta || '').trim();
@@ -10206,12 +10763,14 @@ async function perguntarIA(pergunta) {
   const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
   const iaDia = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano].iaDia : 0;
   if (iaDia === 0) {
+    try { _bpIaSetComposerStatus('Sem cota IA neste plano'); } catch (_) {}
     mostrarModalUpgrade('O Agente IA está disponível no plano Pro (5 perguntas/dia) e Premium (ilimitado).');
     return null;
   }
 
   const usadas = getUsoIAHoje();
   if (iaDia !== Infinity && usadas >= iaDia) {
+    try { _bpIaSetComposerStatus('Limite diário atingido'); } catch (_) {}
     if (plano === 'pro') {
       mostrarModalUpgrade('Atingiu o limite de 5 perguntas/dia do plano Pro. Faça upgrade para Premium para perguntas ilimitadas.');
     } else {
@@ -10225,18 +10784,27 @@ async function perguntarIA(pergunta) {
     const local = responderIALocal(q);
     if (local) {
       iaHistorico.push({ pergunta: q, resposta: local, fonte: 'local' });
-      if (iaHistorico.length > 6) iaHistorico = iaHistorico.slice(-6);
+      if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
+      window.__bpIaLastMeta = { fonte: 'local' };
       return local;
     }
   } catch (eLocal) {}
 
-  const contexto = buildContextoIA();
-  if (contexto && contexto.erro) {
-    toast(contexto.erro, 'warning');
+  const contextoRaw = buildContextoIA();
+  if (contextoRaw && contextoRaw.erro) {
+    toast(contextoRaw.erro, 'warning');
     return null;
   }
+  const contexto = (typeof _bpIaContextoCompacto === 'function')
+    ? _bpIaContextoCompacto(contextoRaw)
+    : contextoRaw;
+  const historicoEnvio = (typeof _bpIaHistoricoCompacto === 'function')
+    ? _bpIaHistoricoCompacto(iaHistorico, 4, 320)
+    : (iaHistorico || []).slice(-4);
 
   _iaBusy = true;
+  window.__bpIaLastMeta = { fonte: null };
+  try { _bpIaSetHeaderStatus('busy', 'A contactar o agente…'); _bpIaSetComposerStatus('A processar…'); } catch (_) {}
   try {
     const resp = await fetch(IA_EDGE_URL, {
       method: 'POST',
@@ -10249,7 +10817,8 @@ async function perguntarIA(pergunta) {
         contexto: contexto,
         plano: plano,
         salaoId: (state.config && state.config.salaoId) || 'local',
-        historico: iaHistorico
+        historico: historicoEnvio,
+        instrucoes: 'Responde em português de Angola, de forma clara e completa. Não cortes frases a meio. Se precisares de ser breve, termina sempre a última frase.'
       })
     });
 
@@ -10272,30 +10841,26 @@ async function perguntarIA(pergunta) {
 
     const resposta = data.resposta || 'Não consegui responder. Tente de novo.';
     iaHistorico.push({ pergunta: q, resposta: resposta, fonte: 'api' });
-    if (iaHistorico.length > 6) iaHistorico = iaHistorico.slice(-6);
+    if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
+    window.__bpIaLastMeta = { fonte: 'api' };
     return resposta;
   } catch (e) {
-    // Offline: tentar local; senão mensagem clara
     try {
       const offlineLocal = responderIALocal(q);
-      if (offlineLocal) return offlineLocal;
+      if (offlineLocal) {
+        window.__bpIaLastMeta = { fonte: 'local' };
+        return offlineLocal;
+      }
     } catch (e2) {}
+    window.__bpIaLastMeta = { fonte: 'error' };
     return 'Sem ligação à internet. Posso responder a perguntas simples sobre vendas, caixa e agenda de hoje com os dados locais — tente reformular (ex.: «quanto faturou hoje?»).';
   } finally {
     _iaBusy = false;
   }
 }
 
-const IA_NOME_KEY = 'bp_ia_nome';
-// CORREÇÃO (relatório Benza AI): nome fixado — deixa de ler o localStorage / permitir renomear.
+/** Nome fixo do assistente (produto). Botão renomear permanece oculto no HTML. */
 function getNomeIA() { return 'Benza'; }
-document.getElementById('ia-renomear-btn').addEventListener('click', () => {
-  const atual = getNomeIA();
-  const novo = prompt('Como queres chamar o teu assistente de IA?', atual === 'Agente IA' ? '' : atual);
-  if (novo && novo.trim()) {
-    localStorage.setItem(IA_NOME_KEY, novo.trim());
-  }
-});
 
 function formatarTempoRelativoIA(ts) {
   if (!ts) return '';
@@ -10308,7 +10873,7 @@ function formatarTempoRelativoIA(ts) {
   if (diffH < 24) return `há ${diffH} ${diffH === 1 ? 'hora' : 'horas'}`;
   return `há ${Math.floor(diffH / 24)} dias`;
 }
-function montarMsgUsuarioIA(pergunta) { return `<div class="ia-msg-user">${escHtml(pergunta)}</div>`; }
+function montarMsgUsuarioIA(pergunta) { return `<div class="ia-msg-user ia-msg-enter">${escHtml(pergunta)}</div>`; }
 
 /**
  * Markdown seguro → HTML (XSS-safe).
@@ -10482,25 +11047,338 @@ function textoPlanoRespostaIA(texto) {
   return s;
 }
 
-function montarMsgBotIA(resposta, ts) {
-  const tempo = formatarTempoRelativoIA(ts);
-  const htmlCorpo = formatarRespostaIA(resposta);
-  const planoAttr = escHtml(textoPlanoRespostaIA(resposta));
-  return `<div class="ia-msg-bot">
-    <div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span>${tempo ? `<span class="ia-msg-bot-tempo">${tempo}</span>` : ''}</div>
-    <div class="ia-msg-bot-corpo" data-plain="${planoAttr}">${htmlCorpo}</div>
-    <div class="ia-msg-bot-acoes">
-      <button type="button" class="ia-feedback-btn" data-fb="util" title="Útil">👍 Útil</button>
-      <button type="button" class="ia-feedback-btn" data-fb="naoajudou" title="Não ajudou">👎 Não ajudou</button>
-      <button type="button" class="ia-feedback-btn ia-copiar-btn" title="Copiar">📋 Copiar</button>
-    </div>
-    <div class="ia-followup-row">
-      <button type="button" class="ia-followup-chip" data-pergunta="Quais clientes estão inativos?">Clientes inativos</button>
-      <button type="button" class="ia-followup-chip" data-pergunta="Como está o fluxo de caixa?">Fluxo de caixa</button>
-      <button type="button" class="ia-followup-chip" data-pergunta="Como está a minha agenda?">Agenda</button>
-    </div>
-  </div>`;
+function _bpIaSvg(name) {
+  var s = {
+    copy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    share: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+    up: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>',
+    down: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>',
+    regen: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>'
+  };
+  return s[name] || '';
 }
+
+/** Follow-ups contextuais — tom de assistente de salão (não robótico). */
+var _bpIaRecentFollowups = [];
+(function _bpIaLoadRecentFollowups() {
+  try {
+    var raw = sessionStorage.getItem('bp_ia_recent_followups');
+    var arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr)) _bpIaRecentFollowups = arr.filter(function (x) { return typeof x === 'string'; }).slice(-36);
+  } catch (_) { _bpIaRecentFollowups = []; }
+})();
+function _bpIaRememberFollowups(items) {
+  try {
+    (items || []).forEach(function (it) {
+      var k1 = typeof _bpIaNormFollowKey === 'function' ? _bpIaNormFollowKey(it && it.label) : String((it && it.label) || '').toLowerCase();
+      var k2 = typeof _bpIaNormFollowKey === 'function' ? _bpIaNormFollowKey(it && it.pergunta) : String((it && it.pergunta) || '').toLowerCase();
+      [k1, k2].forEach(function (k) {
+        if (!k || k.length < 6) return;
+        if (_bpIaRecentFollowups.indexOf(k) === -1) _bpIaRecentFollowups.push(k);
+      });
+    });
+    if (_bpIaRecentFollowups.length > 36) _bpIaRecentFollowups = _bpIaRecentFollowups.slice(-36);
+    try { sessionStorage.setItem('bp_ia_recent_followups', JSON.stringify(_bpIaRecentFollowups)); } catch (_) {}
+  } catch (_) {}
+}
+function _bpIaNormFollowKey(s) {
+  var t = String(s || '').toLowerCase();
+  try {
+    if (typeof t.normalize === 'function') t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch (_) {}
+  return t.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 96);
+}
+function _bpIaTokenOverlap(a, b) {
+  var ta = _bpIaNormFollowKey(a).split(' ').filter(function (t) { return t.length > 3; });
+  var tb = _bpIaNormFollowKey(b).split(' ').filter(function (t) { return t.length > 3; });
+  if (ta.length < 2 || tb.length < 2) return 0;
+  var set = {};
+  for (var i = 0; i < tb.length; i++) set[tb[i]] = 1;
+  var hit = 0;
+  for (var j = 0; j < ta.length; j++) if (set[ta[j]]) hit++;
+  return hit / Math.max(ta.length, tb.length);
+}
+function _bpIaIsRecentFollowup(label, perguntaFull) {
+  var a = _bpIaNormFollowKey(label);
+  var b = _bpIaNormFollowKey(perguntaFull);
+  /* só compara com as 12 mais recentes — evita bloqueio excessivo */
+  var recent = _bpIaRecentFollowups.slice(-12);
+  for (var i = 0; i < recent.length; i++) {
+    var r = recent[i];
+    if (!r || r.length < 8) continue;
+    if (a && a === r) return true;
+    if (b && b === r) return true;
+    /* substring só se ambos longos e um contém o outro quase por completo */
+    if (a && a.length > 20 && r.length > 20 && (a.indexOf(r) !== -1 || r.indexOf(a) !== -1)) return true;
+    if (b && b.length > 20 && r.length > 20 && (b.indexOf(r) !== -1 || r.indexOf(b) !== -1)) return true;
+    if (a && _bpIaTokenOverlap(a, r) >= 0.72) return true;
+    if (b && _bpIaTokenOverlap(b, r) >= 0.72) return true;
+  }
+  return false;
+}
+function gerarFollowupsEstrategicosIA(pergunta, resposta) {
+  var qRaw = String(pergunta || '').trim();
+  var rRaw = String(resposta || '').trim();
+  var q = (typeof normalizarPerguntaIA === 'function' ? normalizarPerguntaIA(pergunta) : qRaw.toLowerCase());
+  var r = rRaw.toLowerCase();
+  var out = [];
+  function add(label, perguntaFull) {
+    if (out.length >= 3) return;
+    label = String(label || '').trim();
+    perguntaFull = String(perguntaFull || '').trim();
+    if (!label || !perguntaFull) return;
+    if (label.length > 72) label = label.slice(0, 69) + '…';
+    /* evitar eco da pergunta do utilizador */
+    var qn = qRaw.toLowerCase();
+    if (qn && (label.toLowerCase() === qn || perguntaFull.toLowerCase() === qn)) return;
+    if (_bpIaIsRecentFollowup(label, perguntaFull)) return;
+    for (var i = 0; i < out.length; i++) {
+      if (out[i].label === label || out[i].pergunta === perguntaFull) return;
+      /* similaridade simples */
+      if (_bpIaTokenOverlap(out[i].label, label) >= 0.72) return;
+    }
+    out.push({ label: label, pergunta: perguntaFull });
+  }
+
+  /* 1) Extrair perguntas já sugeridas no texto da IA */
+  var lines = rRaw.split(/[\n\r]+/);
+  for (var li = 0; li < lines.length && out.length < 3; li++) {
+    var line = lines[li].replace(/^\s*[-*•\d.)]+\s*/, '').trim();
+    if (line.length < 12 || line.length > 120) continue;
+    if (/\?\s*$/.test(line) || /^(como|quais|quero|vamos|posso|devemos|suger)/i.test(line)) {
+      var lab = line.replace(/\?+$/, '?');
+      add(lab, lab);
+    }
+  }
+
+  /* 2) Aprofundar a partir da pergunta do utilizador + temas da resposta */
+  if (qRaw && out.length < 3) {
+    if (/porque|porquê|motivo|razão/.test(q)) {
+      add('O que fazer a seguir?', 'Com base nisso, que 3 acções práticas devo tomar esta semana?');
+    } else if (/como|estratég|melhorar|aumentar|subir/.test(q)) {
+      add('Detalha o primeiro passo', 'Detalha o primeiro passo prático, com exemplo para o meu salão.');
+    } else if (/quem|qual|quais/.test(q)) {
+      add('Prioriza a lista', 'Ordena por impacto no negócio e diz por onde começar.');
+    } else {
+      add('Aprofunda este ponto', 'Aprofunda a resposta anterior com números e próximos passos concretos.');
+    }
+  }
+
+  /* 3) Âncoras contextuais (só se o tema aparecer na pergunta OU na resposta) */
+  var ctx = q + ' ' + r;
+  if (/cliente|vip|inactiv|inativ|ausente|regress/.test(ctx)) {
+    add('Quem contactar primeiro?', 'Com base na análise, quais clientes devo contactar primeiro e com que mensagem?');
+  }
+  if (/receita|fatur|vend|ticket|kz|kwanza/.test(ctx)) {
+    add('Comparar com o período anterior', 'Compara estes números com o período anterior e destaca o que mudou.');
+  }
+  if (/agenda|marcac|horário|horario|amanhã|amanha/.test(ctx)) {
+    add('Otimizar a agenda', 'Como otimizar a agenda dos próximos dias com base no que acabaste de dizer?');
+  }
+  if (/caixa|despes|fluxo|saldo/.test(ctx)) {
+    add('Onde cortar sem risco?', 'Que despesas posso ajustar sem prejudicar a experiência do cliente?');
+  }
+  if (/serviço|servico|profissional|equipa|comiss/.test(ctx)) {
+    add('Plano para a equipa', 'Transforma isto num plano simples para a equipa nos próximos 7 dias.');
+  }
+
+  /* 4) Fallback mínimo — só se ainda vazio (evita lista genérica sempre igual) */
+  if (!out.length) {
+    if (qRaw) {
+      add('Resumo em 3 pontos', 'Resume a resposta anterior em 3 pontos acionáveis.');
+      add('Próximo passo', 'Qual deve ser o meu próximo passo concreto hoje?');
+    } else {
+      add('Ponto de situação', 'Faz um ponto de situação rápido do salão hoje.');
+    }
+  }
+  var final = out.slice(0, 3);
+  if (!final.length && qRaw) {
+    final = [
+      { label: 'Próximo passo concreto', pergunta: 'Qual deve ser o meu próximo passo concreto com base nisto?' },
+      { label: 'Resumo em 3 pontos', pergunta: 'Resume a resposta anterior em 3 pontos acionáveis.' }
+    ];
+  }
+  _bpIaRememberFollowups(final);
+  return final.slice(0, 3);
+}
+
+
+/** Fases de thinking + streaming progressivo (UX estilo Grok / ChatGPT). */
+var _bpIaStreamAbort = null;
+function _bpIaSvgBulb() {
+  return '<svg class="ia-think-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>';
+}
+function _bpIaSvgSpark() {
+  return '<svg class="ia-think-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/><path d="M5.6 5.6l2.1 2.1"/><path d="M16.3 16.3l2.1 2.1"/><path d="M5.6 18.4l2.1-2.1"/><path d="M16.3 7.7l2.1-2.1"/></svg>';
+}
+function _bpIaSetThinkingPhase(el, phase) {
+  if (!el) return;
+  if (phase === 1) {
+    el.innerHTML =
+      '<div class="ia-think-row">' + _bpIaSvgBulb() +
+      '<span class="ia-think-label">A analisar o contexto…</span></div>';
+  } else if (phase === 2) {
+    el.innerHTML =
+      '<div class="ia-think-row">' + _bpIaSvgSpark() +
+      '<span class="ia-think-label">A estruturar a resposta…</span></div>';
+  }
+}
+function _bpIaSleep(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+/** Revela texto progressivamente (palavras) com cursor — não depende de SSE. */
+async function _bpIaStreamInto(elCorpo, textoPlano, opts) {
+  opts = opts || {};
+  var reduced = false;
+  try {
+    reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_) {}
+  if (reduced || !textoPlano) {
+    elCorpo.innerHTML = typeof formatarRespostaIA === 'function' ? formatarRespostaIA(textoPlano) : String(textoPlano || '');
+    return;
+  }
+  var words = String(textoPlano).split(/(\s+)/);
+  var acc = '';
+  var i = 0;
+  var baseDelay = opts.baseDelay != null ? opts.baseDelay : 28;
+  /* Respostas longas: um pouco mais rápido para não cansar */
+  if (words.length > 120) baseDelay = 16;
+  else if (words.length > 60) baseDelay = 22;
+  elCorpo.innerHTML = '<span class="ia-stream-text"></span><span class="ia-stream-caret" aria-hidden="true"></span>';
+  var textEl = elCorpo.querySelector('.ia-stream-text');
+  var caret = elCorpo.querySelector('.ia-stream-caret');
+  while (i < words.length) {
+    if (_bpIaStreamAbort) break;
+    acc += words[i];
+    i++;
+    /* actualizar em chunks de 1–3 tokens */
+    if (i % 1 === 0) {
+      textEl.textContent = acc;
+      try {
+        var chat = document.getElementById('ia-chat');
+        if (chat) chat.scrollTop = chat.scrollHeight;
+      } catch (_) {}
+      var pause = baseDelay;
+      if (/[\.\!\?…]$/.test(words[i - 1])) pause += 120;
+      else if (/[,;:]$/.test(words[i - 1])) pause += 50;
+      await _bpIaSleep(pause);
+    }
+  }
+  /* Render final com markdown completo */
+  elCorpo.innerHTML = typeof formatarRespostaIA === 'function' ? formatarRespostaIA(textoPlano) : String(textoPlano || '');
+  elCorpo.setAttribute('data-plain', textoPlano);
+}
+
+
+function _bpIaEnsureScrollBtn() {
+  var shell = document.getElementById('ia-chat-container');
+  var chat = document.getElementById('ia-chat');
+  if (!shell || !chat) return null;
+  var btn = document.getElementById('ia-scroll-latest');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'ia-scroll-latest';
+    btn.className = 'ia-scroll-latest';
+    btn.setAttribute('aria-label', 'Ir para a última mensagem');
+    btn.title = 'Última mensagem';
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
+    btn.hidden = true;
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      _bpIaScrollToLatest(true);
+    });
+    if (getComputedStyle(shell).position === 'static') shell.style.position = 'relative';
+    shell.appendChild(btn);
+    if (!chat.dataset.bpScrollBound) {
+      chat.dataset.bpScrollBound = '1';
+      chat.addEventListener('scroll', function () { _bpIaUpdateScrollBtn(); }, { passive: true });
+    }
+  }
+  return btn;
+}
+function _bpIaScrollToLatest(smooth) {
+  var chat = document.getElementById('ia-chat');
+  if (!chat) return;
+  try {
+    chat.scrollTo({ top: chat.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  } catch (_) {
+    chat.scrollTop = chat.scrollHeight;
+  }
+  setTimeout(_bpIaUpdateScrollBtn, smooth ? 320 : 40);
+}
+function _bpIaUpdateScrollBtn() {
+  var chat = document.getElementById('ia-chat');
+  var btn = _bpIaEnsureScrollBtn();
+  if (!chat || !btn) return;
+  var distance = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
+  var hasOverflow = chat.scrollHeight > chat.clientHeight + 12;
+  var show = hasOverflow && distance > 36;
+  btn.hidden = !show;
+  btn.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+function montarMsgBotIA(resposta, ts, perguntaOrig, opts) {
+  opts = opts || {};
+  /* Acções + follow-ups apenas na última resposta (opts.toolbar / opts.followups) */
+  var showFollow = opts.followups === true;
+  var showToolbar = opts.toolbar === true;
+  var fonte = opts.fonte || null;
+  var tempo = formatarTempoRelativoIA(ts);
+  var htmlCorpo = formatarRespostaIA(resposta);
+  var planoAttr = escHtml(textoPlanoRespostaIA(resposta));
+  var arrowSvg = '<svg class="ia-followup-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>';
+  var chips = '';
+  if (showFollow) {
+    var follows = gerarFollowupsEstrategicosIA(perguntaOrig || '', resposta);
+    chips = follows.map(function (f) {
+      return '<button type="button" class="ia-followup-chip" data-pergunta="' +
+        String(f.pergunta).replace(/"/g, '&quot;') + '">' +
+        arrowSvg + '<span class="ia-followup-label">' + escHtml(f.label) + '</span></button>';
+    }).join('');
+  }
+
+  var pergAttr = escHtml(String(perguntaOrig || ''));
+  var toolbarHtml = '';
+  if (showToolbar) {
+    toolbarHtml =
+      '<div class="ia-msg-toolbar" role="group" aria-label="Acções da resposta">' +
+        '<button type="button" class="ia-tool-btn ia-copiar-btn" title="Copiar" aria-label="Copiar">' + _bpIaSvg('copy') + '</button>' +
+        '<button type="button" class="ia-tool-btn ia-partilhar-btn" title="Partilhar" aria-label="Partilhar">' + _bpIaSvg('share') + '</button>' +
+        '<button type="button" class="ia-tool-btn ia-feedback-btn" data-fb="util" title="Gostei" aria-label="Gostei">' + _bpIaSvg('up') + '</button>' +
+        '<button type="button" class="ia-tool-btn ia-feedback-btn" data-fb="naoajudou" title="Não gostei" aria-label="Não gostei">' + _bpIaSvg('down') + '</button>' +
+        '<button type="button" class="ia-tool-btn ia-regen-btn" title="Gerar novamente" aria-label="Gerar novamente">' + _bpIaSvg('regen') + '</button>' +
+      '</div>';
+  }
+  return (
+    '<div class="ia-msg-block ia-msg-enter" data-pergunta="' + pergAttr + '">' +
+      '<div class="ia-msg-bot">' +
+        '<div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span>' +
+          (tempo ? '<span class="ia-msg-bot-tempo">' + tempo + '</span>' : '') +
+          (fonte === 'local' ? '<span class="ia-msg-bot-fonte" title="Calculado com dados locais do salão">Local</span>' : '') +
+        '</div>' +
+        '<div class="ia-msg-bot-corpo" data-plain="' + planoAttr + '">' + htmlCorpo + '</div>' +
+      '</div>' +
+      toolbarHtml +
+      (chips ? '<div class="ia-followup-row">' + chips + '</div>' : '') +
+    '</div>'
+  );
+}
+
+/** Remove toolbar e follow-ups de mensagens anteriores (só a última deve tê-los). */
+function _bpIaStripNonLastActions(chatEl) {
+  if (!chatEl) return;
+  var blocks = chatEl.querySelectorAll('.ia-msg-block');
+  for (var i = 0; i < blocks.length; i++) {
+    var tb = blocks[i].querySelector('.ia-msg-toolbar');
+    if (tb) tb.remove();
+    var fr = blocks[i].querySelector('.ia-followup-row');
+    if (fr) fr.remove();
+  }
+}
+
 function atualizarEstadoVazioIA() {
   const vazio = document.getElementById('ia-chat-empty');
   const chat = document.getElementById('ia-chat');
@@ -10510,23 +11388,101 @@ function atualizarEstadoVazioIA() {
   }
   if (vazio && chat) vazio.style.display = chat.children.length > 0 ? 'none' : '';
 }
-const IA_HIST_KEY = () => 'bp_ia_chat_' + (state.config.salaoId || 'local');
+const IA_HIST_KEY = function () {
+  var sid = (state && state.config && state.config.salaoId) ? state.config.salaoId : 'local';
+  return 'bp_ia_chat_' + sid;
+};
+const IA_HIST_MAX = 40;
+
+function _bpIaNormalizeHist(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(function (t) {
+    return t && (t.pergunta || t.resposta);
+  }).slice(-IA_HIST_MAX);
+}
+
+function _bpIaRenderHistNoChat(list) {
+  var chat = document.getElementById('ia-chat');
+  if (!chat) return;
+  var guardado = _bpIaNormalizeHist(list);
+  if (!guardado.length) {
+    chat.innerHTML = '';
+    atualizarEstadoVazioIA();
+    return;
+  }
+  chat.innerHTML = guardado.map(function (item, idx) {
+    var last = idx === guardado.length - 1;
+    return montarMsgUsuarioIA(item.pergunta) +
+      montarMsgBotIA(item.resposta, item.ts, item.pergunta, { followups: last, toolbar: last, fonte: item.fonte || null });
+  }).join('');
+  chat.scrollTop = chat.scrollHeight;
+  atualizarEstadoVazioIA();
+  try { _bpIaEnsureScrollBtn(); _bpIaUpdateScrollBtn(); } catch (_) {}
+}
+
 function carregarHistoricoIA() {
   try {
-    const guardado = JSON.parse(localStorage.getItem(IA_HIST_KEY()) || '[]');
-    iaHistorico = guardado.slice(-6);
-    const chat = document.getElementById('ia-chat');
-    if (guardado.length > 0 && chat) {
-      chat.innerHTML = guardado.map(t => montarMsgUsuarioIA(t.pergunta) + montarMsgBotIA(t.resposta, t.ts)).join('');
-      chat.scrollTop = chat.scrollHeight;
-    }
-    atualizarEstadoVazioIA();
-  } catch (e) { iaHistorico = []; }
+    var fromLs = [];
+    try { fromLs = JSON.parse(localStorage.getItem(IA_HIST_KEY()) || '[]'); } catch (e1) { fromLs = []; }
+    iaHistorico = _bpIaNormalizeHist(fromLs);
+    _bpIaRenderHistNoChat(iaHistorico);
+  } catch (e) {
+    iaHistorico = [];
+  }
+  /* IndexedDB (sobrevive a limpezas parciais / reabre com dados locais) */
+  if (typeof dbGetAll === 'function') {
+    Promise.resolve(dbGetAll('config')).then(function (rows) {
+      try {
+        var row = (rows || []).find(function (c) {
+          return c && (c.id === 'ia_chat_hist' || c.key === 'ia_chat_hist');
+        });
+        var fromDb = row && row.value != null ? row.value : null;
+        if (typeof fromDb === 'string') {
+          try { fromDb = JSON.parse(fromDb); } catch (e2) { fromDb = null; }
+        }
+        fromDb = _bpIaNormalizeHist(fromDb);
+        if (fromDb.length >= iaHistorico.length) {
+          iaHistorico = fromDb;
+          try { localStorage.setItem(IA_HIST_KEY(), JSON.stringify(iaHistorico)); } catch (e3) {}
+          _bpIaRenderHistNoChat(iaHistorico);
+        } else if (iaHistorico.length) {
+          /* LS mais completo → gravar no IDB */
+          guardarHistoricoIA();
+        }
+      } catch (e4) {}
+    }).catch(function () {});
+  }
 }
+
 function guardarHistoricoIA() {
-  try { localStorage.setItem(IA_HIST_KEY(), JSON.stringify(iaHistorico)); } catch (e) {}
+  try {
+    iaHistorico = _bpIaNormalizeHist(iaHistorico);
+    localStorage.setItem(IA_HIST_KEY(), JSON.stringify(iaHistorico));
+  } catch (e) {}
+  try {
+    if (typeof dbPut === 'function') {
+      var payload = {
+        id: 'ia_chat_hist',
+        key: 'ia_chat_hist',
+        value: iaHistorico,
+        updated_at: new Date().toISOString()
+      };
+      if (state && state.config && state.config.salaoId) payload.salao_id = state.config.salaoId;
+      Promise.resolve(dbPut('config', payload)).catch(function () {});
+    }
+  } catch (e5) {}
 }
-carregarHistoricoIA();
+
+/* Carregar quando DOM e estado estiverem prontos */
+function _bpIaBootHist() {
+  carregarHistoricoIA();
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(_bpIaBootHist, 80); });
+} else {
+  setTimeout(_bpIaBootHist, 80);
+}
+setTimeout(_bpIaBootHist, 1200);
 
 function bpIaAutosizeInput() {
   const input = document.getElementById('ia-input');
@@ -10581,48 +11537,140 @@ document.getElementById('ia-enviar')?.addEventListener('click', async () => {
   }
   chat.innerHTML += montarMsgUsuarioIA(pergunta);
   atualizarEstadoVazioIA();
-  const pensando = document.createElement('div');
-  pensando.className = 'ia-msg-bot';
-  pensando.id = 'ia-pensando';
-  pensando.innerHTML = `<div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span></div><span class="ia-dots">Benza está a analisar<span>.</span><span>.</span><span>.</span></span>`;
-  chat.appendChild(pensando);
-  chat.scrollTop = chat.scrollHeight;
+  window.__bpIaLastMeta = { fonte: null };
   if (input) {
     input.value = '';
     bpIaAutosizeInput();
   }
   if (btn) btn.disabled = true;
+  _bpIaStreamAbort = false;
+
+  /* Placeholder de progresso — só se for preciso esperar (API). Local resolve rápido. */
+  const pensando = document.createElement('div');
+  pensando.className = 'ia-msg-bot ia-msg-thinking';
+  pensando.id = 'ia-pensando';
+  pensando.setAttribute('aria-live', 'polite');
+  pensando.innerHTML = '<div class="ia-msg-bot-header"><span class="ia-msg-bot-nome">Benza</span></div><div class="ia-think-body"></div>';
+  chat.appendChild(pensando);
+  var thinkBody = pensando.querySelector('.ia-think-body');
+  try { _bpIaSetThinkingPhase(thinkBody, 1); } catch (_) {}
+  chat.scrollTop = chat.scrollHeight;
+
+  var phaseTimer = setTimeout(function () {
+    try {
+      if (document.getElementById('ia-pensando') && !(window.__bpIaLastMeta && window.__bpIaLastMeta.fonte === 'local')) {
+        _bpIaSetThinkingPhase(thinkBody, 2);
+      }
+    } catch (_) {}
+  }, 700);
+
   let resposta = null;
   try {
+    try { _bpIaSetComposerStatus('A processar…'); } catch (_) {}
     resposta = await perguntarIA(pergunta);
   } finally {
+    clearTimeout(phaseTimer);
     if (btn) {
       btn.disabled = false;
       setTimeout(function () {
         btn.classList.remove('is-sending');
         bpIaSyncSendState();
-      }, 560);
+      }, 200);
     }
   }
-  document.getElementById('ia-pensando')?.remove();
+  try { document.getElementById('ia-pensando') && document.getElementById('ia-pensando').remove(); } catch (_) {}
+
+  var metaFonte = (window.__bpIaLastMeta && window.__bpIaLastMeta.fonte) || null;
+
   if (resposta) {
     const ts = Date.now();
-    chat.innerHTML += montarMsgBotIA(resposta, ts);
-    chat.scrollTop = chat.scrollHeight;
-    if (iaHistorico.length > 0) iaHistorico[iaHistorico.length - 1].ts = ts;
-    guardarHistoricoIA();
+    try { _bpIaStripNonLastActions(chat); } catch (_) {}
+    var isLocal = metaFonte === 'local';
+    try {
+      if (isLocal) {
+        /* Resposta local: mostrar de imediato, sem teatro de stream */
+        chat.insertAdjacentHTML('beforeend', montarMsgBotIA(resposta, ts, pergunta, {
+          followups: true, toolbar: true, fonte: 'local'
+        }));
+        try { _bpIaSetHeaderStatus('local'); _bpIaSetComposerStatus(_bpIaIsOnline() ? 'IA pronta' : 'Modo local'); } catch (_) {}
+      } else {
+        var blockHtml = montarMsgBotIA(resposta, ts, pergunta, { followups: false, toolbar: false, fonte: metaFonte });
+        chat.insertAdjacentHTML('beforeend', blockHtml);
+        var blocks = chat.querySelectorAll('.ia-msg-block');
+        var lastBlock = blocks.length ? blocks[blocks.length - 1] : null;
+        var corpo = lastBlock && lastBlock.querySelector('.ia-msg-bot-corpo');
+        if (corpo) {
+          var plano = corpo.getAttribute('data-plain') || String(resposta);
+          try {
+            await _bpIaStreamInto(corpo, plano, {});
+          } catch (streamErr) {
+            try {
+              corpo.innerHTML = typeof formatarRespostaIA === 'function' ? formatarRespostaIA(plano) : plano;
+              corpo.setAttribute('data-plain', plano);
+            } catch (_) {}
+          }
+        }
+        if (lastBlock && lastBlock.parentNode) {
+          var full = montarMsgBotIA(resposta, ts, pergunta, { followups: true, toolbar: true, fonte: metaFonte });
+          var tmp = document.createElement('div');
+          tmp.innerHTML = full;
+          var rich = tmp.firstElementChild;
+          if (rich) lastBlock.parentNode.replaceChild(rich, lastBlock);
+        }
+        try {
+          if (metaFonte === 'error') _bpIaSetHeaderStatus('error');
+          else if (_bpIaIsOnline()) { _bpIaSetHeaderStatus('ok'); _bpIaSetComposerStatus('IA pronta'); }
+          else { _bpIaSetHeaderStatus('offline'); _bpIaSetComposerStatus('Modo local'); }
+        } catch (_) {}
+      }
+    } catch (renderErr) {
+      try {
+        chat.insertAdjacentHTML('beforeend', montarMsgBotIA(resposta, ts, pergunta, {
+          followups: true, toolbar: true, fonte: metaFonte
+        }));
+      } catch (_) {}
+    }
+    try {
+      chat.scrollTop = chat.scrollHeight;
+      _bpIaEnsureScrollBtn();
+      _bpIaUpdateScrollBtn();
+    } catch (_) {}
+    try {
+      if (iaHistorico.length > 0) iaHistorico[iaHistorico.length - 1].ts = ts;
+      guardarHistoricoIA();
+    } catch (_) {}
+  } else {
+    try { atualizarIAOffline(); } catch (_) {}
   }
   actualizarContadorIA();
   bpIaSyncSendState();
 });
 
 bpIaBindComposer();
-document.addEventListener('DOMContentLoaded', bpIaBindComposer);
+document.addEventListener('DOMContentLoaded', function () {
+  bpIaBindComposer();
+  try { _bpIaEnsureScrollBtn(); } catch (_) {}
+  try { actualizarContadorIA(); } catch (_) {}
+  try { atualizarIAOffline(); } catch (_) {}
+});
 
 // Sugestões rápidas e chips de continuação (delegação de eventos — cobre também os que são criados depois de cada resposta)
 document.addEventListener('click', (e) => {
   const card = e.target.closest('.ia-sugestao-card, .ia-followup-chip');
   if (card && card.dataset.pergunta) {
+    if (card.dataset.pergunta === '__bp_export_ics__') {
+      try {
+        if (window.BPOps && typeof window.BPOps.downloadIcs === 'function') {
+          window.BPOps.downloadIcs();
+          if (typeof toast === 'function') toast('Agenda .ics descarregada', 'success');
+        } else if (typeof toast === 'function') {
+          toast('Exportação de calendário indisponível', 'warning');
+        }
+      } catch (err) {
+        if (typeof toast === 'function') toast('Não foi possível exportar o calendário', 'error');
+      }
+      return;
+    }
     const input = document.getElementById('ia-input');
     if (input) {
       input.value = card.dataset.pergunta;
@@ -10631,23 +11679,79 @@ document.addEventListener('click', (e) => {
       document.getElementById('ia-enviar').click();
     }
   }
-  const fb = e.target.closest('.ia-feedback-btn');
-  if (fb) {
-    if (fb.classList.contains('ia-copiar-btn')) {
-      const corpo = fb.closest('.ia-msg-bot')?.querySelector('.ia-msg-bot-corpo');
-      const texto = (corpo && (corpo.getAttribute('data-plain') || corpo.innerText)) || '';
+  const tool = e.target.closest('.ia-tool-btn, .ia-feedback-btn');
+  if (tool) {
+    const block = tool.closest('.ia-msg-block') || tool.closest('.ia-msg-bot');
+    const corpo = block && block.querySelector('.ia-msg-bot-corpo');
+    const texto = (corpo && (corpo.getAttribute('data-plain') || corpo.innerText)) || '';
+    if (tool.classList.contains('ia-copiar-btn')) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(texto).then(function () { toast('Texto copiado', 'success'); }).catch(function () {
-          toast('Não foi possível copiar', 'error');
+        navigator.clipboard.writeText(texto).then(function () {
+          if (typeof toast === 'function') toast('Texto copiado', 'success');
+        }).catch(function () {
+          if (typeof toast === 'function') toast('Não foi possível copiar', 'error');
         });
-      } else {
+      } else if (typeof toast === 'function') {
         toast('Cópia não suportada neste dispositivo', 'warning');
       }
-    } else {
-      toast('Feedback registado', 'success');
-      fb.parentElement.querySelectorAll('.ia-feedback-btn').forEach(b => b.disabled = true);
-      fb.style.opacity = '1';
-      fb.style.fontWeight = '700';
+      return;
+    }
+    if (tool.classList.contains('ia-partilhar-btn')) {
+      if (navigator.share) {
+        navigator.share({ text: texto }).catch(function () {});
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(function () {
+          if (typeof toast === 'function') toast('Texto copiado para partilhar', 'success');
+        }).catch(function () {});
+      }
+      return;
+    }
+    if (tool.classList.contains('ia-regen-btn')) {
+      var perg = (block && block.getAttribute('data-pergunta')) || '';
+      if (!perg) {
+        if (typeof toast === 'function') toast('Não foi possível repetir esta pergunta', 'warning');
+        return;
+      }
+      /* Regenerar reenvia a pergunta (pode consumir cota se for à API). */
+      var input = document.getElementById('ia-input');
+      var send = document.getElementById('ia-enviar');
+      if (input && send) {
+        input.value = perg;
+        if (typeof bpIaAutosizeInput === 'function') bpIaAutosizeInput();
+        if (typeof bpIaSyncSendState === 'function') bpIaSyncSendState();
+        send.click();
+      }
+      return;
+    }
+    if (tool.getAttribute('data-fb')) {
+      var fb = tool.getAttribute('data-fb');
+      try {
+        var key = 'bp_ia_feedback';
+        var list = [];
+        try { list = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) { list = []; }
+        if (!Array.isArray(list)) list = [];
+        var plain = '';
+        try {
+          var c = block && block.querySelector('.ia-msg-bot-corpo');
+          plain = (c && (c.getAttribute('data-plain') || c.innerText)) || '';
+        } catch (_) {}
+        list.push({
+          fb: fb,
+          ts: Date.now(),
+          pergunta: (block && block.getAttribute('data-pergunta')) || '',
+          amostra: String(plain).slice(0, 240),
+          salao: (state && state.config && state.config.salaoId) || 'local'
+        });
+        if (list.length > 80) list = list.slice(-80);
+        localStorage.setItem(key, JSON.stringify(list));
+      } catch (_) {}
+      if (typeof toast === 'function') toast('Feedback guardado neste dispositivo', 'success');
+      const bar = tool.parentElement;
+      if (bar) {
+        bar.querySelectorAll('[data-fb]').forEach(function (b) { b.disabled = true; b.classList.remove('is-on'); });
+      }
+      tool.classList.add('is-on');
+      tool.disabled = true;
     }
   }
 });
@@ -12085,7 +13189,9 @@ window.renderBarraMeta = renderBarraMeta;
     ];
     (state.agendamentos || []).forEach(function (a) {
       if (!a.data || a.data < start || a.data > end) return;
-      var st = String(a.status || a.estado || "").toLowerCase();
+      var st = (typeof _statusAg === "function")
+        ? _statusAg(a)
+        : String(a.status || a.estado || "").toLowerCase();
       if (st === "cancelado") return;
       var hora = (a.hora || "09:00").replace(":", "");
       if (hora.length === 3) hora = "0" + hora;

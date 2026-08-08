@@ -409,7 +409,9 @@
     ];
     (state.agendamentos || []).forEach(function (a) {
       if (!a.data || a.data < start || a.data > end) return;
-      var st = String(a.status || a.estado || "").toLowerCase();
+      var st = (typeof _statusAg === "function")
+        ? _statusAg(a)
+        : String(a.status || a.estado || "").toLowerCase();
       if (st === "cancelado") return;
       var hora = (a.hora || "09:00").replace(":", "");
       if (hora.length === 3) hora = "0" + hora;

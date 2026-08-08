@@ -172,21 +172,75 @@
 .ia-sug-gold { background: var(--gold-50); color: var(--gold-dark); }
 .ia-sug-graphite { background: var(--neutral-75); color: var(--text-secondary); }
 
-.ia-msg-bot-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+.ia-msg-block { margin: 0 0 14px; }
+.ia-msg-bot {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+.ia-msg-bot-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; }
 .ia-msg-bot-nome { font-family: var(--font-serif); font-size: .82rem; font-weight: 700; color: var(--text-primary); }
 .ia-msg-bot-tempo { font-size: .62rem; color: var(--text-muted); }
-.ia-msg-bot-corpo { font-size: .85rem; color: var(--text-primary); line-height: 1.5; white-space: pre-line; }
-.ia-msg-bot-acoes { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.ia-feedback-btn {
+.ia-msg-bot-corpo {
+  font-size: .9rem;
+  color: var(--text-primary);
+  line-height: 1.55;
+  white-space: pre-line;
+}
+/* Toolbar tipo chat profissional — abaixo da mensagem, só ícones */
+.ia-msg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 0;
+}
+.ia-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.ia-tool-btn:hover {
+  background: var(--bg-soft, #f3f2ef);
+  color: var(--text-primary);
+}
+.ia-tool-btn.is-on {
+  color: var(--gold-dark, #A7872B);
+  background: var(--gold-50, #FBF6E9);
+}
+.ia-tool-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ia-msg-bot-acoes { display: none !important; } /* legado */
+.ia-feedback-btn { /* legado — preferir .ia-tool-btn */
   font-size: .65rem; padding: 4px 8px; background: var(--card-white); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-full); color: var(--text-secondary); cursor: pointer; transition: var(--transition);
+  border-radius: var(--radius-full); color: var(--text-secondary); cursor: pointer;
 }
-.ia-feedback-btn:disabled { opacity: .55; cursor: default; }
-.ia-followup-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border-soft); }
+.ia-followup-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 0; border-top: none; }
 .ia-followup-chip {
-  font-size: .68rem; padding: 5px 10px; background: var(--card-white); border: 1px solid var(--gold-100);
-  border-radius: var(--radius-full); color: var(--gold-dark); font-weight: 600; cursor: pointer; transition: var(--transition);
+  font-size: .72rem;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--card-white, #fff);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-weight: 500;
+  line-height: 1.2;
+  box-shadow: var(--shadow-rest, 0 1px 2px rgba(0,0,0,.04));
 }
+.ia-followup-chip:active { background: var(--bg-soft); transform: scale(0.98); }
 .ia-followup-chip:active { background: var(--gold-50); }
 
 .ia-insight-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; font-size: .78rem; color: var(--text-primary); line-height: 1.4; border-bottom: 1px solid var(--bg-soft); }
@@ -291,7 +345,7 @@
   position: relative;
   min-height: 180px;
   border-radius: 12px;
-  overflow: hidden;
+  overflow: visible;
 }
 .ia-bg-art {
   position: absolute;
@@ -451,4 +505,813 @@
 @media (prefers-reduced-motion: reduce) {
   .ia-send-btn.is-idle { animation: none; }
   .ia-send-btn.is-sending { transition-duration: .2s; }
+}
+
+
+/* === BP IA chat clean toolbar (2026-08-07) === */
+.ia-msg-block { margin: 0 0 16px; }
+#ia-chat .ia-msg-bot {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+}
+#ia-chat .ia-msg-bot-corpo {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+#ia-chat .ia-msg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+}
+#ia-chat .ia-tool-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+#ia-chat .ia-tool-btn:hover {
+  background: var(--bg-soft);
+  color: var(--text-primary);
+}
+#ia-chat .ia-tool-btn.is-on {
+  color: var(--gold-dark);
+  background: var(--gold-50);
+}
+#ia-chat .ia-followup-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  border-top: none;
+  padding-top: 0;
+}
+#ia-chat .ia-followup-chip {
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--card-white);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+#ia-chat .ia-msg-bot-acoes { display: none !important; }
+
+
+/* === BP IA anti-truncate + soft chat (2026-08-07) === */
+#tab-ia .card {
+  overflow: visible;
+}
+#ia-chat-container.ia-chat-shell {
+  overflow: visible;
+  min-height: 200px;
+}
+#ia-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: none;
+  overflow: visible;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+#ia-chat .ia-msg-block {
+  max-width: 100%;
+  overflow: visible;
+}
+#ia-chat .ia-msg-bot,
+#ia-chat .ia-msg-bot-corpo {
+  max-width: 100%;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+#ia-chat .ia-msg-bot-corpo .ia-md-p,
+#ia-chat .ia-msg-bot-corpo .ia-md-h,
+#ia-chat .ia-msg-bot-corpo li {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  word-break: break-word;
+}
+#ia-chat .ia-msg-user {
+  max-width: 92%;
+  overflow: visible;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* Modal/chat mais suave */
+#tab-ia .card {
+  border-radius: 14px;
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-rest, 0 1px 3px rgba(23,20,15,.06));
+}
+#tab-ia .ia-composer {
+  border-radius: 18px;
+  border-color: var(--border-soft);
+  background: var(--warm-ivory, #F9F7F5);
+}
+
+
+/* === BP IA followup arrow + hist UI (2026-08-07) === */
+#ia-chat .ia-msg-bot-corpo {
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+#ia-chat .ia-msg-bot-nome {
+  font-size: 0.78rem;
+}
+#ia-chat .ia-msg-toolbar {
+  margin-top: 4px;
+}
+#ia-chat .ia-tool-btn {
+  width: 30px;
+  height: 30px;
+  color: #6b7280;
+}
+#ia-chat .ia-followup-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 2px;
+  border: none;
+}
+#ia-chat .ia-followup-chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #5b6570;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+#ia-chat .ia-followup-chip:active {
+  background: transparent !important;
+  transform: none;
+  color: var(--text-primary);
+}
+#ia-chat .ia-followup-arrow {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #8b95a1;
+  transform: scaleX(-1);
+}
+#ia-chat .ia-followup-label {
+  flex: 1;
+  min-width: 0;
+}
+/* Sugestões rápidas do topo: manter discretas; follow-ups do chat são o foco */
+#tab-ia .ia-sugestoes-grid {
+  opacity: 0.92;
+}
+
+
+/* === BP IA modal + toolbar Grok-like (2026-08-07) === */
+#ia-chat .ia-msg-block {
+  margin: 0 0 18px;
+  max-width: 100%;
+}
+/* Modal profissional da resposta */
+#ia-chat .ia-msg-bot {
+  background: var(--card-white, #fff) !important;
+  border: 1px solid var(--border-soft, #e8e4df) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 1px 3px rgba(23, 20, 15, 0.05), 0 4px 14px rgba(23, 20, 15, 0.04) !important;
+  padding: 12px 14px 14px !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+}
+#ia-chat .ia-msg-bot-header {
+  margin-bottom: 8px;
+}
+#ia-chat .ia-msg-bot-nome {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+#ia-chat .ia-msg-bot-tempo {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+#ia-chat .ia-msg-bot-corpo {
+  font-size: 0.875rem !important;
+  line-height: 1.55 !important;
+  color: var(--text-primary) !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+/* Toolbar: fora do modal, outline cinza, ordem Grok (sem áudio) */
+#ia-chat .ia-msg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding-left: 2px;
+}
+#ia-chat .ia-tool-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+#ia-chat .ia-tool-btn:hover {
+  background: rgba(107, 114, 128, 0.08);
+  color: #374151;
+}
+#ia-chat .ia-tool-btn.is-on {
+  color: var(--gold-dark, #A7872B);
+  background: var(--gold-50, #FBF6E9);
+}
+/* Follow-ups: coluna + seta curva + texto, sem pill */
+#ia-chat .ia-followup-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 0 2px;
+  border: none !important;
+}
+#ia-chat .ia-followup-chip {
+  display: inline-flex !important;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #5b6570 !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
+  text-align: left;
+  cursor: pointer;
+}
+#ia-chat .ia-followup-chip:active,
+#ia-chat .ia-followup-chip:hover {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  transform: none !important;
+}
+#ia-chat .ia-followup-arrow {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #8b95a1;
+  /* seta curva tipo “reply” apontando para o texto */
+  transform: none;
+}
+#ia-chat .ia-followup-label {
+  flex: 1;
+  min-width: 0;
+}
+
+
+/* === BP IA gold modal + arrow fix (2026-08-07) === */
+#ia-chat .ia-msg-bot {
+  background: var(--gold-50, #FBF6E9) !important;
+  border: 1px solid rgba(212, 175, 55, 0.28) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 2px rgba(23, 20, 15, 0.04) !important;
+  padding: 11px 13px 12px !important;
+}
+#ia-chat .ia-msg-bot-corpo {
+  font-size: 0.84rem !important;
+  line-height: 1.5 !important;
+}
+#ia-chat .ia-msg-bot-nome {
+  font-size: 0.72rem;
+  color: var(--gold-dark, #A7872B);
+}
+/* Toolbar colada ao modal, ícones menores */
+#ia-chat .ia-msg-toolbar {
+  gap: 2px;
+  margin-top: 4px !important;
+  padding-left: 1px;
+  min-height: 28px;
+}
+#ia-chat .ia-tool-btn {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 6px;
+  color: #6b7280;
+}
+#ia-chat .ia-tool-btn svg {
+  width: 15px;
+  height: 15px;
+}
+/* Follow-ups: seta ↳ + texto um pouco menor */
+#ia-chat .ia-followup-row {
+  gap: 10px;
+  margin-top: 10px;
+}
+#ia-chat .ia-followup-chip {
+  gap: 7px;
+  font-size: 0.78rem !important;
+  font-weight: 500 !important;
+  color: #5b6570 !important;
+  line-height: 1.35 !important;
+}
+#ia-chat .ia-followup-arrow {
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  color: #8b95a1;
+  flex-shrink: 0;
+  transform: none !important;
+}
+
+
+/* === BP IA modal original (gold-light) — só a bolha da mensagem === */
+#ia-chat .ia-msg-bot {
+  background: var(--gold-light, var(--gold-50, #FBF6E9)) !important;
+  border: 1px solid var(--gold-light, rgba(212, 175, 55, 0.35)) !important;
+  border-radius: 6px 6px 6px 2px !important;
+  box-shadow: none !important;
+  padding: 10px 12px !important;
+  margin: 4px 0 8px !important;
+  max-width: 100% !important;
+}
+#ia-chat .ia-msg-bot-nome {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+#ia-chat .ia-msg-bot-corpo {
+  font-size: 0.85rem !important;
+  line-height: 1.5 !important;
+}
+/* Toolbar continua colada e pequena */
+#ia-chat .ia-msg-toolbar {
+  margin-top: 2px !important;
+}
+
+/* === BP IA — caixa fixa + scroll + follow-ups polidos (2026-08-08) === */
+#ia-chat-container.ia-chat-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  max-height: min(52vh, 420px);
+  overflow: hidden;
+}
+#ia-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(52vh, 420px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 4px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+#ia-chat-empty {
+  flex-shrink: 0;
+}
+/* Mensagens antigas: sem toolbar/follow-ups (HTML já omite; CSS reforça) */
+#ia-chat .ia-msg-block:not(:last-of-type) .ia-msg-toolbar,
+#ia-chat .ia-msg-block:not(:last-of-type) .ia-followup-row {
+  display: none !important;
+}
+
+/* Follow-ups: tipografia preta, estilo insight, sem cascata colorida */
+#ia-chat .ia-followup-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft, #e5e2dc);
+}
+#ia-chat .ia-followup-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 2px;
+  min-height: 40px;
+  cursor: pointer;
+  border-radius: 6px;
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-primary, #1c1a18);
+  box-shadow: none;
+}
+#ia-chat .ia-followup-chip:hover {
+  background: var(--bg-soft, #f3efe9);
+}
+#ia-chat .ia-followup-chip:active {
+  background: var(--bg-soft, #f3efe9);
+  transform: none;
+}
+#ia-chat .ia-followup-arrow {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--text-primary, #1c1a18);
+  opacity: 0.55;
+}
+#ia-chat .ia-followup-label {
+  color: var(--text-primary, #1c1a18);
+  font-weight: 500;
+}
+
+/* Toolbar só na última (reforço) */
+#ia-chat .ia-msg-toolbar {
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ia-chat { scroll-behavior: auto; }
+}
+
+/* === BP IA — bolhas polidas (user + bot) + follow-ups mais próximos === */
+#ia-chat {
+  gap: 10px;
+  padding: 4px 2px 8px;
+}
+#ia-chat .ia-msg-user {
+  align-self: flex-end;
+  max-width: min(88%, 34rem);
+  margin: 2px 0 2px auto;
+  padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--neutral-800, #2A241E);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 450;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 2px rgba(23, 20, 15, 0.06);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+#ia-chat .ia-msg-block {
+  align-self: stretch;
+  max-width: min(96%, 40rem);
+  margin: 2px 0 4px;
+  padding: 0;
+}
+#ia-chat .ia-msg-bot {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+#ia-chat .ia-msg-bot-header {
+  margin-bottom: 4px;
+  gap: 8px;
+}
+#ia-chat .ia-msg-bot-nome {
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary, #5c574e);
+}
+#ia-chat .ia-msg-bot-tempo {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--text-muted, #8c8980);
+}
+#ia-chat .ia-msg-bot-corpo {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-primary, #1c1a18);
+  letter-spacing: -0.005em;
+  padding: 0;
+}
+#ia-chat .ia-msg-bot-corpo .ia-md-p {
+  margin: 0 0 0.55em;
+}
+#ia-chat .ia-msg-bot-corpo .ia-md-p:last-child {
+  margin-bottom: 0;
+}
+#ia-chat .ia-msg-toolbar {
+  margin-top: 4px;
+  opacity: 0.85;
+}
+#ia-chat .ia-tool-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  color: var(--text-muted, #8c8980);
+}
+#ia-chat .ia-tool-btn:hover {
+  background: var(--bg-soft, #f3efe9);
+  color: var(--text-primary, #1c1a18);
+}
+
+/* Sugestões: mais próximas entre si */
+#ia-chat .ia-followup-row {
+  gap: 0;
+  margin-top: 6px;
+  padding-top: 6px;
+}
+#ia-chat .ia-followup-chip {
+  padding: 5px 2px;
+  min-height: 32px;
+  gap: 6px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+#ia-chat .ia-followup-arrow {
+  margin-top: 2px;
+  opacity: 0.45;
+  width: 11px;
+  height: 11px;
+}
+
+/* === BP IA — animações suaves + padrões de chat modernos === */
+@keyframes iaMsgIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes iaFollowIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#ia-chat .ia-msg-enter {
+  animation: iaMsgIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+#ia-chat .ia-msg-user.ia-msg-enter {
+  animation-duration: 180ms;
+}
+#ia-chat .ia-msg-block.ia-msg-enter .ia-followup-row {
+  animation: iaFollowIn 280ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+}
+#ia-chat .ia-msg-block.ia-msg-enter .ia-msg-toolbar {
+  animation: iaFollowIn 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both;
+}
+
+/* Padrão moderno: ritmo vertical + leitura clara */
+#ia-chat {
+  gap: 12px;
+  padding: 6px 4px 10px;
+}
+#ia-chat .ia-msg-user {
+  max-width: min(85%, 32rem);
+  padding: 10px 14px;
+  border-radius: 18px 18px 6px 18px;
+  line-height: 1.45;
+  transition: background-color 150ms ease;
+}
+#ia-chat .ia-msg-block {
+  margin: 0;
+  padding: 2px 0;
+}
+#ia-chat .ia-msg-bot-corpo {
+  line-height: 1.58;
+}
+#ia-chat .ia-msg-toolbar {
+  transition: opacity 150ms ease;
+}
+#ia-chat .ia-tool-btn {
+  transition: background-color 150ms ease, color 150ms ease, transform 120ms ease;
+}
+#ia-chat .ia-tool-btn:active {
+  transform: scale(0.94);
+}
+#ia-chat .ia-followup-chip {
+  transition: background-color 140ms ease, color 140ms ease;
+  padding: 4px 2px;
+  min-height: 28px;
+  gap: 6px;
+}
+#ia-chat .ia-followup-row {
+  gap: 0;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #ia-chat .ia-msg-enter,
+  #ia-chat .ia-msg-block.ia-msg-enter .ia-followup-row,
+  #ia-chat .ia-msg-block.ia-msg-enter .ia-msg-toolbar {
+    animation: none !important;
+  }
+  #ia-chat .ia-tool-btn:active {
+    transform: none;
+  }
+}
+
+/* === BP IA — correção regressão: bolha user branca suave + scroll estável === */
+#ia-chat-container.ia-chat-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  max-height: min(52vh, 420px);
+  overflow: hidden !important;
+}
+#ia-chat {
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  max-height: min(52vh, 420px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+/* Bolha do utilizador — branca suave (não graphite) */
+#ia-chat .ia-msg-user {
+  align-self: flex-end;
+  max-width: min(85%, 32rem);
+  margin: 2px 0 2px auto;
+  padding: 10px 14px;
+  border-radius: 18px 18px 6px 18px;
+  background: #ffffff !important;
+  color: var(--text-primary, #1c1a18) !important;
+  border: 1px solid var(--border-soft, #e8e4de);
+  box-shadow: 0 1px 2px rgba(23, 20, 15, 0.04);
+  font-size: 0.875rem;
+  font-weight: 450;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+#ia-chat .ia-msg-bot {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+#ia-chat .ia-msg-bot-corpo {
+  color: var(--text-primary, #1c1a18);
+}
+
+/* === Thinking + streaming (padrão profissional) === */
+#ia-chat .ia-msg-thinking {
+  padding: 4px 0 8px;
+}
+#ia-chat .ia-think-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--text-secondary, #5c574e);
+}
+#ia-chat .ia-think-icon {
+  flex-shrink: 0;
+  color: var(--gold-dark, #a8841a);
+  opacity: 0.9;
+  animation: iaThinkPulse 1.4s ease-in-out infinite;
+}
+#ia-chat .ia-think-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-secondary, #5c574e);
+}
+@keyframes iaThinkPulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+#ia-chat .ia-stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--text-primary, #1c1a18);
+  animation: iaCaretBlink 0.9s step-end infinite;
+}
+@keyframes iaCaretBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #ia-chat .ia-think-icon,
+  #ia-chat .ia-stream-caret {
+    animation: none !important;
+  }
+}
+
+/* Seta: ir à última mensagem */
+#ia-chat-container.ia-chat-shell {
+  position: relative;
+}
+.ia-scroll-latest {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 5;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border-soft, #e5e2dc);
+  background: #fff;
+  color: var(--text-primary, #1c1a18);
+  box-shadow: 0 2px 10px rgba(23, 20, 15, 0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.ia-scroll-latest:hover {
+  box-shadow: 0 4px 14px rgba(23, 20, 15, 0.16);
+}
+.ia-scroll-latest:active {
+  transform: scale(0.96);
+}
+.ia-scroll-latest[hidden] {
+  display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ia-scroll-latest { transition: none; }
+}
+
+/* Estado de ligação honesto */
+#tab-ia .ia-status-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #5c574e);
+}
+#tab-ia .ia-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green, #1f7a4d);
+  flex-shrink: 0;
+}
+#tab-ia .ia-status-dot[data-state="offline"] { background: var(--text-muted, #8c8980); }
+#tab-ia .ia-status-dot[data-state="busy"] { background: var(--gold-dark, #a8841a); }
+#tab-ia .ia-status-dot[data-state="error"] { background: var(--red, #b42318); }
+#tab-ia .ia-status-sep { opacity: 0.45; }
+#tab-ia .ia-msg-bot-fonte {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted, #8c8980);
+  border: 1px solid var(--border-soft, #e8e4de);
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 4px;
 }

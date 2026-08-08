@@ -1,4 +1,65 @@
 
+
+function actualizarDashChartExec(analise) {
+  try {
+    var elRev = document.getElementById('dash-chart-exec-rev');
+    var elN = document.getElementById('dash-chart-exec-n');
+    var elTicket = document.getElementById('dash-chart-exec-ticket');
+    var elDelta = document.getElementById('dash-chart-exec-delta');
+    if (!elRev && !elN && !elTicket && !elDelta) return;
+
+    var fmt = function (n) {
+      var v = Number(n);
+      if (!isFinite(v)) v = 0;
+      try {
+        if (typeof fmtKz === 'function') return fmtKz(v);
+      } catch (_) {}
+      try {
+        return Math.round(v).toLocaleString('pt-AO') + ' Kz';
+      } catch (_e2) {
+        return Math.round(v) + ' Kz';
+      }
+    };
+
+    var totais = analise && analise.totais ? analise.totais : null;
+    if (!totais) {
+      if (elRev) elRev.textContent = '—';
+      if (elN) elN.textContent = '—';
+      if (elTicket) elTicket.textContent = '—';
+      if (elDelta) {
+        elDelta.textContent = '—';
+        elDelta.removeAttribute('data-trend');
+      }
+      return;
+    }
+
+    if (elRev) elRev.textContent = fmt(totais.receita);
+    if (elN) elN.textContent = String(totais.nVendas != null ? totais.nVendas : 0);
+    if (elTicket) elTicket.textContent = fmt(totais.ticket);
+
+    if (elDelta) {
+      var ant = analise && analise.anterior ? analise.anterior : null;
+      var pct = null;
+      if (ant) {
+        if (ant.pct != null) pct = Number(ant.pct);
+        else if (ant.totais && totais.receita != null && ant.totais.receita > 0) {
+          pct = ((Number(totais.receita) - Number(ant.totais.receita)) / Number(ant.totais.receita)) * 100;
+        }
+      }
+      if (pct == null || !isFinite(pct)) {
+        elDelta.textContent = '—';
+        elDelta.removeAttribute('data-trend');
+      } else {
+        var rounded = Math.round(pct * 10) / 10;
+        elDelta.textContent = (rounded > 0 ? '+' : '') + rounded + '%';
+        elDelta.setAttribute('data-trend', rounded > 0 ? 'up' : (rounded < 0 ? 'down' : 'flat'));
+      }
+    }
+  } catch (e) {
+    try { console.warn('[chart-exec]', e); } catch (_) {}
+  }
+}
+
 function _bpUpdateChartHealth(analise) {
   var el = document.getElementById('dash-chart-health');
   var val = document.getElementById('dash-chart-health-value');
@@ -247,17 +308,49 @@ function exportarAnaliseCsv(analise) {
 }
 
 function renderizarGrafico() {
-
-
   const canvas = document.getElementById('weekly-chart');
   if (!canvas) return;
+  const parent = canvas.parentElement;
+  const tabDash = document.getElementById('tab-dashboard');
+  const tabVisivel = !tabDash || tabDash.classList.contains('active');
+  let parentWidth = 0;
+  try {
+    parentWidth = parent ? parent.getBoundingClientRect().width : 0;
+  } catch (_) { parentWidth = 0; }
+  /* Tab oculta ou layout ainda a 0 → adiar (evita gráfico “desaparecido”) */
+  if (tabVisivel && parentWidth < 40) {
+    if (!renderizarGrafico._retry) {
+      renderizarGrafico._retry = true;
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          renderizarGrafico._retry = false;
+          renderizarGrafico();
+        });
+      });
+    }
+    return;
+  }
+  if (!tabVisivel) {
+    /* Guarda pedido para quando a aba Resumo voltar a abrir */
+    renderizarGrafico._pending = true;
+    return;
+  }
+  renderizarGrafico._pending = false;
+
   const ctx = canvas.getContext('2d');
-  const parentWidth = canvas.parentElement.getBoundingClientRect().width || 400;
-  const width = Math.max(parentWidth, 200);
+  const width = Math.max(parentWidth || 0, 200);
   const height = 220;
   canvas.width = width;
   canvas.height = height;
-  try { canvas.style.touchAction = 'pan-y'; } catch (_ta) {}
+  try {
+    canvas.style.width = '100%';
+    canvas.style.height = height + 'px';
+    canvas.style.display = 'block';
+    canvas.style.touchAction = 'pan-y';
+  } catch (_ta) {}
+  if (parent) {
+    try { parent.style.minHeight = height + 'px'; } catch (_) {}
+  }
   ctx.clearRect(0, 0, width, height);
 
   const intervalo = (typeof getIntervaloDashAtual === 'function')
@@ -335,13 +428,17 @@ function renderizarGrafico() {
   const baseY = height - 22;
   const plotH = height - 40;
 
-  // Baseline discreta
-  ctx.strokeStyle = mutedBar;
+  // Baseline: nítida e legível, sem engrossar
+  ctx.save();
+  ctx.strokeStyle = textPrimary;
+  ctx.globalAlpha = 0.32;
   ctx.lineWidth = 1;
+  ctx.lineCap = 'butt';
   ctx.beginPath();
   ctx.moveTo(16, baseY + 0.5);
   ctx.lineTo(width - 16, baseY + 0.5);
   ctx.stroke();
+  ctx.restore();
 
   // Geometria de hit-test (partilhada com hover)
   const stepX = barW + gap;
@@ -476,21 +573,19 @@ function renderizarGrafico() {
     if (window._chartShowMedia && media > 0 && maxVal > 0) {
       var yMed = baseY - (media / maxVal) * plotH;
       ctx.save();
-      // Presente sem engrossar: contraste maior + menos transparência
-      ctx.strokeStyle = (typeof getComputedStyle === 'function'
-        ? (getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#c9a227')
-        : '#c9a227');
+      // Média: preta, nítida, mesma espessura
+      ctx.strokeStyle = textPrimary;
       ctx.lineWidth = 1;
-      ctx.setLineDash([5, 3]);
-      ctx.globalAlpha = 0.95;
+      ctx.lineCap = 'butt';
+      ctx.setLineDash([4, 3]);
+      ctx.globalAlpha = 1;
       ctx.beginPath();
       ctx.moveTo(16, yMed + 0.5);
       ctx.lineTo(width - 16, yMed + 0.5);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.font = '600 8px system-ui, sans-serif';
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.globalAlpha = 1;
+      ctx.fillStyle = textPrimary;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillText('Média', 18, yMed - 2);
@@ -748,6 +843,48 @@ function _bpSetChartFilterActive(periodo) {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
 }
+/** Olho só no modo Barras (valores nas barras). */
+function _bpSyncChartEye() {
+  var eye = document.getElementById('chart-eye-toggle');
+  if (!eye) return;
+  var mode = (typeof _chartViewMode !== 'undefined' && _chartViewMode) ? _chartViewMode : 'barras';
+  var show = mode === 'barras';
+  eye.hidden = !show;
+  eye.setAttribute('aria-hidden', show ? 'false' : 'true');
+  try { eye.style.display = show ? '' : 'none'; } catch (_) {}
+}
+
+
+/* Mantém o canvas legível após navegação / rotação / volta à aba Resumo */
+function _bpEnsureChartResizeObserver() {
+  if (_bpEnsureChartResizeObserver._done) return;
+  var wrap = document.getElementById('dash-chart-canvas-wrap') || document.getElementById('weekly-chart');
+  if (!wrap) return;
+  var target = wrap.id === 'weekly-chart' && wrap.parentElement ? wrap.parentElement : wrap;
+  _bpEnsureChartResizeObserver._done = true;
+  var t = null;
+  function schedule() {
+    if (t) clearTimeout(t);
+    t = setTimeout(function () {
+      if (typeof renderizarGrafico === 'function') renderizarGrafico();
+    }, 60);
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    try {
+      var ro = new ResizeObserver(function () { schedule(); });
+      ro.observe(target);
+    } catch (_) {}
+  }
+  window.addEventListener('resize', schedule);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) schedule();
+  });
+}
+try { _bpEnsureChartResizeObserver(); } catch (_) {}
+document.addEventListener('DOMContentLoaded', function () {
+  try { _bpEnsureChartResizeObserver(); } catch (_) {}
+});
+
 function initChartControls() {
   if (_chartControlsBound) return;
   _chartControlsBound = true;
@@ -853,6 +990,7 @@ function initChartControls() {
         b.classList.toggle('is-active', on);
         b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
+      if (typeof _bpSyncChartEye === 'function') _bpSyncChartEye();
       renderizarGrafico();
     });
   });
@@ -862,6 +1000,7 @@ function initChartControls() {
     b.classList.toggle('is-active', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+  if (typeof _bpSyncChartEye === 'function') _bpSyncChartEye();
 
   const eyeToggle = document.getElementById('chart-eye-toggle');
   if (eyeToggle) {
@@ -880,8 +1019,6 @@ function initChartControls() {
     });
   }
 }
-
-
 
 /** @deprecated feedback visual — anel CSS; mantido no-op seguro */
 function _bpChartPulse(el) { /* no-op */ }

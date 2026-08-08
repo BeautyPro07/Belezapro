@@ -340,7 +340,14 @@ function renderDashboard() {
       const variacao = ((totalRev - totalPrev) / totalPrev) * 100;
       const subiu = variacao >= 0;
       percentEl.className = subiu ? 'trend-up' : 'trend-down';
-      percentEl.innerHTML = `<span class="trend-arrow">${subiu ? '↑' : '↓'}</span> ${Math.abs(variacao).toFixed(1)}%`;
+      const _absVar = Math.abs(variacao);
+      let _pctTxt;
+      if (!_absVar) {
+        _pctTxt = '0';
+      } else {
+        _pctTxt = _absVar.toFixed(1).replace(/\.0$/, '');
+      }
+      percentEl.innerHTML = `<span class="trend-arrow">${subiu ? '↑' : '↓'}</span> ${_pctTxt}%`;
       percentEl.style.display = 'inline-flex';
       percentEl.setAttribute('title', 'Receita vs período anterior equivalente');
     } else if (totalRev > 0 && totalPrev === 0) {

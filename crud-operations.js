@@ -860,7 +860,6 @@ async function registarVenda(dados) {
   }
 }
 
-async 
 /**
  * Cancela uma venda e estorna a comissão (offline-first).
  * Marca movimento status=cancelado e zera comissao_gerada (guarda valor em comissao_estornada).
@@ -886,16 +885,13 @@ async function cancelarVenda(movimentoId, motivo) {
       cancelado_motivo: motivo || '',
       updated_at: new Date().toISOString()
     });
-    if (typeof window.AppStore !== 'undefined' && AppStore.updateInList) {
-      AppStore.updateInList('movimentos', movimentoId, updated);
+    if (window.BeautyStore && window.BeautyStore.updateInList) {
+      window.BeautyStore.updateInList('movimentos', movimentoId, updated);
     } else {
       const mi = state.movimentos.findIndex(function (x) { return x.id === movimentoId; });
       if (mi !== -1) state.movimentos[mi] = updated;
     }
     try { await dbPut('movimentos', updated); } catch (e) {}
-    if (typeof enqueueSync === 'function') {
-      try { enqueueSync('movimentos', 'upsert', updated); } catch (e) {}
-    }
     if (typeof toast === 'function') toast('Venda cancelada' + (estorno ? ' · comissão estornada' : ''), 'warning');
     if (typeof updateUI === 'function') updateUI();
     return true;
