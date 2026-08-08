@@ -619,8 +619,8 @@ function atualizarIAOffline() {
   var online = _bpIaIsOnline();
   var overlay = document.getElementById('ia-offline-overlay');
   if (overlay) {
-    overlay.style.display = online ? 'none' : 'flex';
-    overlay.setAttribute('aria-hidden', online ? 'true' : 'false');
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
   }
   if (!_iaBusy) {
     if (!online) {

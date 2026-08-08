@@ -263,9 +263,8 @@
                 </div>
                 <div class="dash-chart-top-actions">
                   <div class="dash-chart-export-wrap">
-                    <button type="button" class="dash-chart-ghost-btn" id="chart-export-toggle" aria-expanded="false" aria-haspopup="true" title="Exportar">
+                    <button type="button" class="dash-chart-ghost-btn" id="chart-export-toggle" aria-expanded="false" aria-haspopup="true" aria-label="Exportar" title="Exportar">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                      <span class="sr-only">Exportar</span>
                     </button>
                     <div class="dash-chart-export-menu" id="chart-export-menu" hidden role="menu">
                       <button type="button" class="dash-chart-export-item" id="chart-export-csv" role="menuitem">CSV</button>
@@ -291,25 +290,6 @@
                 <span class="dash-chart-health-status" id="dash-chart-status"></span>
               </div>
 
-              <!-- KPIs do período (IDs esperados por chart-module) -->
-              <div class="dash-chart-exec-metrics" id="dash-chart-exec" role="group" aria-label="Indicadores do período">
-                <div class="dash-chart-exec-item">
-                  <span class="dash-chart-exec-label">Receita</span>
-                  <strong class="dash-chart-exec-val" id="dash-chart-exec-rev">—</strong>
-                </div>
-                <div class="dash-chart-exec-item">
-                  <span class="dash-chart-exec-label">Vendas</span>
-                  <strong class="dash-chart-exec-val" id="dash-chart-exec-n">—</strong>
-                </div>
-                <div class="dash-chart-exec-item">
-                  <span class="dash-chart-exec-label">Ticket</span>
-                  <strong class="dash-chart-exec-val" id="dash-chart-exec-ticket">—</strong>
-                </div>
-                <div class="dash-chart-exec-item">
-                  <span class="dash-chart-exec-label">Variação</span>
-                  <strong class="dash-chart-exec-val" id="dash-chart-exec-delta">—</strong>
-                </div>
-              </div>
 
               <!-- IDs legados ocultos (não regredir JS) -->
               <div class="dash-chart-legacy-controls" hidden aria-hidden="true">
@@ -636,12 +616,7 @@
                   <div class="ia-chat-empty-sub">Pergunte sobre vendas, clientes, agenda, equipa, caixa ou desempenho.</div>
                 </div>
                 <div class="ia-chat" id="ia-chat"></div>
-                <div id="ia-offline-overlay">
-                  <h3 style="font-family:var(--font-sans);font-size:1rem;font-weight:600;color:var(--text-primary);margin:12px 0 4px;">Sem internet</h3>
-                  <p style="font-size:0.85rem;color:var(--text-secondary);max-width:240px;">A Benza necessita de ligação para responder.</p>
-                  <button class="btn btn-secondary btn-sm" id="ia-offline-retry" style="margin-top:12px;">Tentar novamente</button>
-                </div>
-              </div>
+</div>
               <div class="ia-composer">
                 <div class="ia-input-row">
                   <textarea id="ia-input" class="input-field ia-input-area" rows="1" placeholder="Faça uma pergunta…" autocomplete="off" enterkeyhint="send"></textarea>

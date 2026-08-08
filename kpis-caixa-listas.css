@@ -1881,3 +1881,7 @@
 @media (max-width: 380px) {
   .dash-chart-exec-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* 3 pedidos: ocultar KPIs residual; export só ícone */
+.dash-chart-exec-metrics { display: none !important; }
+#chart-export-toggle > :not(svg) { display: none !important; }
