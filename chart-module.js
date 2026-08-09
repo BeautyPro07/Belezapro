@@ -107,7 +107,74 @@ function _fmtChart(n) {
 }
 
 /** Fase 5 — sheet de drill-down do dia/hora */
+
+/** ET4.7 — tooltip só no Resumo; nunca roubar toques da bottom-nav */
+function bpChartIsDashboardActive() {
+  try {
+    if (typeof activeTab !== 'undefined' && activeTab && activeTab !== 'dashboard') return false;
+    var pane = document.getElementById('tab-dashboard');
+    if (pane && !pane.classList.contains('active')) return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+}
+
+function bpHideChartTooltip() {
+  try {
+    var tip = document.getElementById('chart-tooltip');
+    if (tip) {
+      tip.style.opacity = '0';
+      tip.style.pointerEvents = 'none';
+      tip.classList.remove('is-rich');
+      tip.innerHTML = '';
+      tip.setAttribute('aria-hidden', 'true');
+    }
+    if (typeof _chartSelectedIdx !== 'undefined') _chartSelectedIdx = null;
+  } catch (_) {}
+}
+
+function bpConfineChartTooltipPosition(left, top, tip) {
+  // Mantém o tooltip dentro da área do gráfico / tab dashboard, acima da nav (72px+)
+  try {
+    var wrap = document.getElementById('dash-chart-canvas-wrap')
+      || document.getElementById('tab-dashboard')
+      || document.body;
+    var navH = 80;
+    try {
+      var nav = document.querySelector('.bottom-nav');
+      if (nav) navH = Math.max(72, nav.getBoundingClientRect().height + 8);
+    } catch (_) {}
+    var maxBottom = window.innerHeight - navH - 8;
+    var tipW = (tip && tip.offsetWidth) ? tip.offsetWidth : 200;
+    var tipH = (tip && tip.offsetHeight) ? tip.offsetHeight : 120;
+    var L = Math.min(window.innerWidth - tipW - 8, Math.max(8, left));
+    var T = Math.min(maxBottom - tipH, Math.max(8, top));
+    // Se o wrap do gráfico existe, preferir ficar sobre ele
+    if (wrap && wrap.getBoundingClientRect) {
+      var r = wrap.getBoundingClientRect();
+      if (r.width > 40 && r.height > 40) {
+        L = Math.min(r.right - 12 - tipW, Math.max(r.left + 8, L));
+        T = Math.min(r.bottom - 8 - Math.min(tipH, r.height * 0.9), Math.max(r.top + 8, T));
+      }
+    }
+    return { left: L, top: T };
+  } catch (_) {
+    return { left: left, top: top };
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.bpHideChartTooltip = bpHideChartTooltip;
+  window.bpChartIsDashboardActive = bpChartIsDashboardActive;
+}
+
 function abrirChartDrill(dataIso, horaOpt) {
+  // Contingência: drill só faz sentido no Resumo
+  if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+    if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+    return;
+  }
   if (!dataIso || typeof detalheDiaVendas !== 'function') return;
   var det = detalheDiaVendas(dataIso, (state && state.movimentos) || [], {
     hora: horaOpt != null && isFinite(horaOpt) ? Number(horaOpt) : undefined
@@ -248,7 +315,7 @@ function exportarAnalisePdf(analise) {
   var a = analise || window.__bpUltimaAnaliseTemporal;
   var fmt = typeof fmtKz === 'function' ? fmtKz : function (n) { return Math.round(Number(n) || 0) + ' Kz'; };
   if (!a || !a.totais) {
-    if (typeof toast === 'function') toast('Sem dados para exportar', 'error');
+    if (typeof toast === 'function') toast('Não há dados para exportar.', 'warning');
     return;
   }
   var label = (a.intervalo && a.intervalo.label) || (a.meta && a.meta.label) || 'Período';
@@ -277,7 +344,7 @@ function exportarAnaliseCsv(analise) {
     ? analiseParaExport(analise || window.__bpUltimaAnaliseTemporal)
     : null;
   if (!payload || !payload.serie) {
-    if (typeof toast === 'function') toast('Sem dados para exportar', 'error');
+    if (typeof toast === 'function') toast('Não há dados para exportar.', 'warning');
     return;
   }
   var lines = ['data,label,receita,vendas,ticket'];
@@ -304,7 +371,7 @@ function exportarAnaliseCsv(analise) {
     URL.revokeObjectURL(url);
     a.remove();
   }, 500);
-  if (typeof toast === 'function') toast('CSV exportado', 'success');
+  if (typeof toast === 'function') toast('CSV exportado.', 'success');
 }
 
 function renderizarGrafico() {
@@ -663,6 +730,11 @@ function renderizarGrafico() {
   }
 
   function showTooltipFor(idx, clientX, clientY) {
+    if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+      return;
+    }
+
     if (!tooltip || idx < 0) return;
     const pt = analise && analise.serie && analise.serie[idx];
     const val = dados[idx] || 0;
@@ -725,20 +797,39 @@ function renderizarGrafico() {
         ? '<div class="ct-actions"><button type="button" class="ct-drill-btn" id="chart-tooltip-drill"' + drillAttr + '>Ver detalhe</button></div>'
         : '');
     tooltip.style.whiteSpace = 'normal';
+    // Só no dashboard; senão não mostrar
+    if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+      bpHideChartTooltip();
+      return;
+    }
     var left = Math.min(window.innerWidth - 200, Math.max(8, clientX + 8));
     var top = Math.max(8, clientY - 20);
-    tooltip.style.left = left + 'px';
-    tooltip.style.top = top + 'px';
+    var confined = typeof bpConfineChartTooltipPosition === 'function'
+      ? bpConfineChartTooltipPosition(left, top, tooltip)
+      : { left: left, top: top };
+    tooltip.style.left = confined.left + 'px';
+    tooltip.style.top = confined.top + 'px';
     tooltip.style.opacity = '1';
+    tooltip.style.pointerEvents = 'auto';
+    tooltip.setAttribute('aria-hidden', 'false');
 
     var btn = document.getElementById('chart-tooltip-drill');
     if (btn) {
       btn.onclick = function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
+        // Garante que o toque não propaga para a nav
+        if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+        if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+          bpHideChartTooltip();
+          return;
+        }
         var d = btn.getAttribute('data-drill-data');
         var h = btn.getAttribute('data-drill-hora');
-        abrirChartDrill(d, h != null && h !== '' ? Number(h) : undefined);
+        if (typeof abrirChartDrill === 'function') {
+          abrirChartDrill(d, h != null && h !== '' ? Number(h) : undefined);
+        }
+        bpHideChartTooltip();
       };
     }
   }
@@ -1187,3 +1278,29 @@ if (document.readyState === 'loading') {
 } else {
   setTimeout(_bpInitChartChrome, 100);
 }
+
+
+/* ET4.7 — nav e overlays: nunca deixar tooltip roubar toques */
+(function bpChartTooltipNavGuard() {
+  if (window.__bpChartTipGuard) return;
+  window.__bpChartTipGuard = 1;
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    // Toque na bottom-nav ou noutro tab-pane que não o dashboard → esconder tooltip
+    if (t.closest('.bottom-nav, .nav-item, [data-tab]')) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+      return;
+    }
+    if (t.closest('#tab-agenda, #tab-clientes, #tab-caixa, #tab-equipa, #tab-ia')) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+    }
+  }, true);
+  document.addEventListener('touchstart', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest('.bottom-nav, .nav-item')) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+    }
+  }, { capture: true, passive: true });
+})();

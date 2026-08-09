@@ -30,12 +30,19 @@ document.getElementById('logout-btn')?.addEventListener('click', async function(
   var dd = document.getElementById('menu-dropdown');
   if (dd) dd.style.display = 'none';
   logoutVoluntarioEmCurso = true;
-  const confirmed = await showConfirmModal('Sair da aplicação', 'Tem a certeza que quer sair?', false);
+  const confirmed = await showConfirmModal('Sair da conta?', 'Vais terminar a sessão neste dispositivo. Os dados do salão continuam guardados; basta iniciares sessão outra vez para continuares.', false, { confirmLabel: 'Sair', cancelLabel: 'Cancelar', variant: 'quiet', confirmTone: 'danger' });
   if (!confirmed) {
     logoutVoluntarioEmCurso = false;
     return;
   }
+  // ET4.3: limpar flags de init BP* antes do reload (troca de conta / permissões)
+  try {
+    ['__bpFinanceInitDone','__bpOpsInitDone','__bpGestaoInitDone','__bpEquipaInitDone','__bpMarketingInitDone','__bpMediaInitDone'].forEach(function (k) {
+      try { delete window[k]; } catch (_) { window[k] = false; }
+    });
+  } catch (_) {}
   if (typeof bpClearSessionLocal === 'function') bpClearSessionLocal();
+  try { localStorage.removeItem('bp_user_role'); } catch (_) {}
   try { await supabaseClient.auth.signOut(); } catch (_) {}
   location.reload();
 });
@@ -69,8 +76,8 @@ document.getElementById('modal-agenda-save').addEventListener('click', async () 
   const profissionalId = document.getElementById('agenda-profissional').value;
   const datetime = document.getElementById('agenda-datetime').value;
   const preco = parseFloat(document.getElementById('agenda-preco').value);
-  if (!cliente || !servico || !datetime) { toast('Preencha todos os campos obrigatórios', 'error'); return; }
-  if (!profissionalId) { toast('Selecione um profissional', 'error'); return; }
+  if (!cliente || !servico || !datetime) { toast('Preenche os campos obrigatórios.', 'warning'); return; }
+  if (!profissionalId) { toast('Selecciona um profissional.', 'warning'); return; }
   if (isNaN(preco) || preco <= 0) { toast('Insira um preço válido', 'error'); return; }
   if (!datetime.includes('T')) { toast('Data e hora inválidas', 'error'); return; }
   const data = datetime.split('T')[0];
@@ -97,7 +104,7 @@ document.getElementById('modal-agenda-save').addEventListener('click', async () 
   if (editId) {
     result = await updateAgendamento(editId, payload);
     if (result) {
-      toast('Agendamento actualizado', 'success');
+      toast('Agendamento actualizado.', 'success');
       closeModal('modal-agenda');
       document.getElementById('agenda-edit-id').value = '';
     }
@@ -156,7 +163,7 @@ document.getElementById('agenda-add-cliente-rapido').addEventListener('click', (
 document.getElementById('modal-cliente-rapido-save').addEventListener('click', async () => {
   const nome = document.getElementById('cliente-rapido-nome').value.trim();
   const telefone = document.getElementById('cliente-rapido-telefone').value.trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
   const result = await addCliente({ nome, telefone, notas: '' });
   if (result) {
     try {
@@ -235,17 +242,20 @@ document.getElementById('modal-cliente-save').addEventListener('click', async ()
   let telefone = document.getElementById('cliente-telefone').value.trim();
   const notas = document.getElementById('cliente-notas').value.trim();
   const id = document.getElementById('cliente-id').value;
-  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
   const telDigits = telefone.replace(/\D/g, '');
   if (telDigits && telDigits.length !== 9) {
     toast('Contacto deve ter exactamente 9 dígitos, ou deixe em branco.', 'error');
     return;
   }
   telefone = telDigits;
-  if (id) { 
-    await updateCliente(id, { nome, telefone, notas });
-    toast('Dados do cliente actualizados', 'success');
-    closeModal('modal-cliente');
+  if (id) {
+    // ET4.3: só toast/fecha se a actualização efectivamente ocorreu
+    const upd = await updateCliente(id, { nome, telefone, notas });
+    if (upd) {
+      toast('Cliente actualizado.', 'success');
+      closeModal('modal-cliente');
+    }
   } else { 
     const result = await addCliente({ nome, telefone, notas });
     if (result) {
@@ -322,11 +332,11 @@ async function bpCriarServicoDesdeProfModal() {
   const nome = ((document.getElementById('prof-novo-servico-nome') || {}).value || '').trim();
   const preco = parseFloat((document.getElementById('prof-novo-servico-preco') || {}).value);
   if (!nome) {
-    toast('Indique o nome do novo serviço', 'error');
+    toast('Indica o nome do novo serviço.', 'warning');
     return null;
   }
   if (!preco || preco <= 0) {
-    toast('Indique um preço válido (Kz)', 'error');
+    toast('Indica um preço válido.', 'warning');
     return null;
   }
   if (typeof existeNomeDuplicado === 'function' && existeNomeDuplicado('servicos', nome)) {
@@ -334,17 +344,22 @@ async function bpCriarServicoDesdeProfModal() {
     popularEspecialidadesProf(nome);
     return nome;
   }
+  const draftProf = ((document.getElementById('prof-nome') || {}).value || '').trim();
+  if (!draftProf) {
+    toast('Preenche o nome do profissional antes de criar o serviço.', 'warning');
+    return null;
+  }
   const payload = {
     nome: nome,
     precoBase: preco,
-    profissionais: [],
+    profissionais: [draftProf],
     ativo: true,
     duracao: 60,
     updated_at: new Date().toISOString()
   };
   let created = null;
   if (typeof addServico === 'function') {
-    created = await addServico(payload);
+    created = await addServico(payload, { pendingNomes: [draftProf] });
   }
   if (!created) return null;
   // Associar nome ao select e fechar box
@@ -529,7 +544,7 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   const taxa = parseFloat(document.getElementById('prof-taxa')?.value);
   const meta = parseFloat(document.getElementById('prof-meta')?.value);
 
-  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
   if (!idade || isNaN(parseInt(idade, 10))) { toast('Idade é obrigatória', 'error'); return; }
   if (!dataContratual) { toast('Data contratual é obrigatória', 'error'); return; }
   // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
@@ -538,7 +553,7 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     if (!criado) return;
     especialidade = criado;
   }
-  if (!especialidade) { toast('Seleccione uma especialidade (serviço) ou crie uma nova', 'error'); return; }
+  if (!especialidade) { toast('Selecciona uma especialidade ou cria uma nova.', 'warning'); return; }
   if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
     toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
@@ -561,9 +576,11 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   };
 
   if (id) {
-    await updateProfissional(id, dados);
-    toast('Dados do profissional actualizados', 'success');
-    closeModal('modal-prof');
+    const upd = await updateProfissional(id, dados);
+    if (upd) {
+      toast('Profissional actualizado.', 'success');
+      closeModal('modal-prof');
+    }
   } else {
     const result = await addProfissional(dados);
     if (result) {
@@ -619,16 +636,22 @@ document.getElementById('modal-servico-save').addEventListener('click', async ()
   const id = document.getElementById('servico-id').value;
   const profissionais = typeof getSelectedProfissionais === 'function' ? getSelectedProfissionais() : [];
   if (!nome || isNaN(precoBase) || precoBase <= 0) {
-    toast('Preencha nome e preço válido', 'error');
+    toast('Indica nome e preço válidos.', 'warning');
     return;
   }
-  // profissionais vazio = toda a equipa (legítimo em salão pequeno)
-  const payload = { nome, precoBase, profissionais: profissionais || [], duracao };
+  // ET4.5: profissionais obrigatórios — proibido vazio / "toda a equipa"
+  if (!profissionais || !profissionais.length) {
+    toast('Associa pelo menos um profissional a este serviço.', 'warning');
+    return;
+  }
+  const payload = { nome, precoBase, profissionais: profissionais, duracao };
   if (id) {
-    await updateServico(id, payload);
-    toast('Serviço actualizado', 'success');
+    const upd = await updateServico(id, payload);
+    if (!upd) return;
+    toast('Serviço actualizado.', 'success');
   } else {
-    await addServico(payload);
+    const created = await addServico(payload);
+    if (!created) return;
   }
   closeModal('modal-servico');
   if (typeof updateUI === 'function') updateUI();

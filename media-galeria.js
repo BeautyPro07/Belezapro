@@ -368,8 +368,104 @@
     session.pendingProfFoto = null;
     session.pendingProfScope = null;
   }
+  var FOTO_QUEUE_KEY = "bp_foto_upload_queue";
+
+  function getFotoQueue() {
+    try {
+      var raw = localStorage.getItem(FOTO_QUEUE_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  }
+  function saveFotoQueue(arr) {
+    try { localStorage.setItem(FOTO_QUEUE_KEY, JSON.stringify(arr || [])); } catch (e) {
+      console.warn("[BPMedia] foto queue save failed", e);
+    }
+  }
+  function enqueueFotoUpload(kind, entityId, dataUrl) {
+    if (!kind || !entityId || !dataUrl) return;
+    var q = getFotoQueue().filter(function (x) {
+      return !(x.kind === kind && x.entityId === entityId);
+    });
+    q.push({
+      kind: kind,
+      entityId: entityId,
+      dataUrl: dataUrl,
+      ts: Date.now(),
+      attempts: 0
+    });
+    // ET4.6: sem teto rígido; se storage falhar, foto continua no entity.foto (data:)
+    saveFotoQueue(q);
+  }
+  function removeFotoQueueItem(kind, entityId) {
+    saveFotoQueue(getFotoQueue().filter(function (x) {
+      return !(x.kind === kind && x.entityId === entityId);
+    }));
+  }
+
+  /** Processa fila de fotos offline quando há rede — lotes de 3. */
+  async function flushFotoUploadQueue() {
+    if (!navigator.onLine) return;
+    if (flushFotoUploadQueue._running) return;
+    flushFotoUploadQueue._running = true;
+    try {
+      var q = getFotoQueue();
+      if (!q.length) {
+        // Também varrer entidades com foto data: ainda pendente
+        try {
+          (state.clientes || []).forEach(function (c) {
+            if (c && c.id && c.foto && String(c.foto).indexOf("data:") === 0 && !c.foto_url) {
+              enqueueFotoUpload("clientes", c.id, c.foto);
+            }
+          });
+          (state.profissionais || []).forEach(function (p) {
+            if (p && p.id && p.foto && String(p.foto).indexOf("data:") === 0 && !p.foto_url) {
+              enqueueFotoUpload("profissionais", p.id, p.foto);
+            }
+          });
+          q = getFotoQueue();
+        } catch (_) {}
+      }
+      var batch = q.slice(0, 3);
+      var rest = q.slice(3);
+      for (var i = 0; i < batch.length; i++) {
+        if (!navigator.onLine) {
+          rest = batch.slice(i).concat(rest);
+          break;
+        }
+        var item = batch[i];
+        try {
+          var result = await withTimeout(uploadFotoStorage(item.kind, item.entityId, item.dataUrl), UPLOAD_MS);
+          var url = result && result.url ? result.url : null;
+          if (!url) {
+            item.attempts = (item.attempts || 0) + 1;
+            if (item.attempts < 10) rest.push(item);
+            continue;
+          }
+          var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
+          var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
+          if (item.kind === "clientes" && typeof updateCliente === "function") {
+            await updateCliente(item.entityId, patch);
+          } else if (item.kind === "profissionais" && typeof updateProfissional === "function") {
+            await updateProfissional(item.entityId, patch);
+          }
+          try { patchRowAvatar(item.kind, item.entityId); } catch (_) {}
+        } catch (e) {
+          item.attempts = (item.attempts || 0) + 1;
+          if (item.attempts < 10) rest.push(item);
+        }
+      }
+      saveFotoQueue(rest);
+    } finally {
+      flushFotoUploadQueue._running = false;
+    }
+  }
+
   function scheduleFotoUpload(kind, entityId, dataUrl) {
     if (!entityId || !dataUrl) return;
+    // Sempre enfileirar — garante offline e retry
+    enqueueFotoUpload(kind, entityId, dataUrl);
+    if (!navigator.onLine) return;
     var token = String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8);
     _uploadToken[kind + ":" + entityId] = token;
     withTimeout(uploadFotoStorage(kind, entityId, dataUrl), UPLOAD_MS).then(function (result) {
@@ -379,6 +475,7 @@
         toastUploadOutcome(result || { url: null, error: "upload" }, { silentOk: true });
         return;
       }
+      removeFotoQueueItem(kind, entityId);
       // Cache-bust: mesmo path .jpg no Storage mantém URL pública — forçar ?v=
       var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
       var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
@@ -763,7 +860,7 @@
         patchRowAvatar("clientes", id);
       } catch (e) {
         console.warn(e);
-        toastMsg("Erro ao processar imagem", "error");
+        toastMsg("Não foi possível processar a imagem.", "error");
       }
     };
     document.getElementById("bp-cli-foto-rm").onclick = async function () {
@@ -774,7 +871,7 @@
         showPreview("bp-cli-foto-preview", null, id || "new");
         this.style.display = "none";
       }
-      toastMsg("Foto removida", "success");
+      toastMsg("Foto removida.", "success");
       patchRowAvatar("clientes", id);
     };
   }
@@ -829,7 +926,7 @@
         patchRowAvatar("profissionais", id);
       } catch (e) {
         console.warn(e);
-        toastMsg("Erro ao processar imagem", "error");
+        toastMsg("Não foi possível processar a imagem.", "error");
       }
     };
     document.getElementById("bp-prof-foto-rm").onclick = async function () {
@@ -840,7 +937,7 @@
         showPreview("bp-prof-foto-preview", null, id || "new");
         this.style.display = "none";
       }
-      toastMsg("Foto removida", "success");
+      toastMsg("Foto removida.", "success");
       patchRowAvatar("profissionais", id);
     };
   }
@@ -1348,29 +1445,42 @@
           }
         } catch (e) {
           console.warn(e);
-          toastMsg("Erro ao processar imagem", "error");
+          toastMsg("Não foi possível processar a imagem.", "error");
         }
       };
     }
     body.querySelectorAll("[data-del-gal]").forEach(function (btn) {
       btn.onclick = function (e) {
         e.stopPropagation();
-        if (!confirm("Remover esta foto?")) return;
-        var delId = btn.getAttribute("data-del-gal");
-        var pidDel = (document.getElementById("bp-gal-prof") || {}).value;
-        if (pidDel && delId) removeFotoStorage("galeria/" + pidDel, delId);
-        removeFotoGaleria(delId);
-        deleteGaleriaRemoto(delId);
-        renderGaleria(pidDel);
-        toastMsg("Foto removida", "success");
+        (async function () {
+          var ok = true;
+          if (typeof showConfirmModal === "function") {
+            ok = await showConfirmModal(
+              "Remover foto?",
+              "Esta foto deixa de aparecer na galeria deste profissional. Podes voltar a adicionar outra mais tarde.",
+              true,
+              { confirmLabel: "Remover", cancelLabel: "Cancelar", variant: "destructive" }
+            );
+          }
+          if (!ok) return;
+          var delId = btn.getAttribute("data-del-gal");
+          var pidDel = (document.getElementById("bp-gal-prof") || {}).value;
+          if (pidDel && delId) removeFotoStorage("galeria/" + pidDel, delId);
+          removeFotoGaleria(delId);
+          deleteGaleriaRemoto(delId);
+          renderGaleria(pidDel);
+          toastMsg("Foto removida.", "success");
+        })();
       };
     });
-  }
 
-    // Lazy load imagens fora do viewport
+    // Lazy load imagens fora do viewport (body no scope de renderGaleria)
     setTimeout(function () {
-      bpGalObserve(body.querySelector(".bp-gal-grid") || body);
+      try {
+        if (body) bpGalObserve(body.querySelector(".bp-gal-grid") || body);
+      } catch (_) {}
     }, 30);
+  }
 
 
 
@@ -1413,6 +1523,16 @@
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpMediaInitDone) {
+      try {
+        if (typeof ensureMenuItem === "function") ensureMenuItem();
+        if (typeof enhanceListAvatars === "function") enhanceListAvatars();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpMediaInitDone = true;
+
     try {
       ensureClientePhotoUI();
       ensureProfPhotoUI();
@@ -1477,4 +1597,18 @@
     uploadFotoStorage: uploadFotoStorage,
     session: session
   };
+
+  window.addEventListener("online", function () {
+    setTimeout(function () { flushFotoUploadQueue(); }, 1200);
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && navigator.onLine) {
+      setTimeout(function () { flushFotoUploadQueue(); }, 1500);
+    }
+  });
+  // Expor para flush global após sync de dados
+  if (typeof window !== "undefined") {
+    window.bpFlushFotoUploadQueue = flushFotoUploadQueue;
+  }
+
 })();

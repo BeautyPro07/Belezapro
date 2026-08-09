@@ -4,19 +4,157 @@
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
 let reciboCounter = parseInt(localStorage.getItem('bp_recibo_counter') || '0', 10);
 
-function nextReciboNum() {
-  // Contador local por salão (evita colisão entre salões no mesmo dispositivo).
-  // Unicidade multi-dispositivo requer sequência no Supabase (ver GUIA).
+function bpReciboStorageKey() {
   const salaoKey = (typeof state !== 'undefined' && state.config && state.config.salaoId)
     ? String(state.config.salaoId).slice(0, 8)
     : 'local';
-  const storageKey = 'bp_recibo_counter_' + salaoKey;
-  let n = parseInt(localStorage.getItem(storageKey) || localStorage.getItem('bp_recibo_counter') || '0', 10);
-  n++;
-  localStorage.setItem(storageKey, String(n));
-  reciboCounter = n;
-  const prefix = salaoKey !== 'local' ? salaoKey.slice(-4).toUpperCase() + '-' : '';
+  return { salaoKey: salaoKey, storageKey: 'bp_recibo_counter_' + salaoKey };
+}
+
+/** Extrai sequência numérica do final de um recibo (ex. ABCD-0012 → 12). */
+function bpParseReciboSeq(val) {
+  const m = String(val || '').match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function bpGetLocalReciboSeq() {
+  const keys = bpReciboStorageKey();
+  let n = parseInt(localStorage.getItem(keys.storageKey) || localStorage.getItem('bp_recibo_counter') || '0', 10);
+  if (isNaN(n) || n < 0) n = 0;
+  return n;
+}
+
+function bpSetLocalReciboSeq(n) {
+  const keys = bpReciboStorageKey();
+  const v = Math.max(0, parseInt(n, 10) || 0);
+  try { localStorage.setItem(keys.storageKey, String(v)); } catch (_) {}
+  try { localStorage.setItem('bp_recibo_counter', String(v)); } catch (_) {}
+  reciboCounter = v;
+  try {
+    if (typeof state !== 'undefined' && state.config) state.config.reciboCounter = v;
+  } catch (_) {}
+  return v;
+}
+
+/**
+ * ET4.5: reconcilia contador com movimentos locais + remoto (max).
+ * Garante que multi-dispositivo sobe o piso do contador.
+ */
+function bpReconcileReciboCounterFromMovimentos() {
+  let maxSeq = bpGetLocalReciboSeq();
+  try {
+    const list = (typeof state !== 'undefined' && state.movimentos) ? state.movimentos : [];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m) continue;
+      if (m.tipo && m.tipo !== 'venda') continue;
+      const s = bpParseReciboSeq(m.reciboNum);
+      if (s > maxSeq) maxSeq = s;
+    }
+  } catch (_) {}
+  if (maxSeq > bpGetLocalReciboSeq()) bpSetLocalReciboSeq(maxSeq);
+  return maxSeq;
+}
+
+/**
+ * Tenta persistir o contador em salao_config.recibo_counter (se a coluna existir).
+ * Se o schema ainda não tiver a coluna, falha em silêncio — o contador continua
+ * nos movimentos (reciboNum) e no localStorage até a migração SQL.
+ */
+async function bpPushReciboCounterToSupabase(n) {
+  try {
+    if (!navigator.onLine) return false;
+    if (typeof state === 'undefined' || !state.config || !state.config.salaoId) return false;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return false;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const accessToken = session && session.access_token;
+    if (!accessToken || typeof SUPABASE_URL === 'undefined') return false;
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    };
+    const body = {
+      salao_id: state.config.salaoId,
+      recibo_counter: n,
+      updated_at: new Date().toISOString()
+    };
+    // PATCH se linha existir; fallback POST merge
+    let resp = await fetch(
+      SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId),
+      { method: 'PATCH', headers: headers, body: JSON.stringify({ recibo_counter: n, updated_at: body.updated_at }) }
+    );
+    if (resp.status === 404 || resp.status === 400 || resp.status === 409) {
+      resp = await fetch(SUPABASE_URL + '/rest/v1/salao_config', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+      });
+    }
+    return resp.ok;
+  } catch (e) {
+    if (typeof logErroSilencioso === 'function') logErroSilencioso('bpPushReciboCounter', e);
+    return false;
+  }
+}
+
+async function bpPullReciboCounterFromSupabase() {
+  try {
+    if (!navigator.onLine) return null;
+    if (typeof state === 'undefined' || !state.config || !state.config.salaoId) return null;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return null;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const accessToken = session && session.access_token;
+    if (!accessToken || typeof SUPABASE_URL === 'undefined') return null;
+    const resp = await fetch(
+      SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId) + '&select=recibo_counter',
+      { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + accessToken } }
+    );
+    if (!resp.ok) return null;
+    const rows = await resp.json();
+    if (!rows || !rows.length) return null;
+    const remote = parseInt(rows[0].recibo_counter, 10);
+    return isNaN(remote) ? null : remote;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Sobe o contador local para max(local, movimentos, remoto) e empurra se necessário. */
+async function bpSyncReciboCounter() {
+  let local = bpReconcileReciboCounterFromMovimentos();
+  const remote = await bpPullReciboCounterFromSupabase();
+  if (remote != null && remote > local) {
+    local = bpSetLocalReciboSeq(remote);
+  }
+  // Empurrar se local >= remoto (inclui empate após venda)
+  if (navigator.onLine) {
+    try { await bpPushReciboCounterToSupabase(local); } catch (_) {}
+  }
+  return local;
+}
+
+function nextReciboNum() {
+  // ET4.5: sequência por salão; reconcilia com movimentos; tenta sync Supabase
+  bpReconcileReciboCounterFromMovimentos();
+  const keys = bpReciboStorageKey();
+  let n = bpGetLocalReciboSeq() + 1;
+  bpSetLocalReciboSeq(n);
+  // Fire-and-forget push (não bloqueia a venda)
+  try {
+    if (typeof bpPushReciboCounterToSupabase === 'function') {
+      Promise.resolve(bpPushReciboCounterToSupabase(n)).catch(function () {});
+    }
+  } catch (_) {}
+  const prefix = keys.salaoKey !== 'local' ? keys.salaoKey.slice(-4).toUpperCase() + '-' : '';
   return prefix + String(n).padStart(4, '0');
+}
+
+if (typeof window !== 'undefined') {
+  window.nextReciboNum = nextReciboNum;
+  window.bpSyncReciboCounter = bpSyncReciboCounter;
+  window.bpReconcileReciboCounterFromMovimentos = bpReconcileReciboCounterFromMovimentos;
 }
 
 function hoje() {
@@ -46,19 +184,32 @@ function logErroSilencioso(contexto, err) {
 
 let toastTimer;
 
-function toast(msg, type) {
+/**
+ * ET4.8 — toast profissional (duração por tipo; z-index abaixo do modal).
+ * type: success | error | warning | info | (default)
+ * opts.duration ms opcional
+ */
+function toast(msg, type, opts) {
   const el = document.getElementById('toast');
   if (!el) return;
-  const icons = { success: '', error: '', warning: '' };
-  // Reset imediato para o browser pintar o novo estado sem esperar o timer anterior
   clearTimeout(toastTimer);
   el.classList.remove('show');
-  el.textContent = (icons[type] || '') + msg;
-  el.className = 'toast' + (type ? ' ' + type : '');
-  // Forçar reflow → a transição .show aplica-se de imediato (feedback determinístico)
+  const text = String(msg == null ? '' : msg);
+  el.textContent = text;
+  const t = type || '';
+  el.className = 'toast' + (t ? ' ' + t : '');
+  el.setAttribute('role', t === 'error' ? 'alert' : 'status');
+  el.setAttribute('aria-live', t === 'error' ? 'assertive' : 'polite');
   void el.offsetWidth;
   el.classList.add('show');
-  toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2800);
+  var dur = 2500;
+  if (opts && opts.duration != null) dur = Number(opts.duration) || 2500;
+  else if (t === 'error') dur = 5000;
+  else if (t === 'warning') dur = 3500;
+  else if (t === 'info') dur = 2500;
+  else if (t === 'success') dur = 2500;
+  else dur = 2500;
+  toastTimer = setTimeout(function () { el.classList.remove('show'); }, dur);
 }
 
 function animateKpi(id, txt) {
@@ -90,6 +241,7 @@ function closeModal(id) {
 function openModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
+  try { el.hidden = false; } catch (_) {}
   el.classList.add('open');
   el.style.display = 'flex';
   document.body.classList.add('bp-modal-open');
@@ -100,13 +252,13 @@ document.addEventListener('click', function (e) {
   const t = e.target;
   if (!t || !t.classList || !t.classList.contains('modal-overlay')) return;
   if (!t.classList.contains('open')) return;
-  if (t.id === 'modal-confirm' || t.id === 'modal-erro') return;
+  if (t.id === 'modal-confirm' || t.id === 'modal-erro' || t.id === 'modal-offline-info') return;
   closeModal(t.id);
 }, true);
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
   const open = document.querySelector('.modal-overlay.open');
-  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro') return;
+  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro' || open.id === 'modal-offline-info') return;
   closeModal(open.id);
 });
 
@@ -120,7 +272,13 @@ function setButtonLoading(button, isLoading) {
 // ====================================================================
 //  MODAL DE CONFIRMAÇÃO CENTRADO (Fase 1)
 // ====================================================================
-function showConfirmModal(title, message, danger = true) {
+/**
+ * ET4.8 — confirmação.
+ * danger=true → destrutivo (CTA = opts.confirmLabel || "Eliminar")
+ * danger=false → simples (CTA = opts.confirmLabel || "Continuar")
+ * opts: { confirmLabel, cancelLabel, variant }
+ */
+function showConfirmModal(title, message, danger = true, opts) {
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-confirm');
     const titleEl = document.getElementById('confirm-title');
@@ -128,38 +286,67 @@ function showConfirmModal(title, message, danger = true) {
     const okBtn = document.getElementById('confirm-ok-btn');
     const cancelBtn = document.getElementById('confirm-cancel-btn');
     if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) { resolve(confirm(message || title)); return; }
+    opts = opts || {};
+    const variant = opts.variant || (danger ? 'destructive' : 'default');
     titleEl.textContent = title || 'Tem a certeza?';
     msgEl.textContent = message || 'Esta acção não pode ser desfeita.';
-    if (danger) { okBtn.className = 'btn btn-danger';
-      okBtn.textContent = 'Confirmar'; } else { okBtn.className = 'btn btn-primary';
-      okBtn.textContent = 'Sim'; }
-    const newOk = () => { closeModal('modal-confirm');
-      resolve(true); };
-    const newCancel = () => { closeModal('modal-confirm');
-      resolve(false); };
+    cancelBtn.textContent = opts.cancelLabel || 'Cancelar';
+    cancelBtn.className = 'btn btn-secondary btn-modal-compact';
+    if (variant === 'destructive' || danger) {
+      okBtn.className = 'btn btn-danger btn-modal-compact';
+      okBtn.textContent = opts.confirmLabel || 'Eliminar';
+    } else if (variant === 'quiet') {
+      // Quiet = tipografia limpa; CTA pode ser vermelho (ex. Sair) via confirmTone
+      var quietTone = opts.confirmTone || 'neutral';
+      if (quietTone === 'danger') {
+        okBtn.className = 'btn btn-danger btn-modal-compact';
+      } else {
+        okBtn.className = 'btn btn-modal-compact btn-modal-quiet';
+      }
+      okBtn.textContent = opts.confirmLabel || 'Continuar';
+    } else {
+      okBtn.className = 'btn btn-primary btn-modal-compact';
+      okBtn.textContent = opts.confirmLabel || 'Continuar';
+    }
+    try {
+      overlay.classList.toggle('modal-confirm--quiet', variant === 'quiet');
+      overlay.classList.toggle('modal-confirm--destructive', variant === 'destructive' || !!danger);
+    } catch (_) {}
+    try {
+      const lab = overlay.querySelector('label');
+      if (lab && lab.querySelector('#keep-logged')) lab.style.display = 'none';
+    } catch (_) {}
+    const newOk = () => { closeModal('modal-confirm'); resolve(true); };
+    const newCancel = () => { closeModal('modal-confirm'); resolve(false); };
     okBtn.onclick = newOk;
     cancelBtn.onclick = newCancel;
-    overlay.onclick = (e) => { if (e.target === overlay) { closeModal('modal-confirm');
-        resolve(false); } };
+    overlay.onclick = (e) => { if (e.target === overlay) { closeModal('modal-confirm'); resolve(false); } };
     openModal('modal-confirm');
-    setTimeout(() => { cancelBtn.focus(); }, 150);
+    setTimeout(function () { try { if (cancelBtn && typeof cancelBtn.focus === 'function') cancelBtn.focus(); } catch (_) {} }, 150);
   });
 }
 
 // ====================================================================
 //  MODAL DE ERRO (Fase 7)
 // ====================================================================
-function mostrarErro(mensagem, acaoTentar = null) {
+function mostrarErro(mensagem, acaoTentar = null, titulo) {
   const modal = document.getElementById('modal-erro');
   const msgEl = document.getElementById('erro-message');
+  const titleEl = document.getElementById('erro-title');
   const tentarBtn = document.getElementById('erro-tentar-btn');
   const cancelarBtn = document.getElementById('erro-cancelar-btn');
   if (!modal) return;
-  msgEl.textContent = mensagem || 'Ocorreu um erro ao processar a operação. Tente novamente.';
+  if (titleEl) titleEl.textContent = titulo || 'Não foi possível concluir';
+  msgEl.textContent = mensagem || 'Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.';
+  if (cancelarBtn) cancelarBtn.textContent = 'Fechar';
+  if (tentarBtn) {
+    tentarBtn.textContent = 'Tentar novamente';
+    tentarBtn.style.display = typeof acaoTentar === 'function' ? '' : 'none';
+  }
   const newTentar = () => { closeModal('modal-erro'); if (typeof acaoTentar === 'function') acaoTentar(); };
   const newCancelar = () => { closeModal('modal-erro'); };
-  tentarBtn.onclick = newTentar;
-  cancelarBtn.onclick = newCancelar;
+  if (tentarBtn) tentarBtn.onclick = newTentar;
+  if (cancelarBtn) cancelarBtn.onclick = newCancelar;
   modal.onclick = (e) => { if (e.target === modal) closeModal('modal-erro'); };
   openModal('modal-erro');
 }

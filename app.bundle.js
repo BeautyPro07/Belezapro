@@ -60,19 +60,157 @@ const RBAC_ROLES = ['admin', 'gerente', 'operador'];
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
 let reciboCounter = parseInt(localStorage.getItem('bp_recibo_counter') || '0', 10);
 
-function nextReciboNum() {
-  // Contador local por salão (evita colisão entre salões no mesmo dispositivo).
-  // Unicidade multi-dispositivo requer sequência no Supabase (ver GUIA).
+function bpReciboStorageKey() {
   const salaoKey = (typeof state !== 'undefined' && state.config && state.config.salaoId)
     ? String(state.config.salaoId).slice(0, 8)
     : 'local';
-  const storageKey = 'bp_recibo_counter_' + salaoKey;
-  let n = parseInt(localStorage.getItem(storageKey) || localStorage.getItem('bp_recibo_counter') || '0', 10);
-  n++;
-  localStorage.setItem(storageKey, String(n));
-  reciboCounter = n;
-  const prefix = salaoKey !== 'local' ? salaoKey.slice(-4).toUpperCase() + '-' : '';
+  return { salaoKey: salaoKey, storageKey: 'bp_recibo_counter_' + salaoKey };
+}
+
+/** Extrai sequência numérica do final de um recibo (ex. ABCD-0012 → 12). */
+function bpParseReciboSeq(val) {
+  const m = String(val || '').match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function bpGetLocalReciboSeq() {
+  const keys = bpReciboStorageKey();
+  let n = parseInt(localStorage.getItem(keys.storageKey) || localStorage.getItem('bp_recibo_counter') || '0', 10);
+  if (isNaN(n) || n < 0) n = 0;
+  return n;
+}
+
+function bpSetLocalReciboSeq(n) {
+  const keys = bpReciboStorageKey();
+  const v = Math.max(0, parseInt(n, 10) || 0);
+  try { localStorage.setItem(keys.storageKey, String(v)); } catch (_) {}
+  try { localStorage.setItem('bp_recibo_counter', String(v)); } catch (_) {}
+  reciboCounter = v;
+  try {
+    if (typeof state !== 'undefined' && state.config) state.config.reciboCounter = v;
+  } catch (_) {}
+  return v;
+}
+
+/**
+ * ET4.5: reconcilia contador com movimentos locais + remoto (max).
+ * Garante que multi-dispositivo sobe o piso do contador.
+ */
+function bpReconcileReciboCounterFromMovimentos() {
+  let maxSeq = bpGetLocalReciboSeq();
+  try {
+    const list = (typeof state !== 'undefined' && state.movimentos) ? state.movimentos : [];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m) continue;
+      if (m.tipo && m.tipo !== 'venda') continue;
+      const s = bpParseReciboSeq(m.reciboNum);
+      if (s > maxSeq) maxSeq = s;
+    }
+  } catch (_) {}
+  if (maxSeq > bpGetLocalReciboSeq()) bpSetLocalReciboSeq(maxSeq);
+  return maxSeq;
+}
+
+/**
+ * Tenta persistir o contador em salao_config.recibo_counter (se a coluna existir).
+ * Se o schema ainda não tiver a coluna, falha em silêncio — o contador continua
+ * nos movimentos (reciboNum) e no localStorage até a migração SQL.
+ */
+async function bpPushReciboCounterToSupabase(n) {
+  try {
+    if (!navigator.onLine) return false;
+    if (typeof state === 'undefined' || !state.config || !state.config.salaoId) return false;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return false;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const accessToken = session && session.access_token;
+    if (!accessToken || typeof SUPABASE_URL === 'undefined') return false;
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    };
+    const body = {
+      salao_id: state.config.salaoId,
+      recibo_counter: n,
+      updated_at: new Date().toISOString()
+    };
+    // PATCH se linha existir; fallback POST merge
+    let resp = await fetch(
+      SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId),
+      { method: 'PATCH', headers: headers, body: JSON.stringify({ recibo_counter: n, updated_at: body.updated_at }) }
+    );
+    if (resp.status === 404 || resp.status === 400 || resp.status === 409) {
+      resp = await fetch(SUPABASE_URL + '/rest/v1/salao_config', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+      });
+    }
+    return resp.ok;
+  } catch (e) {
+    if (typeof logErroSilencioso === 'function') logErroSilencioso('bpPushReciboCounter', e);
+    return false;
+  }
+}
+
+async function bpPullReciboCounterFromSupabase() {
+  try {
+    if (!navigator.onLine) return null;
+    if (typeof state === 'undefined' || !state.config || !state.config.salaoId) return null;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return null;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const accessToken = session && session.access_token;
+    if (!accessToken || typeof SUPABASE_URL === 'undefined') return null;
+    const resp = await fetch(
+      SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId) + '&select=recibo_counter',
+      { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + accessToken } }
+    );
+    if (!resp.ok) return null;
+    const rows = await resp.json();
+    if (!rows || !rows.length) return null;
+    const remote = parseInt(rows[0].recibo_counter, 10);
+    return isNaN(remote) ? null : remote;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Sobe o contador local para max(local, movimentos, remoto) e empurra se necessário. */
+async function bpSyncReciboCounter() {
+  let local = bpReconcileReciboCounterFromMovimentos();
+  const remote = await bpPullReciboCounterFromSupabase();
+  if (remote != null && remote > local) {
+    local = bpSetLocalReciboSeq(remote);
+  }
+  // Empurrar se local >= remoto (inclui empate após venda)
+  if (navigator.onLine) {
+    try { await bpPushReciboCounterToSupabase(local); } catch (_) {}
+  }
+  return local;
+}
+
+function nextReciboNum() {
+  // ET4.5: sequência por salão; reconcilia com movimentos; tenta sync Supabase
+  bpReconcileReciboCounterFromMovimentos();
+  const keys = bpReciboStorageKey();
+  let n = bpGetLocalReciboSeq() + 1;
+  bpSetLocalReciboSeq(n);
+  // Fire-and-forget push (não bloqueia a venda)
+  try {
+    if (typeof bpPushReciboCounterToSupabase === 'function') {
+      Promise.resolve(bpPushReciboCounterToSupabase(n)).catch(function () {});
+    }
+  } catch (_) {}
+  const prefix = keys.salaoKey !== 'local' ? keys.salaoKey.slice(-4).toUpperCase() + '-' : '';
   return prefix + String(n).padStart(4, '0');
+}
+
+if (typeof window !== 'undefined') {
+  window.nextReciboNum = nextReciboNum;
+  window.bpSyncReciboCounter = bpSyncReciboCounter;
+  window.bpReconcileReciboCounterFromMovimentos = bpReconcileReciboCounterFromMovimentos;
 }
 
 function hoje() {
@@ -102,19 +240,32 @@ function logErroSilencioso(contexto, err) {
 
 let toastTimer;
 
-function toast(msg, type) {
+/**
+ * ET4.8 — toast profissional (duração por tipo; z-index abaixo do modal).
+ * type: success | error | warning | info | (default)
+ * opts.duration ms opcional
+ */
+function toast(msg, type, opts) {
   const el = document.getElementById('toast');
   if (!el) return;
-  const icons = { success: '', error: '', warning: '' };
-  // Reset imediato para o browser pintar o novo estado sem esperar o timer anterior
   clearTimeout(toastTimer);
   el.classList.remove('show');
-  el.textContent = (icons[type] || '') + msg;
-  el.className = 'toast' + (type ? ' ' + type : '');
-  // Forçar reflow → a transição .show aplica-se de imediato (feedback determinístico)
+  const text = String(msg == null ? '' : msg);
+  el.textContent = text;
+  const t = type || '';
+  el.className = 'toast' + (t ? ' ' + t : '');
+  el.setAttribute('role', t === 'error' ? 'alert' : 'status');
+  el.setAttribute('aria-live', t === 'error' ? 'assertive' : 'polite');
   void el.offsetWidth;
   el.classList.add('show');
-  toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2800);
+  var dur = 2500;
+  if (opts && opts.duration != null) dur = Number(opts.duration) || 2500;
+  else if (t === 'error') dur = 5000;
+  else if (t === 'warning') dur = 3500;
+  else if (t === 'info') dur = 2500;
+  else if (t === 'success') dur = 2500;
+  else dur = 2500;
+  toastTimer = setTimeout(function () { el.classList.remove('show'); }, dur);
 }
 
 function animateKpi(id, txt) {
@@ -146,6 +297,7 @@ function closeModal(id) {
 function openModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
+  try { el.hidden = false; } catch (_) {}
   el.classList.add('open');
   el.style.display = 'flex';
   document.body.classList.add('bp-modal-open');
@@ -156,13 +308,13 @@ document.addEventListener('click', function (e) {
   const t = e.target;
   if (!t || !t.classList || !t.classList.contains('modal-overlay')) return;
   if (!t.classList.contains('open')) return;
-  if (t.id === 'modal-confirm' || t.id === 'modal-erro') return;
+  if (t.id === 'modal-confirm' || t.id === 'modal-erro' || t.id === 'modal-offline-info') return;
   closeModal(t.id);
 }, true);
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
   const open = document.querySelector('.modal-overlay.open');
-  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro') return;
+  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro' || open.id === 'modal-offline-info') return;
   closeModal(open.id);
 });
 
@@ -176,7 +328,13 @@ function setButtonLoading(button, isLoading) {
 // ====================================================================
 //  MODAL DE CONFIRMAÇÃO CENTRADO (Fase 1)
 // ====================================================================
-function showConfirmModal(title, message, danger = true) {
+/**
+ * ET4.8 — confirmação.
+ * danger=true → destrutivo (CTA = opts.confirmLabel || "Eliminar")
+ * danger=false → simples (CTA = opts.confirmLabel || "Continuar")
+ * opts: { confirmLabel, cancelLabel, variant }
+ */
+function showConfirmModal(title, message, danger = true, opts) {
   return new Promise((resolve) => {
     const overlay = document.getElementById('modal-confirm');
     const titleEl = document.getElementById('confirm-title');
@@ -184,38 +342,67 @@ function showConfirmModal(title, message, danger = true) {
     const okBtn = document.getElementById('confirm-ok-btn');
     const cancelBtn = document.getElementById('confirm-cancel-btn');
     if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) { resolve(confirm(message || title)); return; }
+    opts = opts || {};
+    const variant = opts.variant || (danger ? 'destructive' : 'default');
     titleEl.textContent = title || 'Tem a certeza?';
     msgEl.textContent = message || 'Esta acção não pode ser desfeita.';
-    if (danger) { okBtn.className = 'btn btn-danger';
-      okBtn.textContent = 'Confirmar'; } else { okBtn.className = 'btn btn-primary';
-      okBtn.textContent = 'Sim'; }
-    const newOk = () => { closeModal('modal-confirm');
-      resolve(true); };
-    const newCancel = () => { closeModal('modal-confirm');
-      resolve(false); };
+    cancelBtn.textContent = opts.cancelLabel || 'Cancelar';
+    cancelBtn.className = 'btn btn-secondary btn-modal-compact';
+    if (variant === 'destructive' || danger) {
+      okBtn.className = 'btn btn-danger btn-modal-compact';
+      okBtn.textContent = opts.confirmLabel || 'Eliminar';
+    } else if (variant === 'quiet') {
+      // Quiet = tipografia limpa; CTA pode ser vermelho (ex. Sair) via confirmTone
+      var quietTone = opts.confirmTone || 'neutral';
+      if (quietTone === 'danger') {
+        okBtn.className = 'btn btn-danger btn-modal-compact';
+      } else {
+        okBtn.className = 'btn btn-modal-compact btn-modal-quiet';
+      }
+      okBtn.textContent = opts.confirmLabel || 'Continuar';
+    } else {
+      okBtn.className = 'btn btn-primary btn-modal-compact';
+      okBtn.textContent = opts.confirmLabel || 'Continuar';
+    }
+    try {
+      overlay.classList.toggle('modal-confirm--quiet', variant === 'quiet');
+      overlay.classList.toggle('modal-confirm--destructive', variant === 'destructive' || !!danger);
+    } catch (_) {}
+    try {
+      const lab = overlay.querySelector('label');
+      if (lab && lab.querySelector('#keep-logged')) lab.style.display = 'none';
+    } catch (_) {}
+    const newOk = () => { closeModal('modal-confirm'); resolve(true); };
+    const newCancel = () => { closeModal('modal-confirm'); resolve(false); };
     okBtn.onclick = newOk;
     cancelBtn.onclick = newCancel;
-    overlay.onclick = (e) => { if (e.target === overlay) { closeModal('modal-confirm');
-        resolve(false); } };
+    overlay.onclick = (e) => { if (e.target === overlay) { closeModal('modal-confirm'); resolve(false); } };
     openModal('modal-confirm');
-    setTimeout(() => { cancelBtn.focus(); }, 150);
+    setTimeout(function () { try { if (cancelBtn && typeof cancelBtn.focus === 'function') cancelBtn.focus(); } catch (_) {} }, 150);
   });
 }
 
 // ====================================================================
 //  MODAL DE ERRO (Fase 7)
 // ====================================================================
-function mostrarErro(mensagem, acaoTentar = null) {
+function mostrarErro(mensagem, acaoTentar = null, titulo) {
   const modal = document.getElementById('modal-erro');
   const msgEl = document.getElementById('erro-message');
+  const titleEl = document.getElementById('erro-title');
   const tentarBtn = document.getElementById('erro-tentar-btn');
   const cancelarBtn = document.getElementById('erro-cancelar-btn');
   if (!modal) return;
-  msgEl.textContent = mensagem || 'Ocorreu um erro ao processar a operação. Tente novamente.';
+  if (titleEl) titleEl.textContent = titulo || 'Não foi possível concluir';
+  msgEl.textContent = mensagem || 'Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.';
+  if (cancelarBtn) cancelarBtn.textContent = 'Fechar';
+  if (tentarBtn) {
+    tentarBtn.textContent = 'Tentar novamente';
+    tentarBtn.style.display = typeof acaoTentar === 'function' ? '' : 'none';
+  }
   const newTentar = () => { closeModal('modal-erro'); if (typeof acaoTentar === 'function') acaoTentar(); };
   const newCancelar = () => { closeModal('modal-erro'); };
-  tentarBtn.onclick = newTentar;
-  cancelarBtn.onclick = newCancelar;
+  if (tentarBtn) tentarBtn.onclick = newTentar;
+  if (cancelarBtn) cancelarBtn.onclick = newCancelar;
   modal.onclick = (e) => { if (e.target === modal) closeModal('modal-erro'); };
   openModal('modal-erro');
 }
@@ -864,6 +1051,7 @@ function bpClearSessionLocal() {
     localStorage.setItem('bp_logged_out', '1');
     localStorage.removeItem('bp_session_active');
     localStorage.removeItem('bp_salao_id_cache');
+    localStorage.removeItem('bp_user_role');
   } catch (_) {}
 }
 function bpHasLocalSession() {
@@ -906,8 +1094,15 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
         m.classList.remove('open');
       });
       bpShowLoginShell();
-      if (typeof toast === 'function') toast('A sua sessão expirou. Inicie sessão novamente.', 'error');
+      if (typeof toast === 'function') toast('A sessão expirou. Inicia sessão novamente.', 'error');
     }
+  }
+  // ET4.2-P0-auth: refrescar permissões quando a sessão muda (sem expulsar offline-first)
+  if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'SIGNED_IN') {
+    try {
+      if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    } catch (_) {}
   }
   logoutVoluntarioEmCurso = false;
 });
@@ -1188,6 +1383,13 @@ async function sincronizarConfigDoServidor() {
       try { localStorage.setItem('bp_plano_cache', state.config.plano); } catch (_) {}
       await saveConfig();
       if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+      // ET4.5: reconciliar contador de recibos com servidor + movimentos
+      try {
+        if (typeof bpSyncReciboCounter === 'function') await bpSyncReciboCounter();
+      } catch (_) {}
+      try {
+        if (typeof bpPullIAUsoFromSupabase === 'function') await bpPullIAUsoFromSupabase();
+      } catch (_) {}
     } else {
       await fetch(`${SUPABASE_URL}/rest/v1/salao_config`, {
         method: 'POST',
@@ -1212,7 +1414,7 @@ async function sincronizarConfigDoServidor() {
 document.getElementById('login-btn').addEventListener('click', async function() {
   const email    = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value.trim();
-  if (!email || !password) { toast('Preencha email e password', 'error'); return; }
+  if (!email || !password) { toast('Introduz o email e a palavra-passe.', 'warning'); return; }
   setButtonLoading(this, true);
   try {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -1452,19 +1654,11 @@ document.getElementById('login-btn').addEventListener('click', async function() 
       }
     } catch (_) {}
 
+    // ET4.9b: sem avisos ao utilizador sobre «ligação ao servidor» / saúde do serviço.
+    // A sincronização continua em silêncio; apenas log interno se necessário.
     if (!worsened) return;
-    if (Date.now() < _alertCooldownUntil) return;
-    _alertCooldownUntil = Date.now() + 60000;
-
-    var msg =
-      health.level === 'critical'
-        ? 'Ligação ao servidor instável. Os dados continuam seguros neste dispositivo.'
-        : 'Servidor mais lento que o habitual. A sincronização pode demorar.';
     try {
-      if (typeof toast === 'function') toast(msg, health.level === 'critical' ? 'error' : 'info');
-    } catch (_) {}
-    try {
-      bpLogError('service-health', new Error(health.label), {
+      bpLogError('service-health', new Error(health.label || 'health'), {
         level: health.level,
         reasons: health.reasons,
         stats: health.stats
@@ -1670,26 +1864,122 @@ function saveSyncQueue(q) {
     const str = JSON.stringify(q);
     if (typeof storageSetSecure === 'function') storageSetSecure(SYNC_QUEUE_KEY, str);
     else localStorage.setItem(SYNC_QUEUE_KEY, str);
-  } catch (e) { logErroSilencioso('saveSyncQueue', e); }
+    // ET4.6: espelho em sessionStorage como contingência leve (não substitui IDB)
+    try { sessionStorage.setItem(SYNC_QUEUE_KEY + '_len', String((q && q.length) || 0)); } catch (_) {}
+  } catch (e) {
+    // Quota cheia: manter o máximo possível; nunca silenciar perda total
+    logErroSilencioso('saveSyncQueue', e);
+    try {
+      // Tentar gravar só metadados + últimos N se o payload for enorme
+      if (q && q.length > 100) {
+        const slim = q.map(function (op) {
+          return {
+            id: op.id,
+            tabela: op.tabela,
+            operacao: op.operacao,
+            ts: op.ts,
+            attempts: op.attempts,
+            failed: op.failed,
+            nextRetry: op.nextRetry,
+            payload: op.payload
+          };
+        });
+        localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(slim));
+      }
+    } catch (e2) {
+      logErroSilencioso('saveSyncQueue.fallback', e2);
+      if (typeof toast === 'function') {
+        toast('Armazenamento do dispositivo quase cheio. Liberte espaço — a fila tem ' + ((q && q.length) || 0) + ' ops.', 'warning');
+      }
+    }
+  }
 }
 
 function actualizarBannerOffline() {
+  // Banner topo continua desactivado (relatório: não intrusivo permanente).
   const banner = document.getElementById('offline-banner');
-  const txt = document.getElementById('offline-banner-text');
-  if (!banner) return;
-  if (navigator.onLine) {
+  if (banner) {
     banner.classList.remove('show');
-    return;
+    banner.style.display = 'none';
+    banner.setAttribute('aria-hidden', 'true');
   }
-  banner.classList.add('show');
-  if (txt) {
-    const fila = getSyncQueue();
-    const n = fila.filter(function (op) { return op.failed !== true; }).length;
-    txt.textContent = n > 0
-      ? ('Modo offline — ' + n + (n === 1 ? ' alteração' : ' alterações') + ' serão enviadas ao reconectar')
-      : 'Modo offline — dados guardados neste dispositivo';
-  }
+  // ET4.10: aviso offline centrado, uma vez por sessão, CTA Entendi.
+  try {
+    if (typeof bpMaybeShowOfflineInfoModal === 'function') bpMaybeShowOfflineInfoModal();
+  } catch (_) {}
 }
+
+/** Offline info modal — centro, obrigatório ler, depois desaparece (sessionStorage). */
+function bpMaybeShowOfflineInfoModal() {
+  try {
+    if (typeof navigator === 'undefined' || navigator.onLine) return;
+    if (sessionStorage.getItem('bp_offline_info_ack') === '1') return;
+    var modal = document.getElementById('modal-offline-info');
+    if (!modal) return;
+    if (modal.classList.contains('open')) return;
+    modal.hidden = false;
+    if (typeof openModal === 'function') openModal('modal-offline-info');
+    else {
+      modal.classList.add('open');
+      modal.style.display = 'flex';
+    }
+  } catch (_) {}
+}
+
+function bpAckOfflineInfoModal() {
+  try { sessionStorage.setItem('bp_offline_info_ack', '1'); } catch (_) {}
+  try {
+    if (typeof closeModal === 'function') closeModal('modal-offline-info');
+    else {
+      var modal = document.getElementById('modal-offline-info');
+      if (modal) {
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+        modal.hidden = true;
+      }
+    }
+  } catch (_) {}
+}
+
+if (typeof window !== 'undefined') {
+  window.bpMaybeShowOfflineInfoModal = bpMaybeShowOfflineInfoModal;
+  window.bpAckOfflineInfoModal = bpAckOfflineInfoModal;
+}
+
+(function bpBindOfflineInfoModal() {
+  function bind() {
+    var ok = document.getElementById('modal-offline-info-ok');
+    if (!ok || ok.dataset.bpBound) return;
+    ok.dataset.bpBound = '1';
+    ok.addEventListener('click', function () {
+      if (typeof bpAckOfflineInfoModal === 'function') bpAckOfflineInfoModal();
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+  // Uma vez por sessão de separador: se ainda não leu, mostra ao ficar offline.
+  window.addEventListener('offline', function () {
+    setTimeout(function () {
+      if (typeof bpMaybeShowOfflineInfoModal === 'function') bpMaybeShowOfflineInfoModal();
+    }, 200);
+  });
+  // Arranque já offline
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      setTimeout(function () {
+        if (typeof actualizarBannerOffline === 'function') actualizarBannerOffline();
+      }, 400);
+    });
+  } else {
+    setTimeout(function () {
+      if (typeof actualizarBannerOffline === 'function') actualizarBannerOffline();
+    }, 400);
+  }
+})();
+
 
 function atualizarIndicadorSync() {
   const text = document.getElementById('sync-text');
@@ -1703,7 +1993,7 @@ function atualizarIndicadorSync() {
   let label = '';
   if (offline) {
     stateKey = 'offline';
-    label = pendentes > 0 ? ('Offline · ' + pendentes + ' pend.') : 'Offline';
+    label = pendentes > 0 ? ('Sem rede · ' + pendentes + ' pend.') : 'Sem rede';
   } else if (pendentes > 0) {
     stateKey = 'pending';
     label = pendentes === 1 ? '1 pendente' : (pendentes + ' pendentes');
@@ -1711,16 +2001,9 @@ function atualizarIndicadorSync() {
     stateKey = 'error';
     label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
   } else if (typeof bpGetServiceHealth === 'function') {
-    // Saúde do serviço (latência / falhas HTTP) — só quando a fila está limpa
+    // ET4.10: sem labels de «servidor instável» no header (relatório + pedido do produto).
     try {
       var health = bpGetServiceHealth();
-      if (health && (health.level === 'degraded' || health.level === 'critical')) {
-        stateKey = health.level === 'critical' ? 'error' : 'pending';
-        label = health.label || (health.level === 'critical' ? 'Serviço instável' : 'Serviço lento');
-        if (health.stats && health.stats.avg) {
-          label += ' · ' + health.stats.avg + 'ms';
-        }
-      }
       if (typeof bpNotifyHealthIfNeeded === 'function') bpNotifyHealthIfNeeded(health);
     } catch (_) {}
   }
@@ -1763,104 +2046,129 @@ function addToSyncQueue(tabela, operacao, payload) {
     attempts: 0,
     failed: false
   });
+  // ET4.5: fila sem teto — nunca descartar ops (pedido de produto)
   saveSyncQueue(q);
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 async function flushSyncQueue() {
-  const q = getSyncQueue();
-  if (q.length === 0) return;
+  if (!navigator.onLine) return;
+  if (flushSyncQueue._running) return;
+  flushSyncQueue._running = true;
 
-  const MAX_ATTEMPTS = 5;
-  const restantes = [];
-  let interrompido = false;
-  const itensFalhos = [];
+  // ET4.6: filas grandes (600+) em lotes — progresso gravado, sem conflitos por "tudo ou nada"
+  const BATCH_SIZE = 25;
+  const MAX_ATTEMPTS = 8;
+  const YIELD_MS = 30;
 
-  for (let i = 0; i < q.length; i++) {
-    const op = q[i];
+  try {
+    let q = getSyncQueue();
+    if (!q.length) return;
 
-    if (op.failed === true) {
-      restantes.push(op);
-      continue;
-    }
+    const itensFalhos = [];
+    let processed = 0;
+    let interrompido = false;
 
-    if (interrompido) {
-      restantes.push(op);
-      continue;
-    }
-
-    // Respeitar o backoff exponencial
-    if (op.nextRetry && Date.now() < op.nextRetry) {
-      restantes.push(op);
-      continue;
-    }
-
-    try {
-      if (op.operacao === 'delete') {
-        const success = await supabaseDelete(op.tabela, op.payload.id);
-        if (success) {
-          removeDeletedItem(op.payload.id, op.tabela);  // só remover tombstone se delete remoto OK
-        }
-      } else {
-        if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload?.id, op.tabela)) {
+    while (q.length && navigator.onLine && !interrompido) {
+      const batch = [];
+      const defer = [];
+      for (let i = 0; i < q.length; i++) {
+        const op = q[i];
+        if (!op) continue;
+        if (op.failed === true) {
+          defer.push(op);
           continue;
         }
-        // Contingência: desactivação → PATCH dedicado (mais fiável que upsert)
-        const payload = op.payload || {};
-        const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
-        if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
-          await supabaseDeactivate(op.tabela, payload.id, {
-            data_desativacao: payload.data_desativacao || null,
-            updated_at: payload.updated_at || new Date().toISOString()
-          });
-        } else {
-          await supabaseUpsert(op.tabela, op.payload);
+        if (op.nextRetry && Date.now() < op.nextRetry) {
+          defer.push(op);
+          continue;
         }
-      }
-    } catch (err) {
-      // ================================================================
-      //  TRATAMENTO PARA LIMITE DE PLANO (não retentar)
-      // ================================================================
-      if (err.message === 'LIMITE_PLANO_ATINGIDO') {
-        toast('Operação bloqueada: limite do plano atingido.', 'error');
-        // Não colocar de volta na fila – descartar definitivamente
-        continue;
+        if (batch.length < BATCH_SIZE) batch.push(op);
+        else defer.push(op);
       }
 
-      if (err.message === 'SESSION_EXPIRED') {
-        restantes.push(op);
-        for (let j = i + 1; j < q.length; j++) {
-          restantes.push(q[j]);
-        }
-        saveSyncQueue(restantes);
-        await supabaseClient.auth.signOut();
-        interrompido = true;
+      if (!batch.length) {
+        // Só backoff/falhas — sair para não spin
+        saveSyncQueue(defer);
         break;
       }
 
-      op.attempts = (op.attempts || 0) + 1;
-
-      if (op.attempts >= MAX_ATTEMPTS) {
-        op.failed = true;
-        itensFalhos.push(op.id || 'item');
-        restantes.push(op);
-      } else {
-        const delay = Math.min(Math.pow(2, op.attempts) * 1000, 60000) + Math.random() * 1000;
-        op.nextRetry = Date.now() + delay;
-        restantes.push(op);
+      const restantesBatch = [];
+      for (let i = 0; i < batch.length; i++) {
+        if (!navigator.onLine) {
+          interrompido = true;
+          restantesBatch.push.apply(restantesBatch, batch.slice(i));
+          break;
+        }
+        const op = batch[i];
+        try {
+          if (op.operacao === 'delete') {
+            const success = await supabaseDelete(op.tabela, op.payload.id);
+            if (success && typeof removeDeletedItem === 'function') {
+              removeDeletedItem(op.payload.id, op.tabela);
+            }
+          } else {
+            if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload && op.payload.id, op.tabela)) {
+              continue;
+            }
+            const payload = op.payload || {};
+            const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
+            if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
+              await supabaseDeactivate(op.tabela, payload.id, {
+                data_desativacao: payload.data_desativacao || null,
+                updated_at: payload.updated_at || new Date().toISOString()
+              });
+            } else {
+              await supabaseUpsert(op.tabela, op.payload);
+            }
+          }
+          processed++;
+        } catch (err) {
+          if (err && err.message === 'LIMITE_PLANO_ATINGIDO') {
+            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido.', 'error');
+            continue;
+          }
+          if (err && (err.message === 'DUPLICADO_BLOQUEADO' || String(err.message || '').indexOf('DUPLICADO') >= 0)) {
+            if (typeof logErroSilencioso === 'function') logErroSilencioso('flushSyncQueue.duplicado', err);
+            // não retentar em loop
+            op.failed = true;
+            op.attempts = MAX_ATTEMPTS;
+            itensFalhos.push(op.id || 'item');
+            restantesBatch.push(op);
+            continue;
+          }
+          op.attempts = (op.attempts || 0) + 1;
+          if (op.attempts >= MAX_ATTEMPTS) {
+            op.failed = true;
+            itensFalhos.push(op.id || 'item');
+            restantesBatch.push(op);
+          } else {
+            const delay = Math.min(Math.pow(2, op.attempts) * 1000, 60000) + Math.random() * 1000;
+            op.nextRetry = Date.now() + delay;
+            restantesBatch.push(op);
+          }
+        }
       }
+
+      // Persistir progresso após cada lote (crítico com 600+)
+      q = restantesBatch.concat(defer);
+      saveSyncQueue(q);
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+
+      // Ceder à UI entre lotes
+      await new Promise(function (r) { setTimeout(r, YIELD_MS); });
     }
-  }
 
-  if (!interrompido) {
-    saveSyncQueue(restantes);
+    if (itensFalhos.length > 0 && typeof toast === 'function') {
+      toast('Falha ao sincronizar ' + itensFalhos.length + ' operação(ões) após várias tentativas. Toque no indicador de sync para reintentar.', 'error');
+    }
+    if (processed > 0 && typeof logErroSilencioso === 'function') {
+      try { console.info('[sync] flush processou', processed, 'ops; restam', getSyncQueue().length); } catch (_) {}
+    }
+    if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+  } finally {
+    flushSyncQueue._running = false;
   }
-
-  if (itensFalhos.length > 0) {
-    const msg = `Falha ao sincronizar ${itensFalhos.length} operação(ões) após ${MAX_ATTEMPTS} tentativas. Contacte o suporte.`;
-    toast(msg, 'error');
-  }
-  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 // ====================================================================
@@ -1874,7 +2182,13 @@ dbPut = async function(store, item) {
   await _dbPutOriginal(store, item);
 
   const tabela = STORE_TO_TABLE[store];
-  if (!tabela || !state.config.salaoId) return item;
+  // ET4-P0-04: sem salaoId não há sync remoto (isolamento multi-tenant)
+  if (!tabela || !state.config || !state.config.salaoId) {
+    if (tabela && (!state.config || !state.config.salaoId)) {
+      try { console.warn('[sync-queue] dbPut sem salaoId — apenas local:', store, item && item.id); } catch (_) {}
+    }
+    return item;
+  }
 
   if (navigator.onLine) {
     try {
@@ -1906,7 +2220,13 @@ dbDelete = async function(store, id) {
 
   await _dbDeleteOriginal(store, id);
 
-  if (!tabela || !state.config.salaoId) return;
+  // ET4.4: alinhado a dbPut — sem salaoId não há delete remoto
+  if (!tabela || !state.config || !state.config.salaoId) {
+    if (tabela) {
+      try { console.warn('[sync-queue] dbDelete sem salaoId — apenas local:', store, id); } catch (_) {}
+    }
+    return;
+  }
   if (navigator.onLine) {
     try { await supabaseDelete(tabela, id); }
     catch { addToSyncQueue(tabela, 'delete', { id }); }
@@ -1934,7 +2254,33 @@ async function bpRetryFailedSync() {
 }
 if (typeof window !== 'undefined') {
   window.bpRetryFailedSync = bpRetryFailedSync;
+  // ET4.2-P1-sync-retry: toque no indicador tenta reenviar falhas + flush
+  (function bindSyncRetryClick() {
+    var el = document.getElementById('sync-status-container');
+    if (!el || el.dataset.bpSyncRetryBound) return;
+    el.dataset.bpSyncRetryBound = '1';
+    el.style.cursor = 'pointer';
+    el.title = el.title || 'Toque para tentar sincronizar novamente';
+    el.addEventListener('click', function () {
+      if (!navigator.onLine) {
+        if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
+        return;
+      }
+      if (typeof toast === 'function') toast('A sincronizar alterações…', 'info');
+      Promise.resolve()
+        .then(function () { return typeof bpRetryFailedSync === 'function' ? bpRetryFailedSync() : null; })
+        .then(function () { return typeof flushSyncQueue === 'function' ? flushSyncQueue() : null; })
+        .then(function () {
+          if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+        })
+        .catch(function (e) {
+          if (typeof logErroSilencioso === 'function') logErroSilencioso('syncRetryClick', e);
+        });
+    });
+  })();
+
   window.addEventListener('online', function () {
+    try { sessionStorage.removeItem('bp_offline_info_ack'); } catch (_) {}
     setTimeout(function () {
       if (typeof bpRetryFailedSync === 'function') bpRetryFailedSync();
     }, 1500);
@@ -2261,6 +2607,9 @@ function toSupabaseFormat(tabela, item) {
         profissional: item.profissional || '',
         itens: item.itens || [],
         metodo_pagamento: item.metodoPagamento || 'Numerário',
+        recibo_num: item.reciboNum || item.recibo_num || null,
+        comissao_gerada: item.comissao_gerada != null ? Number(item.comissao_gerada) : null,
+        // cliente_id não existe no schema remoto actual (PGRST204) — nome em `cliente`
         data: item.data,
         hora: item.hora,
         updated_at: item.updated_at,
@@ -2335,10 +2684,13 @@ function fromSupabaseFormat(tabela, row) {
         descricao:       row.descricao,
         valor:           row.valor,
         cliente:         row.cliente,
+        cliente_id:      row.cliente_id || null,
         profissional_id: row.profissional_id || null,
         profissional:    row.profissional || '',
         itens:           row.itens || [],
         metodoPagamento: row.metodo_pagamento,
+        reciboNum:       row.recibo_num || row.reciboNum || null,
+        comissao_gerada: row.comissao_gerada != null ? Number(row.comissao_gerada) : 0,
         data:            row.data,
         hora:            row.hora,
         updated_at:      row.updated_at,
@@ -2679,6 +3031,8 @@ async function carregarDoSupabase() {
     for (const c of state.clientes)      await dbPutLocal('clientes',      c);
     for (const a of state.agendamentos)  await dbPutLocal('agendamentos',  a);
     for (const m of state.movimentos)    await dbPutLocal('movimentos',    m);
+    // ET4.5: após pull, alinhar sequência de recibos ao max local/remoto
+    try { if (typeof bpSyncReciboCounter === 'function') await bpSyncReciboCounter(); } catch (_) {}
     for (const p of state.profissionais) await dbPutLocal('profissionais', p);
     for (const s of state.servicos)      await dbPutLocal('servicos',      s);
 
@@ -2760,7 +3114,14 @@ function verificarLimite(tipo) {
       total = state.clientes.length;
       break;
     case 'profissionais':
-      total = state.profissionais.length;
+      // ET4-P1-05: contar apenas ativos (soft-delete não consome limite)
+      if (typeof getProfissionaisAtivos === 'function') {
+        total = getProfissionaisAtivos().length;
+      } else {
+        total = (state.profissionais || []).filter(function (p) {
+          return p && p.ativo !== false && p.ativo !== 0 && p.ativo !== 'false';
+        }).length;
+      }
       break;
   }
   if (total >= limite) {
@@ -2927,9 +3288,18 @@ async function loadState(trocouDeSalao = false) {
     try { localStorage.removeItem('bp_deleted_items'); } catch (_) {}
     // Preferências e resíduos do salão anterior (P2)
     ['bp_filtro_clientes','bp_chart_periodo','bp_chart_offset','bp_chart_mostrar_valores',
-     'bp_hist_periodo','bp_caixa_data_exata','bp_carrinho','bp_last_venda_id'].forEach(k => {
+     'bp_hist_periodo','bp_caixa_data_exata','bp_carrinho','bp_last_venda_id','bp_cart_items'].forEach(k => {
       try { localStorage.removeItem(k); } catch (_) {}
     });
+    try {
+      if (typeof clearCartStorageAll === 'function') clearCartStorageAll();
+      else {
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+          var ck = localStorage.key(i);
+          if (ck && ck.indexOf('bp_cart_items') === 0) localStorage.removeItem(ck);
+        }
+      }
+    } catch (_) {}
     try { sessionStorage.removeItem('bp_last_venda_id'); } catch (_) {}
     state.histPeriodo = 'hoje';
     state.filtroClientes = 'todos';
@@ -3018,7 +3388,7 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
   const lista = state[tabela] || [];
   const itemOriginal = lista.find(item => item.id === id);
   if (!itemOriginal) {
-    toast(`${nomeEntidade} não encontrado(a).`, 'warning');
+    toast((nomeEntidade || 'Registo') + ' não encontrado(a).', 'warning');
     return false;
   }
 
@@ -3047,7 +3417,7 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
         }
       }
       if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-      toast(`${nomeEntidade} eliminado(a).`, 'success');
+      toast((nomeEntidade || 'Registo') + ' removido(a).', 'success');
       return true;
     } catch (e) {
       console.warn(`[delete ${tabela}] Falha ao sincronizar:`, e);
@@ -3055,11 +3425,11 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
         const soft = Object.assign({}, itemOriginal, { ativo: false, updated_at: new Date().toISOString() });
         addToSyncQueue('servicos', 'upsert', soft);
       }
-      toast(`${nomeEntidade} eliminado(a) localmente. Sync em fila.`, 'warning');
+      toast((nomeEntidade || 'Registo') + ' removido(a) neste dispositivo. Será sincronizado quando houver rede.', 'warning');
       return true;
     }
   } else {
-    toast(`${nomeEntidade} eliminado(a) (offline). Sync quando online.`, 'warning');
+    toast((nomeEntidade || 'Registo') + ' removido(a) neste dispositivo. Será sincronizado quando houver rede.', 'warning');
     return true;
   }
 }
@@ -3110,7 +3480,7 @@ async function creditarPontosCliente(clienteId, pontos) {
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
   const nome = (c.nome || '').trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
   if (existeNomeDuplicado('clientes', nome)) {
     toast('Já existe um cliente com este nome.', 'error');
@@ -3126,7 +3496,7 @@ async function addCliente(c) {
       state.clientes.push(n);
       updateUI();
     }
-    toast('Cliente adicionado à lista', 'success');
+    toast('Cliente adicionado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -3193,6 +3563,10 @@ async function updateCliente(id, data) {
 }
 
 async function deleteCliente(id) {
+  // ET4.4: RBAC operacional (UI já restringe admin/gerente)
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para eliminar clientes.')) {
+    return false;
+  }
   return _deleteComRollback('clientes', id, 'Cliente');
 }
 
@@ -3254,7 +3628,7 @@ async function addAgendamento(ag) {
   }
   if (!verificarLimite('agendamentos')) return null;
   if (!ag.profissional_id || String(ag.profissional_id).trim() === '') {
-    toast('Selecione um profissional antes de agendar.', 'error');
+    toast('Selecciona um profissional antes de agendar.', 'warning');
     return null;
   }
 
@@ -3294,7 +3668,7 @@ async function addAgendamento(ag) {
       updateUI();
     }
     if (typeof renderBadges === 'function') renderBadges();
-    toast('Agendamento marcado', 'success');
+    toast('Agendamento marcado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -3308,6 +3682,12 @@ async function addAgendamento(ag) {
 async function updateAgendamento(id, data) {
   const actual = (state.agendamentos || []).find(a => a.id === id);
   if (!actual) return null;
+  // ET4.3-cancel: cancelar via status exige admin/gerente
+  if (data && String(data.status || '').toLowerCase() === 'cancelado') {
+    if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para cancelar agendamentos.')) {
+      return null;
+    }
+  }
 
   const merged = { ...actual, ...data };
   const st = String(merged.status || 'agendado').toLowerCase();
@@ -3359,17 +3739,96 @@ async function deleteAgendamento(id) {
 // ====================================================================
 //  CRUD — PROFISSIONAL
 // ====================================================================
+
+/** ET4.5: serviço exige ≥1 profissional válido (activo) ou nome pendente (criação conjunta). */
+function bpValidarProfissionaisDoServico(lista, opts) {
+  opts = opts || {};
+  const pending = (opts.pendingNomes || []).map(function (x) { return String(x || '').trim(); }).filter(Boolean);
+  const arr = Array.isArray(lista) ? lista : [];
+  if (!arr.length) {
+    return { ok: false, msg: 'Seleccione pelo menos um profissional para o serviço.' };
+  }
+  const activos = typeof getProfissionaisAtivos === 'function'
+    ? getProfissionaisAtivos()
+    : (state.profissionais || []).filter(function (p) {
+        return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p && p.ativo !== false);
+      });
+  const valid = arr.filter(function (ref) {
+    const r = String(ref || '').trim();
+    if (!r) return false;
+    if (pending.indexOf(r) !== -1) return true;
+    return activos.some(function (p) {
+      return String(p.id) === r || String(p.nome) === r;
+    });
+  });
+  if (!valid.length) {
+    return { ok: false, msg: 'Associe pelo menos um profissional activo ao serviço.' };
+  }
+  return { ok: true, profissionais: valid };
+}
+
+/** ET4.5: profissional exige especialidade = serviço activo existente. */
+function bpValidarEspecialidadeProfissional(esp) {
+  const nome = String(esp || '').trim();
+  if (!nome) {
+    return { ok: false, msg: 'O profissional tem de ter pelo menos um serviço (especialidade).' };
+  }
+  const activos = typeof getServicosAtivos === 'function'
+    ? getServicosAtivos()
+    : (state.servicos || []).filter(function (s) {
+        return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
+      });
+  const hit = activos.find(function (s) { return String(s.nome) === nome || String(s.id) === nome; });
+  if (!hit) {
+    return { ok: false, msg: 'Especialidade inválida: escolha um serviço activo existente.' };
+  }
+  return { ok: true, servico: hit };
+}
+
+/** Liga profissional ao array profissionais do serviço. */
+async function bpLigarProfissionalAoServico(prof, servicoNome) {
+  if (!prof || !servicoNome) return;
+  const s = (state.servicos || []).find(function (x) {
+    return String(x.nome) === String(servicoNome) || String(x.id) === String(servicoNome);
+  });
+  if (!s) return;
+  const arr = Array.isArray(s.profissionais) ? s.profissionais.slice() : [];
+  const refs = [prof.nome, prof.id].filter(Boolean).map(String);
+  const already = arr.some(function (x) { return refs.indexOf(String(x)) !== -1; });
+  if (already) return;
+  arr.push(prof.nome || prof.id);
+  const patch = { profissionais: arr, updated_at: new Date().toISOString() };
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('servicos', s.id, patch);
+  } else {
+    const i = state.servicos.findIndex(function (x) { return x.id === s.id; });
+    if (i !== -1) state.servicos[i] = Object.assign({}, state.servicos[i], patch);
+  }
+  const item = (state.servicos || []).find(function (x) { return x.id === s.id; });
+  if (item) {
+    try { await dbPut('servicos', item); } catch (_) {}
+  }
+}
+
 async function addProfissional(p) {
   if (!verificarLimite('profissionais')) return null;
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem adicionar profissionais.')) return null;
   const nome = (p.nome || '').trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
+
+  // ET4.5: profissional sem serviço (especialidade) não é permitido
+  const espCheck = bpValidarEspecialidadeProfissional(p.especialidade);
+  if (!espCheck.ok) {
+    toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
+    return null;
+  }
 
   if (existeNomeDuplicado('profissionais', nome)) {
     toast('Já existe um profissional com este nome.', 'error');
     return null;
   }
 
-  const n = { ...p, id: uuid(), nome, ativo: p.ativo !== false };
+  const n = { ...p, id: uuid(), nome, especialidade: String(p.especialidade || '').trim(), ativo: p.ativo !== false };
   try {
     await dbPut('profissionais', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -3378,7 +3837,8 @@ async function addProfissional(p) {
       state.profissionais.push(n);
       updateUI();
     }
-    toast('Profissional adicionado à equipa', 'success');
+    try { await bpLigarProfissionalAoServico(n, n.especialidade); } catch (_) {}
+    toast('Profissional adicionado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -3404,12 +3864,21 @@ function getProfissionaisAtivos() {
   return (state.profissionais || []).filter(isProfissionalAtivo);
 }
 
+function getServicosAtivos() {
+  return (state.servicos || []).filter(isServicoAtivo);
+}
+if (typeof window !== 'undefined') {
+  window.getProfissionaisAtivos = getProfissionaisAtivos;
+  window.getServicosAtivos = getServicosAtivos;
+}
+
 /**
  * Soft-delete: destituir profissional sem DELETE remoto (evita 409 FK).
  * Remove associações em serviços; desactiva serviços que ficam sem equipa.
  */
 async function desassociarProfissional(id) {
   const p = (state.profissionais || []).find(function (x) { return x.id === id; });
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem destituir profissionais.')) return null;
   if (!p) {
     if (typeof toast === 'function') toast('Profissional não encontrado', 'error');
     return null;
@@ -3509,7 +3978,18 @@ async function desassociarProfissional(id) {
 
 async function updateProfissional(id, data) {
   const actual = (state.profissionais || []).find(p => p.id === id);
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem editar profissionais.')) return null;
   if (!actual) return null;
+
+  if (data.especialidade != null) {
+    const espCheck = typeof bpValidarEspecialidadeProfissional === 'function'
+      ? bpValidarEspecialidadeProfissional(data.especialidade)
+      : { ok: !!(data.especialidade && String(data.especialidade).trim()), msg: 'Especialidade obrigatória' };
+    if (!espCheck.ok) {
+      toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
+      return null;
+    }
+  }
 
   if (data.nome) {
     const nome = data.nome.trim();
@@ -3532,6 +4012,9 @@ async function updateProfissional(id, data) {
   }
   const item = state.profissionais.find(p => p.id === id);
   if (item) await dbPut('profissionais', item);
+  if (item && data && data.especialidade) {
+    try { await bpLigarProfissionalAoServico(item, data.especialidade); } catch (_) {}
+  }
 
   // Rename: actualizar nomes em serviços ligados (array legado de nomes)
   if (renamed && oldNome && newNome) {
@@ -3573,22 +4056,34 @@ async function updateProfissional(id, data) {
 }
 
 async function deleteProfissional(id) {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem eliminar profissionais.')) return false;
   return _deleteComRollback('profissionais', id, 'Profissional');
 }
 
 // ====================================================================
 //  CRUD — SERVIÇO
 // ====================================================================
-async function addServico(s) {
+async function addServico(s, opts) {
+  opts = opts || {};
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem criar serviços.')) return null;
   const nome = (s.nome || '').trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
+
+  // ET4.5: serviço sem profissionais — proibido (não existe "toda a equipa")
+  const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
+    ? bpValidarProfissionaisDoServico(s.profissionais, opts)
+    : { ok: Array.isArray(s.profissionais) && s.profissionais.length > 0, msg: 'Seleccione profissionais', profissionais: s.profissionais };
+  if (!profCheck.ok) {
+    toast(profCheck.msg || 'Seleccione pelo menos um profissional.', 'error');
+    return null;
+  }
 
   if (existeNomeDuplicado('servicos', nome)) {
     toast('Já existe um serviço com este nome.', 'error');
     return null;
   }
 
-  const n = { ...s, id: uuid(), nome };
+  const n = { ...s, id: uuid(), nome, profissionais: profCheck.profissionais || s.profissionais };
   await dbPut('servicos', n);
   if (window.BeautyStore && window.BeautyStore.pushToList) {
     window.BeautyStore.pushToList('servicos', n);
@@ -3596,33 +4091,101 @@ async function addServico(s) {
     state.servicos.push(n);
     updateUI();
   }
-  toast('Serviço criado e disponível', 'success');
+  toast('Serviço criado.', 'success');
   return n;
 }
 
 async function updateServico(id, data) {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem editar serviços.')) return null;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'profissionais')) {
+    const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
+      ? bpValidarProfissionaisDoServico(data.profissionais)
+      : { ok: Array.isArray(data.profissionais) && data.profissionais.length > 0, msg: 'Seleccione profissionais', profissionais: data.profissionais };
+    if (!profCheck.ok) {
+      toast(profCheck.msg || 'O serviço tem de ter pelo menos um profissional.', 'error');
+      return null;
+    }
+    data = Object.assign({}, data, { profissionais: profCheck.profissionais || data.profissionais });
+  }
   if (data.nome) {
     const nome = data.nome.trim();
     if (existeNomeDuplicado('servicos', nome, id)) {
       toast('Já existe um serviço com este nome.', 'error');
-      return;
+      return null;
     }
   }
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('servicos', id, data);
   } else {
     const i = state.servicos.findIndex(s => s.id === id);
-    if (i === -1) return;
+    if (i === -1) return null;
     state.servicos[i] = { ...state.servicos[i], ...data };
   }
   const item = state.servicos.find(s => s.id === id);
   if (item) await dbPut('servicos', item);
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  return item || null;
 }
 
 async function deleteServico(id) {
-  return _deleteComRollback('servicos', id, 'Serviço');
+  // ET4.2-P1-03: soft-delete (ativo=false) — alinhado a profissionais; preserva histórico multi-dispositivo
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem desactivar serviços.')) return false;
+  return desativarServico(id);
 }
+
+/** Soft-delete de serviço (mesmo contrato que desassociarProfissional). */
+async function desativarServico(id) {
+  const s = (state.servicos || []).find(function (x) { return x.id === id; });
+  if (!s) {
+    if (typeof toast === 'function') toast('Serviço não encontrado', 'error');
+    return false;
+  }
+  if (!isServicoAtivo(s)) {
+    if (typeof toast === 'function') toast('Este serviço já está desactivado', 'warning');
+    return false;
+  }
+  const patch = {
+    ativo: false,
+    updated_at: new Date().toISOString()
+  };
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('servicos', id, patch);
+  } else {
+    const i = state.servicos.findIndex(function (x) { return x.id === id; });
+    if (i !== -1) state.servicos[i] = Object.assign({}, state.servicos[i], patch);
+  }
+  const item = (state.servicos || []).find(function (x) { return x.id === id; });
+  let remotoOk = false;
+  try {
+    if (item) await dbPut('servicos', item);
+  } catch (e) {
+    console.error('[desativarServico]', e);
+  }
+  try {
+    if (navigator.onLine && typeof supabaseDeactivate === 'function' && state.config && state.config.salaoId) {
+      try {
+        await supabaseDeactivate('servicos', id, { updated_at: patch.updated_at });
+        remotoOk = true;
+      } catch (eRemoto) {
+        console.warn('[desativarServico] PATCH remoto falhou, fila de contingência', eRemoto);
+      }
+    }
+    if (!remotoOk && typeof addToSyncQueue === 'function' && item) {
+      addToSyncQueue('servicos', 'upsert', item);
+      if (navigator.onLine && typeof flushSyncQueue === 'function') {
+        try { await flushSyncQueue(); } catch (eFlush) {
+          console.warn('[desativarServico] flush', eFlush);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[desativarServico] sync', e);
+  }
+  if (typeof updateUI === 'function') updateUI();
+  if (typeof toast === 'function') toast('Serviço desactivado.', 'success');
+  return true;
+}
+
 
 function getServicoById(id) {
   return state.servicos.find(s => s.id === id);
@@ -3633,11 +4196,12 @@ function getServicoByNome(nome) {
 }
 
 function getProfissionaisPorServico(nomeServico) {
-  const servico = state.servicos.find(s => s.nome === nomeServico);
-  if (servico && servico.profissionais && servico.profissionais.length > 0) {
-    return servico.profissionais;
+  // ET4.5: sem associação explícita → lista vazia (nunca "toda a equipa")
+  const servico = (state.servicos || []).find(s => s.nome === nomeServico);
+  if (servico && Array.isArray(servico.profissionais) && servico.profissionais.length > 0) {
+    return servico.profissionais.slice();
   }
-  return state.profissionais.map(p => p.nome);
+  return [];
 }
 
 // ====================================================================
@@ -3657,7 +4221,7 @@ async function registarVenda(dados) {
     }
 
     if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
-      toast('Adicione pelo menos um serviço à venda.', 'error');
+      toast('Adiciona pelo menos um serviço à venda.', 'warning');
       return null;
     }
 
@@ -3745,6 +4309,7 @@ async function registarVenda(dados) {
  * Marca movimento status=cancelado e zera comissao_gerada (guarda valor em comissao_estornada).
  */
 async function cancelarVenda(movimentoId, motivo) {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para cancelar vendas.')) return false;
   try {
     if (!movimentoId || typeof state === 'undefined') return false;
     const mov = (state.movimentos || []).find(function (m) { return m.id === movimentoId; });
@@ -5491,7 +6056,7 @@ function renderServicos() {
   container.innerHTML = servicosOrdenados.map(s => {
     const profs = (function () {
       const arr = s.profissionais || [];
-      if (!arr.length) return 'Todos os profissionais';
+      if (!arr.length) return 'Sem profissionais associados';
       return arr.map(function (x) {
         const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
         if (byId) return byId.nome;
@@ -5557,15 +6122,26 @@ function populateAgendaSelects() {
   const servSel = document.getElementById('agenda-servico');
   if (!profSel || !servSel) return;
 
-  // Verificar se há serviços
-  if (state.servicos.length === 0) {
+  // Verificar se há serviços ativos
+  var _servActivosEmpty = (typeof getServicosAtivos === 'function')
+    ? getServicosAtivos()
+    : (state.servicos || []).filter(function (s) {
+        return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
+      });
+  if (!_servActivosEmpty.length) {
     servSel.innerHTML = '<option value="">Nenhum serviço disponível</option>';
     profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
     return;
   }
 
   const prevServico = servSel.value;
-  servSel.innerHTML = state.servicos.map(s =>
+  // ET4.2-P1-03: só serviços ativos nos selects de agenda/venda
+  var servicosParaSelect = (typeof getServicosAtivos === 'function')
+    ? getServicosAtivos()
+    : (state.servicos || []).filter(function (s) {
+        return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
+      });
+  servSel.innerHTML = servicosParaSelect.map(s =>
     `<option value="${escHtml(s.nome)}">${escHtml(s.nome)}</option>`
   ).join('') + '<option value="Outro">Outro / Personalizado</option>';
   if (prevServico) servSel.value = prevServico;
@@ -5585,12 +6161,15 @@ function populateAgendaSelects() {
       profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
-      const nomes = serv && serv.profissionais && serv.profissionais.length > 0
-        ? serv.profissionais
-        : activos.map(p => p.nome);
-      profs = activos
-        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
-        .map(p => ({ id: p.id, nome: p.nome }));
+      const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
+      // ET4.5: sem profissionais no serviço → nenhum (não toda a equipa)
+      if (!nomes.length) {
+        profs = [];
+      } else {
+        profs = activos
+          .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
+          .map(p => ({ id: p.id, nome: p.nome }));
+      }
     }
     const prevProfId = profSel.value;
     profSel.innerHTML = profs.map(p =>
@@ -5643,12 +6222,14 @@ function populateVendaSelects() {
       profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
-      const nomes = serv && serv.profissionais && serv.profissionais.length > 0
-        ? serv.profissionais
-        : activos.map(p => p.nome);
-      profs = activos
-        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
-        .map(p => ({ id: p.id, nome: p.nome }));
+      const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
+      if (!nomes.length) {
+        profs = [];
+      } else {
+        profs = activos
+          .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
+          .map(p => ({ id: p.id, nome: p.nome }));
+      }
     }
     profSel.innerHTML = `<option value="">Selecionar profissional</option>` +
       profs.map(p =>
@@ -6362,7 +6943,74 @@ function _fmtChart(n) {
 }
 
 /** Fase 5 — sheet de drill-down do dia/hora */
+
+/** ET4.7 — tooltip só no Resumo; nunca roubar toques da bottom-nav */
+function bpChartIsDashboardActive() {
+  try {
+    if (typeof activeTab !== 'undefined' && activeTab && activeTab !== 'dashboard') return false;
+    var pane = document.getElementById('tab-dashboard');
+    if (pane && !pane.classList.contains('active')) return false;
+    return true;
+  } catch (_) {
+    return true;
+  }
+}
+
+function bpHideChartTooltip() {
+  try {
+    var tip = document.getElementById('chart-tooltip');
+    if (tip) {
+      tip.style.opacity = '0';
+      tip.style.pointerEvents = 'none';
+      tip.classList.remove('is-rich');
+      tip.innerHTML = '';
+      tip.setAttribute('aria-hidden', 'true');
+    }
+    if (typeof _chartSelectedIdx !== 'undefined') _chartSelectedIdx = null;
+  } catch (_) {}
+}
+
+function bpConfineChartTooltipPosition(left, top, tip) {
+  // Mantém o tooltip dentro da área do gráfico / tab dashboard, acima da nav (72px+)
+  try {
+    var wrap = document.getElementById('dash-chart-canvas-wrap')
+      || document.getElementById('tab-dashboard')
+      || document.body;
+    var navH = 80;
+    try {
+      var nav = document.querySelector('.bottom-nav');
+      if (nav) navH = Math.max(72, nav.getBoundingClientRect().height + 8);
+    } catch (_) {}
+    var maxBottom = window.innerHeight - navH - 8;
+    var tipW = (tip && tip.offsetWidth) ? tip.offsetWidth : 200;
+    var tipH = (tip && tip.offsetHeight) ? tip.offsetHeight : 120;
+    var L = Math.min(window.innerWidth - tipW - 8, Math.max(8, left));
+    var T = Math.min(maxBottom - tipH, Math.max(8, top));
+    // Se o wrap do gráfico existe, preferir ficar sobre ele
+    if (wrap && wrap.getBoundingClientRect) {
+      var r = wrap.getBoundingClientRect();
+      if (r.width > 40 && r.height > 40) {
+        L = Math.min(r.right - 12 - tipW, Math.max(r.left + 8, L));
+        T = Math.min(r.bottom - 8 - Math.min(tipH, r.height * 0.9), Math.max(r.top + 8, T));
+      }
+    }
+    return { left: L, top: T };
+  } catch (_) {
+    return { left: left, top: top };
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.bpHideChartTooltip = bpHideChartTooltip;
+  window.bpChartIsDashboardActive = bpChartIsDashboardActive;
+}
+
 function abrirChartDrill(dataIso, horaOpt) {
+  // Contingência: drill só faz sentido no Resumo
+  if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+    if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+    return;
+  }
   if (!dataIso || typeof detalheDiaVendas !== 'function') return;
   var det = detalheDiaVendas(dataIso, (state && state.movimentos) || [], {
     hora: horaOpt != null && isFinite(horaOpt) ? Number(horaOpt) : undefined
@@ -6503,7 +7151,7 @@ function exportarAnalisePdf(analise) {
   var a = analise || window.__bpUltimaAnaliseTemporal;
   var fmt = typeof fmtKz === 'function' ? fmtKz : function (n) { return Math.round(Number(n) || 0) + ' Kz'; };
   if (!a || !a.totais) {
-    if (typeof toast === 'function') toast('Sem dados para exportar', 'error');
+    if (typeof toast === 'function') toast('Não há dados para exportar.', 'warning');
     return;
   }
   var label = (a.intervalo && a.intervalo.label) || (a.meta && a.meta.label) || 'Período';
@@ -6532,7 +7180,7 @@ function exportarAnaliseCsv(analise) {
     ? analiseParaExport(analise || window.__bpUltimaAnaliseTemporal)
     : null;
   if (!payload || !payload.serie) {
-    if (typeof toast === 'function') toast('Sem dados para exportar', 'error');
+    if (typeof toast === 'function') toast('Não há dados para exportar.', 'warning');
     return;
   }
   var lines = ['data,label,receita,vendas,ticket'];
@@ -6559,7 +7207,7 @@ function exportarAnaliseCsv(analise) {
     URL.revokeObjectURL(url);
     a.remove();
   }, 500);
-  if (typeof toast === 'function') toast('CSV exportado', 'success');
+  if (typeof toast === 'function') toast('CSV exportado.', 'success');
 }
 
 function renderizarGrafico() {
@@ -6918,6 +7566,11 @@ function renderizarGrafico() {
   }
 
   function showTooltipFor(idx, clientX, clientY) {
+    if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+      return;
+    }
+
     if (!tooltip || idx < 0) return;
     const pt = analise && analise.serie && analise.serie[idx];
     const val = dados[idx] || 0;
@@ -6980,20 +7633,39 @@ function renderizarGrafico() {
         ? '<div class="ct-actions"><button type="button" class="ct-drill-btn" id="chart-tooltip-drill"' + drillAttr + '>Ver detalhe</button></div>'
         : '');
     tooltip.style.whiteSpace = 'normal';
+    // Só no dashboard; senão não mostrar
+    if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+      bpHideChartTooltip();
+      return;
+    }
     var left = Math.min(window.innerWidth - 200, Math.max(8, clientX + 8));
     var top = Math.max(8, clientY - 20);
-    tooltip.style.left = left + 'px';
-    tooltip.style.top = top + 'px';
+    var confined = typeof bpConfineChartTooltipPosition === 'function'
+      ? bpConfineChartTooltipPosition(left, top, tooltip)
+      : { left: left, top: top };
+    tooltip.style.left = confined.left + 'px';
+    tooltip.style.top = confined.top + 'px';
     tooltip.style.opacity = '1';
+    tooltip.style.pointerEvents = 'auto';
+    tooltip.setAttribute('aria-hidden', 'false');
 
     var btn = document.getElementById('chart-tooltip-drill');
     if (btn) {
       btn.onclick = function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
+        // Garante que o toque não propaga para a nav
+        if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+        if (typeof bpChartIsDashboardActive === 'function' && !bpChartIsDashboardActive()) {
+          bpHideChartTooltip();
+          return;
+        }
         var d = btn.getAttribute('data-drill-data');
         var h = btn.getAttribute('data-drill-hora');
-        abrirChartDrill(d, h != null && h !== '' ? Number(h) : undefined);
+        if (typeof abrirChartDrill === 'function') {
+          abrirChartDrill(d, h != null && h !== '' ? Number(h) : undefined);
+        }
+        bpHideChartTooltip();
       };
     }
   }
@@ -7443,6 +8115,32 @@ if (document.readyState === 'loading') {
   setTimeout(_bpInitChartChrome, 100);
 }
 
+
+/* ET4.7 — nav e overlays: nunca deixar tooltip roubar toques */
+(function bpChartTooltipNavGuard() {
+  if (window.__bpChartTipGuard) return;
+  window.__bpChartTipGuard = 1;
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    // Toque na bottom-nav ou noutro tab-pane que não o dashboard → esconder tooltip
+    if (t.closest('.bottom-nav, .nav-item, [data-tab]')) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+      return;
+    }
+    if (t.closest('#tab-agenda, #tab-clientes, #tab-caixa, #tab-equipa, #tab-ia')) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+    }
+  }, true);
+  document.addEventListener('touchstart', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest('.bottom-nav, .nav-item')) {
+      if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+    }
+  }, { capture: true, passive: true });
+})();
+
 /* ===== FILE: vendas-modais.js ===== */
 // ====================================================================
 //  vendas-modais.js — extraído do app.js (Fase C da modularização)
@@ -7697,22 +8395,60 @@ function _bumpEl(row, sel) {
 }
 
 let cartItems = [];
-const CART_STORAGE_KEY = 'bp_cart_items';
+// ET4.4: chave legada + chave por salão (isolamento multi-tenant no device)
+const CART_STORAGE_KEY_LEGACY = 'bp_cart_items';
+
+function cartStorageKey() {
+  try {
+    var sid = (typeof state !== 'undefined' && state.config && state.config.salaoId)
+      ? String(state.config.salaoId) : '';
+    if (sid) return 'bp_cart_items_' + sid;
+  } catch (_) {}
+  return CART_STORAGE_KEY_LEGACY;
+}
 
 // --- Persistência ---
 function saveCartToStorage() {
-  try { localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems)); } catch (e) {}
+  try { localStorage.setItem(cartStorageKey(), JSON.stringify(cartItems)); } catch (e) {}
 }
 
 function loadCartFromStorage() {
   try {
-    const data = localStorage.getItem(CART_STORAGE_KEY);
+    var key = cartStorageKey();
+    var data = localStorage.getItem(key);
+    // migração única: legado global → chave do salão actual
+    if (!data && key !== CART_STORAGE_KEY_LEGACY) {
+      data = localStorage.getItem(CART_STORAGE_KEY_LEGACY);
+      if (data) {
+        try { localStorage.setItem(key, data); } catch (_) {}
+        try { localStorage.removeItem(CART_STORAGE_KEY_LEGACY); } catch (_) {}
+      }
+    }
     if (data) {
       cartItems = JSON.parse(data);
+      if (!Array.isArray(cartItems)) cartItems = [];
       renderCart();
     }
   } catch (e) { cartItems = []; }
 }
+
+function clearCartStorageAll() {
+  cartItems = [];
+  try { localStorage.removeItem(CART_STORAGE_KEY_LEGACY); } catch (_) {}
+  try {
+    var key = cartStorageKey();
+    if (key) localStorage.removeItem(key);
+  } catch (_) {}
+  // limpar outras chaves de carrinho no device (troca de salão)
+  try {
+    for (var i = localStorage.length - 1; i >= 0; i--) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf('bp_cart_items') === 0) localStorage.removeItem(k);
+    }
+  } catch (_) {}
+}
+if (typeof window !== "undefined") window.clearCartStorageAll = clearCartStorageAll;
+
 
 // --- Renderização do carrinho com botões + / - e total detalhado ---
 function renderCart() {
@@ -7834,11 +8570,12 @@ async function removeItemFromCart(idx, skipConfirm) {
     if (typeof showConfirmModal === 'function') {
       choice = await showConfirmModal(
         'Remover item?',
-        '"' + (item.nome || 'Item') + '" tem ' + item.quantidade + ' unidades. Remover todas da venda?',
-        true
+        '"' + (item.nome || 'Item') + '" tem ' + item.quantidade + ' unidades. Queres remover todas da venda?',
+        true,
+        { confirmLabel: 'Remover', cancelLabel: 'Cancelar', variant: 'destructive' }
       );
     } else {
-      choice = confirm('"' + (item.nome || '') + '" tem ' + item.quantidade + ' unidades. Remover todas?');
+      choice = true;
     }
     if (!choice) {
       // Deixar só 1 unidade em vez de forçar decisão binária agressiva
@@ -7872,15 +8609,20 @@ async function removeItemFromCart(idx, skipConfirm) {
 }
 
 // --- Função central de adição ao carrinho (sem profissional) ---
-function addToCart(nome, valor) {
+async function addToCart(nome, valor) {
   const existingIndex = cartItems.findIndex(item => item.nome === nome);
   if (existingIndex !== -1) {
     const existing = cartItems[existingIndex];
     if (existing.precoUnit !== valor) {
-      const choice = confirm(
-        `"${escHtml(nome||"")}" já está no carrinho com preço ${fmtKz(existing.precoUnit)}.\n` +
-        `Deseja atualizar para ${fmtKz(valor)}? (Cancelar = manter os dois separados)`
-      );
+      let choice = false;
+      if (typeof showConfirmModal === 'function') {
+        choice = await showConfirmModal(
+          'Atualizar preço?',
+          '"' + (nome || 'Serviço') + '" já está no carrinho a ' + (typeof fmtKz === 'function' ? fmtKz(existing.precoUnit) : existing.precoUnit) + '. Queres atualizar para ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + '? Se cancelares, os dois preços ficam como linhas separadas.',
+          false,
+          { confirmLabel: 'Atualizar', cancelLabel: 'Manter separados', variant: 'default' }
+        );
+      }
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
@@ -7889,7 +8631,7 @@ function addToCart(nome, valor) {
         return;
       } else {
         cartItems.push({
-          nome: nome + ' (' + fmtKz(valor) + ')',
+          nome: nome + ' (' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + ')',
           quantidade: 1,
           precoUnit: valor,
           subtotal: valor
@@ -7972,7 +8714,7 @@ function openVendaModal() {
 // --- Limpar carrinho (após venda ou cancelamento) ---
 function clearCart() {
   cartItems = [];
-  localStorage.removeItem(CART_STORAGE_KEY);
+  localStorage.removeItem(cartStorageKey());
   renderCart();
 }
 
@@ -8037,7 +8779,7 @@ function setServicoModalMode(mode) {
 
 function _labelProfsServico(arr) {
   const list = arr || [];
-  if (!list.length) return 'Toda a equipa';
+  if (!list.length) return 'Sem profissionais associados';
   return list.map(function (x) {
     const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
     return byId ? byId.nome : x;
@@ -8181,6 +8923,7 @@ function abrirDetalheAgendamentos(filtro = 'pendentes') {
 }
 
 function abrirFechoCaixa() {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
  const hojeStr = hoje();
  const movs = state.movimentos.filter(m => m.data === hojeStr);
  const vendas = movs.filter(m => m.tipo === 'venda');
@@ -8245,10 +8988,10 @@ function trapFocus(modal) {
   if (e.key === 'Tab') {
    if (e.shiftKey) {
     if (document.activeElement === firstElement) { e.preventDefault();
-     lastElement.focus(); }
+     if (lastElement) try { lastElement.focus(); } catch (_) {} }
    } else {
     if (document.activeElement === lastElement) { e.preventDefault();
-     firstElement.focus(); }
+     if (firstElement) try { firstElement.focus(); } catch (_) {} }
    }
   }
  });
@@ -8262,15 +9005,14 @@ if (originalOpenModal) {
   originalOpenModal(id);
   trapFocus(modal);
   const firstFocusable = modal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-  if (firstFocusable) setTimeout(() => firstFocusable.focus(), 100);
+  if (firstFocusable) setTimeout(function () { try { firstFocusable.focus(); } catch (_) {} }, 100);
  };
 }
 const originalCloseModal = window.closeModal;
 if (originalCloseModal) {
  window.closeModal = function(id) {
   originalCloseModal(id);
-  if (previousFocusedElement) { setTimeout(() => { previousFocusedElement.focus();
-    previousFocusedElement = null; }, 200); }
+  if (previousFocusedElement && previousFocusedElement.focus) { setTimeout(function () { try { previousFocusedElement.focus(); } catch (_) {} previousFocusedElement = null; }, 200); }
  };
 }
 
@@ -8295,20 +9037,59 @@ const svgPessoa = `<svg width="80" height="80" viewBox="0 0 80 80" fill="none" s
 // ====================================================================
 // NAVEGAÇÃO ENTRE ABAS
 // ====================================================================
+var BP_TAB_ORDER = ['dashboard', 'agenda', 'clientes', 'caixa', 'equipa', 'ia'];
+function bpTabIndex(id) {
+  var i = BP_TAB_ORDER.indexOf(id);
+  return i < 0 ? 0 : i;
+}
+function bpSwitchTabPane(fromId, toId) {
+  var from = fromId ? document.getElementById('tab-' + fromId) : null;
+  var to = document.getElementById('tab-' + toId);
+  if (!to) return;
+  var reduce = false;
+  try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+  var forward = bpTabIndex(toId) >= bpTabIndex(fromId || toId);
+  document.querySelectorAll('.tab-pane').forEach(function (p) {
+    p.classList.remove('active', 'bp-tab-in-right', 'bp-tab-in-left', 'bp-tab-out-left', 'bp-tab-out-right');
+  });
+  if (reduce || !from || from === to) {
+    to.classList.add('active');
+    return;
+  }
+  from.classList.add(forward ? 'bp-tab-out-left' : 'bp-tab-out-right');
+  to.classList.add('active', forward ? 'bp-tab-in-right' : 'bp-tab-in-left');
+  var clean = function () {
+    from.classList.remove('bp-tab-out-left', 'bp-tab-out-right');
+    to.classList.remove('bp-tab-in-right', 'bp-tab-in-left');
+    from.removeEventListener('animationend', clean);
+  };
+  from.addEventListener('animationend', clean);
+  setTimeout(clean, 320);
+}
+
 document.querySelectorAll('.nav-item').forEach(btn => {
- btn.addEventListener('click', function() {
+ btn.addEventListener('click', function(ev) {
+  // ET4.7: ao mudar de aba, matar tooltip do gráfico (não rouba toques)
+  try {
+    if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+  } catch (_) {}
   const tab = this.dataset.tab;
   if (this.dataset.role) {
    const permitido = this.dataset.role.split(',').map(r => r.trim()).includes(normalizarRole(state.config.userRole));
    if (!permitido) {
-    toast('Não tem permissão para aceder a essa área.', 'error');
+    toast('Não tens acesso a esta área.', 'warning');
     return;
    }
   }
+  var prevTab = (typeof activeTab !== 'undefined') ? activeTab : null;
+  if (prevTab === tab) return;
   activeTab = tab;
   localStorage.setItem('bp_active_tab', tab);
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
+  bpSwitchTabPane(prevTab, tab);
+  if (tab !== 'dashboard') {
+    try { if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip(); } catch (_) {}
+    try { if (typeof fecharChartDrill === 'function') fecharChartDrill(); } catch (_) {}
+  }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   this.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n => n.setAttribute('aria-selected', 'false'));
@@ -8346,6 +9127,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 // ====================================================================
 
 function ativarAbaAtiva() {
+  try { if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip(); } catch (_) {}
   const pane = document.getElementById('tab-' + activeTab);
   if (!pane) return;
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -8375,6 +9157,39 @@ function normalizarRole(role) {
   return 'operador';
 }
 
+/**
+ * ET4-P0-03 — autorização operacional (não só DOM).
+ * bpPode('admin') | bpPode(['admin','gerente'])
+ * Fail-safe: role desconhecida → operador (acesso mínimo).
+ */
+function bpPode(rolesPermitidos) {
+  const role = normalizarRole(
+    (typeof state !== 'undefined' && state.config && state.config.userRole)
+      ? state.config.userRole
+      : null
+  );
+  let allowed = rolesPermitidos;
+  if (allowed == null) return true;
+  if (typeof allowed === 'string') {
+    allowed = allowed.split(',').map(function (r) { return r.trim(); }).filter(Boolean);
+  }
+  if (!Array.isArray(allowed) || allowed.length === 0) return true;
+  return allowed.indexOf(role) !== -1;
+}
+
+function bpExigirRole(rolesPermitidos, mensagem) {
+  if (bpPode(rolesPermitidos)) return true;
+  if (typeof toast === 'function') {
+    toast(mensagem || 'Não tem permissão para esta operação.', 'error');
+  }
+  return false;
+}
+
+if (typeof window !== 'undefined') {
+  window.bpPode = bpPode;
+  window.bpExigirRole = bpExigirRole;
+}
+
 function aplicarPermissoes() {
   const role = normalizarRole(state.config.userRole);
   state.config.userRole = role;
@@ -8399,7 +9214,7 @@ function aplicarPermissoes() {
   const tabEquipaAtiva = document.getElementById('tab-equipa')?.classList.contains('active');
   if (equipaNav && equipaNav.style.display === 'none' && tabEquipaAtiva) {
     equipaNav.parentElement?.querySelector('.nav-item[data-tab="dashboard"]')?.click();
-    toast('Não tem permissão para aceder a essa área.', 'error');
+    toast('Não tens acesso a esta área.', 'warning');
   }
 }
 
@@ -8441,12 +9256,19 @@ document.getElementById('logout-btn')?.addEventListener('click', async function(
   var dd = document.getElementById('menu-dropdown');
   if (dd) dd.style.display = 'none';
   logoutVoluntarioEmCurso = true;
-  const confirmed = await showConfirmModal('Sair da aplicação', 'Tem a certeza que quer sair?', false);
+  const confirmed = await showConfirmModal('Sair da conta?', 'Vais terminar a sessão neste dispositivo. Os dados do salão continuam guardados; basta iniciares sessão outra vez para continuares.', false, { confirmLabel: 'Sair', cancelLabel: 'Cancelar', variant: 'quiet', confirmTone: 'danger' });
   if (!confirmed) {
     logoutVoluntarioEmCurso = false;
     return;
   }
+  // ET4.3: limpar flags de init BP* antes do reload (troca de conta / permissões)
+  try {
+    ['__bpFinanceInitDone','__bpOpsInitDone','__bpGestaoInitDone','__bpEquipaInitDone','__bpMarketingInitDone','__bpMediaInitDone'].forEach(function (k) {
+      try { delete window[k]; } catch (_) { window[k] = false; }
+    });
+  } catch (_) {}
   if (typeof bpClearSessionLocal === 'function') bpClearSessionLocal();
+  try { localStorage.removeItem('bp_user_role'); } catch (_) {}
   try { await supabaseClient.auth.signOut(); } catch (_) {}
   location.reload();
 });
@@ -8480,8 +9302,8 @@ document.getElementById('modal-agenda-save').addEventListener('click', async () 
   const profissionalId = document.getElementById('agenda-profissional').value;
   const datetime = document.getElementById('agenda-datetime').value;
   const preco = parseFloat(document.getElementById('agenda-preco').value);
-  if (!cliente || !servico || !datetime) { toast('Preencha todos os campos obrigatórios', 'error'); return; }
-  if (!profissionalId) { toast('Selecione um profissional', 'error'); return; }
+  if (!cliente || !servico || !datetime) { toast('Preenche os campos obrigatórios.', 'warning'); return; }
+  if (!profissionalId) { toast('Selecciona um profissional.', 'warning'); return; }
   if (isNaN(preco) || preco <= 0) { toast('Insira um preço válido', 'error'); return; }
   if (!datetime.includes('T')) { toast('Data e hora inválidas', 'error'); return; }
   const data = datetime.split('T')[0];
@@ -8508,7 +9330,7 @@ document.getElementById('modal-agenda-save').addEventListener('click', async () 
   if (editId) {
     result = await updateAgendamento(editId, payload);
     if (result) {
-      toast('Agendamento actualizado', 'success');
+      toast('Agendamento actualizado.', 'success');
       closeModal('modal-agenda');
       document.getElementById('agenda-edit-id').value = '';
     }
@@ -8567,7 +9389,7 @@ document.getElementById('agenda-add-cliente-rapido').addEventListener('click', (
 document.getElementById('modal-cliente-rapido-save').addEventListener('click', async () => {
   const nome = document.getElementById('cliente-rapido-nome').value.trim();
   const telefone = document.getElementById('cliente-rapido-telefone').value.trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
   const result = await addCliente({ nome, telefone, notas: '' });
   if (result) {
     try {
@@ -8646,17 +9468,20 @@ document.getElementById('modal-cliente-save').addEventListener('click', async ()
   let telefone = document.getElementById('cliente-telefone').value.trim();
   const notas = document.getElementById('cliente-notas').value.trim();
   const id = document.getElementById('cliente-id').value;
-  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
   const telDigits = telefone.replace(/\D/g, '');
   if (telDigits && telDigits.length !== 9) {
     toast('Contacto deve ter exactamente 9 dígitos, ou deixe em branco.', 'error');
     return;
   }
   telefone = telDigits;
-  if (id) { 
-    await updateCliente(id, { nome, telefone, notas });
-    toast('Dados do cliente actualizados', 'success');
-    closeModal('modal-cliente');
+  if (id) {
+    // ET4.3: só toast/fecha se a actualização efectivamente ocorreu
+    const upd = await updateCliente(id, { nome, telefone, notas });
+    if (upd) {
+      toast('Cliente actualizado.', 'success');
+      closeModal('modal-cliente');
+    }
   } else { 
     const result = await addCliente({ nome, telefone, notas });
     if (result) {
@@ -8733,11 +9558,11 @@ async function bpCriarServicoDesdeProfModal() {
   const nome = ((document.getElementById('prof-novo-servico-nome') || {}).value || '').trim();
   const preco = parseFloat((document.getElementById('prof-novo-servico-preco') || {}).value);
   if (!nome) {
-    toast('Indique o nome do novo serviço', 'error');
+    toast('Indica o nome do novo serviço.', 'warning');
     return null;
   }
   if (!preco || preco <= 0) {
-    toast('Indique um preço válido (Kz)', 'error');
+    toast('Indica um preço válido.', 'warning');
     return null;
   }
   if (typeof existeNomeDuplicado === 'function' && existeNomeDuplicado('servicos', nome)) {
@@ -8745,17 +9570,22 @@ async function bpCriarServicoDesdeProfModal() {
     popularEspecialidadesProf(nome);
     return nome;
   }
+  const draftProf = ((document.getElementById('prof-nome') || {}).value || '').trim();
+  if (!draftProf) {
+    toast('Preenche o nome do profissional antes de criar o serviço.', 'warning');
+    return null;
+  }
   const payload = {
     nome: nome,
     precoBase: preco,
-    profissionais: [],
+    profissionais: [draftProf],
     ativo: true,
     duracao: 60,
     updated_at: new Date().toISOString()
   };
   let created = null;
   if (typeof addServico === 'function') {
-    created = await addServico(payload);
+    created = await addServico(payload, { pendingNomes: [draftProf] });
   }
   if (!created) return null;
   // Associar nome ao select e fechar box
@@ -8940,7 +9770,7 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   const taxa = parseFloat(document.getElementById('prof-taxa')?.value);
   const meta = parseFloat(document.getElementById('prof-meta')?.value);
 
-  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
   if (!idade || isNaN(parseInt(idade, 10))) { toast('Idade é obrigatória', 'error'); return; }
   if (!dataContratual) { toast('Data contratual é obrigatória', 'error'); return; }
   // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
@@ -8949,7 +9779,7 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     if (!criado) return;
     especialidade = criado;
   }
-  if (!especialidade) { toast('Seleccione uma especialidade (serviço) ou crie uma nova', 'error'); return; }
+  if (!especialidade) { toast('Selecciona uma especialidade ou cria uma nova.', 'warning'); return; }
   if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
     toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
@@ -8972,9 +9802,11 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   };
 
   if (id) {
-    await updateProfissional(id, dados);
-    toast('Dados do profissional actualizados', 'success');
-    closeModal('modal-prof');
+    const upd = await updateProfissional(id, dados);
+    if (upd) {
+      toast('Profissional actualizado.', 'success');
+      closeModal('modal-prof');
+    }
   } else {
     const result = await addProfissional(dados);
     if (result) {
@@ -9030,16 +9862,22 @@ document.getElementById('modal-servico-save').addEventListener('click', async ()
   const id = document.getElementById('servico-id').value;
   const profissionais = typeof getSelectedProfissionais === 'function' ? getSelectedProfissionais() : [];
   if (!nome || isNaN(precoBase) || precoBase <= 0) {
-    toast('Preencha nome e preço válido', 'error');
+    toast('Indica nome e preço válidos.', 'warning');
     return;
   }
-  // profissionais vazio = toda a equipa (legítimo em salão pequeno)
-  const payload = { nome, precoBase, profissionais: profissionais || [], duracao };
+  // ET4.5: profissionais obrigatórios — proibido vazio / "toda a equipa"
+  if (!profissionais || !profissionais.length) {
+    toast('Associa pelo menos um profissional a este serviço.', 'warning');
+    return;
+  }
+  const payload = { nome, precoBase, profissionais: profissionais, duracao };
   if (id) {
-    await updateServico(id, payload);
-    toast('Serviço actualizado', 'success');
+    const upd = await updateServico(id, payload);
+    if (!upd) return;
+    toast('Serviço actualizado.', 'success');
   } else {
-    await addServico(payload);
+    const created = await addServico(payload);
+    if (!created) return;
   }
   closeModal('modal-servico');
   if (typeof updateUI === 'function') updateUI();
@@ -9172,8 +10010,9 @@ function validarBI(bi) {
 //  CORREÇÃO: adicionado profissional_id e renderBadges() no modal-finalizar-save
 // ====================================================================
 
-// Despesa
+// Despesa — ET4.2-P0: RBAC operacional (alinhado a data-role admin,gerente)
 document.getElementById('add-despesa-btn').addEventListener('click', () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para registar despesas.')) return;
   const d = document.getElementById('desp-desc');
   const v = document.getElementById('desp-valor');
   const c = document.getElementById('desp-categoria');
@@ -9184,11 +10023,12 @@ document.getElementById('add-despesa-btn').addEventListener('click', () => {
   setTimeout(function () { if (d) try { d.focus(); } catch (e) {} }, 100);
 });
 document.getElementById('modal-despesa-save').addEventListener('click', async () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para registar despesas.')) return;
   const desc = document.getElementById('desp-desc').value.trim();
   const valor = Number(document.getElementById('desp-valor').value);
   const categoria = (document.getElementById('desp-categoria') || {}).value || 'outro';
-  if (!desc) { toast('Indique a descrição da despesa', 'error'); return; }
-  if (!valor || valor <= 0 || isNaN(valor)) { toast('Indique um valor válido', 'error'); return; }
+  if (!desc) { toast('Indica a descrição da despesa.', 'warning'); return; }
+  if (!valor || valor <= 0 || isNaN(valor)) { toast('Indica um valor válido.', 'warning'); return; }
   await addMovimento({
     tipo: 'despesa',
     descricao: desc,
@@ -9198,13 +10038,14 @@ document.getElementById('modal-despesa-save').addEventListener('click', async ()
   closeModal('modal-despesa');
   document.getElementById('desp-desc').value = '';
   document.getElementById('desp-valor').value = '';
-  toast('Despesa registada', 'success');
+  toast('Despesa registada.', 'success');
   if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
-// Fundo
+// Fundo — ET4.2-P0: RBAC admin/gerente
 document.getElementById('ajustar-fundo-btn').addEventListener('click', () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para ajustar o fundo de caixa.')) return;
   const el = document.getElementById('fundo-valor');
   const atual = Number(state.config && state.config.fundo) || 0;
   if (el) el.value = atual;
@@ -9216,12 +10057,14 @@ document.getElementById('ajustar-fundo-btn').addEventListener('click', () => {
   setTimeout(function () { if (el) try { el.focus(); el.select(); } catch (e) {} }, 100);
 });
 document.getElementById('modal-fundo-save').addEventListener('click', async () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para ajustar o fundo de caixa.')) return;
+
   const v = Number(document.getElementById('fundo-valor').value);
   if (isNaN(v) || v < 0) { toast('Valor inválido', 'error'); return; }
   state.config.fundo = v;
   await saveConfig();
   closeModal('modal-fundo');
-  toast('Fundo actualizado', 'success');
+  toast('Fundo de caixa actualizado.', 'success');
   if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-fundo-cancel').addEventListener('click', () => closeModal('modal-fundo'));
@@ -9241,7 +10084,7 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
   const valor = parseFloat(ciValor.value);
   if (wasDisabled) ciValor.disabled = true;
   if (!nome || !valor || valor <= 0) { 
-    toast('Preencha serviço e valor válido', 'error'); 
+    toast('Indica serviço e valor válidos.', 'warning'); 
     return; 
   }
 
@@ -9269,7 +10112,7 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
 const vendaSaveBtn = document.getElementById('modal-venda-save');
 if (vendaSaveBtn) {
   vendaSaveBtn.onclick = async function(e) {
-    if (!cartItems.length) { toast('Adicione pelo menos um serviço à venda', 'error'); return; }
+    if (!cartItems.length) { toast('Adiciona pelo menos um serviço à venda.', 'warning'); return; }
     const cliente = document.getElementById('venda-cliente').value || 'Avulso';
     const profissionalId = document.getElementById('venda-profissional').value;
     const metodoPagamento = document.getElementById('venda-pagamento').value;
@@ -9337,9 +10180,17 @@ if (vendaSaveBtn) {
 }
 
 // Cancelar venda – limpar carrinho com confirmação e fechar modal
-document.getElementById('modal-venda-cancel').addEventListener('click', () => {
+document.getElementById('modal-venda-cancel').addEventListener('click', async () => {
   if (cartItems.length > 0) {
-    const confirmCancel = confirm('Tem a certeza que deseja cancelar? O carrinho será limpo.');
+    let confirmCancel = true;
+    if (typeof showConfirmModal === 'function') {
+      confirmCancel = await showConfirmModal(
+        'Limpar carrinho?',
+        'Os serviços adicionados a esta venda serão removidos. Podes voltar a montar a venda a qualquer momento.',
+        true,
+        { confirmLabel: 'Limpar', cancelLabel: 'Manter', variant: 'destructive' }
+      );
+    }
     if (!confirmCancel) return;
   }
   if (typeof window.clearCart === 'function') {
@@ -9414,7 +10265,7 @@ document.getElementById('modal-finalizar-save').addEventListener('click', async 
   });
   
   closeModal('modal-finalizar');
-  toast('Atendimento finalizado e venda registada!', 'success');
+  toast('Venda registada.', 'success');
   
   // Atualizar UI e badge
   updateUI();
@@ -9427,6 +10278,8 @@ document.getElementById('modal-finalizar-cancel').addEventListener('click', () =
 //  CONFIRMAR FECHO DE CAIXA (persistência)
 // ====================================================================
 async function confirmarFechoCaixa() {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
+
   const hojeStr = hoje();
   const movs = state.movimentos.filter(m => m.data === hojeStr);
   const vendas = movs.filter(m => m.tipo === 'venda');
@@ -9468,7 +10321,7 @@ async function confirmarFechoCaixa() {
     if (!Array.isArray(state.fechos_caixa)) state.fechos_caixa = [];
     state.fechos_caixa.push(registro);
   }
-  toast('Caixa fechado com sucesso', 'success');
+  toast('Caixa fechado.', 'success');
   closeModal('modal-fecho');
   updateUI();
 }
@@ -9626,7 +10479,7 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
 
   function procurar() {
     if (!periodoLoc) {
-      toast('Seleccione primeiro o período.', 'warning');
+      toast('Selecciona primeiro o período.', 'warning');
       return;
     }
     const nome = (input && input.value || '').trim().toLowerCase();
@@ -9840,7 +10693,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
       if (window.BPAgendaUI && typeof BPAgendaUI.waHref === 'function') href = BPAgendaUI.waHref(ag);
     } catch (_) {}
     if (!href) {
-      if (typeof toast === 'function') toast('Cliente sem telefone no registo', 'warning');
+      if (typeof toast === 'function') toast('Este cliente não tem telefone no registo.', 'warning');
       return;
     }
     const win = window.open(href, '_blank', 'noopener,noreferrer');
@@ -9854,6 +10707,8 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
   if (target) {
     e.preventDefault();
     e.stopPropagation();
+    // ET4.3: RBAC operacional (botão já tem data-role admin,gerente)
+    if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para cancelar agendamentos.')) return;
     const id = target.dataset.id;
     const ag = state.agendamentos.find(a => a.id === id);
     if (!ag) return;
@@ -9866,7 +10721,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
       // continua a existir (histórico), só deixa de contar como
       // pendente/realizado.
       await updateAgendamento(id, { status: 'cancelado' });
-      toast('Agendamento cancelado', 'warning');
+      toast('Agendamento cancelado.', 'warning');
     }
     return;
   }
@@ -9876,7 +10731,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
     e.preventDefault();
     e.stopPropagation();
     if (normalizarRole(state.config.userRole) !== 'admin') {
-      toast('Não tem permissão para executar esta acção.', 'error');
+      toast('Não tens permissão para esta ação.', 'warning');
       return;
     }
     const id = delProf.dataset.id;
@@ -9929,13 +10784,13 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
     e.preventDefault();
     e.stopPropagation();
     if (normalizarRole(state.config.userRole) !== 'admin') {
-      toast('Não tem permissão para executar esta acção.', 'error');
+      toast('Não tens permissão para esta ação.', 'warning');
       return;
     }
     const id = delServ.dataset.id;
     const serv = state.servicos.find(s => s.id === id);
     if (!serv) return;
-    const confirmed = await showConfirmModal('Eliminar Serviço?', `Tem a certeza que quer eliminar "${serv.nome}"? Esta acção não pode ser desfeita.`, true);
+    const confirmed = await showConfirmModal('Desactivar Serviço?', `Tem a certeza que quer desactivar "${serv.nome}"? Deixa de aparecer em novas vendas; o histórico mantém-se.`, true);
     if (confirmed) await deleteServico(id);
     return;
   }
@@ -9946,7 +10801,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
     e.stopPropagation();
     const papel = normalizarRole(state.config.userRole);
     if (papel !== 'admin' && papel !== 'gerente') {
-      toast('Não tem permissão para executar esta acção.', 'error');
+      toast('Não tens permissão para esta ação.', 'warning');
       return;
     }
     const id = delCliente.dataset.id;
@@ -10572,6 +11427,117 @@ function getUsoIAHoje() {
 function setUsoIAHoje(n) {
   localStorage.setItem(chaveIAPerguntas(), String(Math.max(0, n | 0)));
   actualizarContadorIA();
+  // ET4.6: propagar contador para Supabase (salao_config + tabela ia_uso_diario se existir)
+  try {
+    if (typeof bpPushIAUsoToSupabase === 'function') {
+      Promise.resolve(bpPushIAUsoToSupabase(Math.max(0, n | 0))).catch(function () {});
+    }
+  } catch (_) {}
+}
+
+/** Lê uso remoto e fica com max(local, remoto) — multi-dispositivo no mesmo dia. */
+async function bpPullIAUsoFromSupabase() {
+  try {
+    if (!navigator.onLine || !state.config || !state.config.salaoId) return null;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return null;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session || !session.access_token) return null;
+    const dia = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token
+    };
+    // Preferir tabela dedicada
+    let remote = null;
+    try {
+      const r1 = await fetch(
+        SUPABASE_URL + '/rest/v1/ia_uso_diario?salao_id=eq.' + encodeURIComponent(state.config.salaoId) +
+        '&dia=eq.' + encodeURIComponent(dia) + '&select=perguntas',
+        { headers: headers }
+      );
+      if (r1.ok) {
+        const rows = await r1.json();
+        if (rows && rows[0] && rows[0].perguntas != null) remote = parseInt(rows[0].perguntas, 10);
+      }
+    } catch (_) {}
+    // Fallback salao_config
+    if (remote == null || isNaN(remote)) {
+      try {
+        const r2 = await fetch(
+          SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId) +
+          '&select=ia_perguntas_hoje,ia_perguntas_dia',
+          { headers: headers }
+        );
+        if (r2.ok) {
+          const rows = await r2.json();
+          if (rows && rows[0]) {
+            const d = rows[0].ia_perguntas_dia;
+            if (d === dia && rows[0].ia_perguntas_hoje != null) {
+              remote = parseInt(rows[0].ia_perguntas_hoje, 10);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    if (remote == null || isNaN(remote)) return null;
+    const local = getUsoIAHoje();
+    if (remote > local) setUsoIAHoje(remote);
+    return remote;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function bpPushIAUsoToSupabase(n) {
+  try {
+    if (!navigator.onLine || !state.config || !state.config.salaoId) return false;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return false;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session || !session.access_token) return false;
+    const dia = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    };
+    // Tabela ia_uso_diario (PK salao_id+dia)
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/ia_uso_diario', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          salao_id: state.config.salaoId,
+          dia: dia,
+          perguntas: n,
+          updated_at: new Date().toISOString()
+        })
+      });
+    } catch (_) {}
+    // Espelho em salao_config
+    try {
+      await fetch(
+        SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId),
+        {
+          method: 'PATCH',
+          headers: headers,
+          body: JSON.stringify({
+            ia_perguntas_hoje: n,
+            ia_perguntas_dia: dia,
+            updated_at: new Date().toISOString()
+          })
+        }
+      );
+    } catch (_) {}
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.bpPullIAUsoFromSupabase = bpPullIAUsoFromSupabase;
+  window.bpPushIAUsoToSupabase = bpPushIAUsoToSupabase;
 }
 
 
@@ -10792,6 +11758,11 @@ async function perguntarIA(pergunta) {
     }
   } catch (eLocal) {}
 
+  // ET4.2-P0: IA online só admin/gerente (aba já filtrada; reforço operacional)
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para usar o agente IA.')) {
+    return null;
+  }
+
   const contextoRaw = buildContextoIA();
   if (contextoRaw && contextoRaw.erro) {
     toast(contextoRaw.erro, 'warning');
@@ -10808,12 +11779,44 @@ async function perguntarIA(pergunta) {
   window.__bpIaLastMeta = { fonte: null };
   try { _bpIaSetHeaderStatus('busy', 'A contactar o agente…'); _bpIaSetComposerStatus('A processar…'); } catch (_) {}
   try {
+    // ET4-P0-02: preferir JWT de sessão (least privilege); ANON só como fallback controlado
+    var iaHeaders = { 'Content-Type': 'application/json' };
+    var iaAuthMode = 'anon-fallback';
+    try {
+      if (typeof getAuthHeaders === 'function') {
+        var authH = await getAuthHeaders();
+        if (authH && authH.Authorization) {
+          iaHeaders['Authorization'] = authH.Authorization;
+          if (authH.apikey) iaHeaders['apikey'] = authH.apikey;
+          else if (typeof SUPABASE_ANON_KEY !== 'undefined') iaHeaders['apikey'] = SUPABASE_ANON_KEY;
+          iaAuthMode = 'user-jwt';
+        }
+      }
+    } catch (eAuth) {
+      if (eAuth && eAuth.message === 'SESSION_EXPIRED') {
+        console.warn('[IA] sessão expirada — fallback local sem consumir cota remota');
+        var fbSess = typeof responderIALocal === 'function' ? responderIALocal(q) : null;
+        if (fbSess) {
+          iaHistorico.push({ pergunta: q, resposta: fbSess, fonte: 'local' });
+          if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
+          window.__bpIaLastMeta = { fonte: 'local', auth: 'session-expired' };
+          return fbSess;
+        }
+        return 'Sessão expirada. Inicie sessão novamente para usar o agente IA online.';
+      }
+    }
+    if (iaAuthMode !== 'user-jwt') {
+      if (typeof SUPABASE_ANON_KEY !== 'undefined') {
+        iaHeaders['Authorization'] = 'Bearer ' + SUPABASE_ANON_KEY;
+        iaHeaders['apikey'] = SUPABASE_ANON_KEY;
+      }
+      console.warn('[IA] sem JWT de utilizador — a usar ANON (Edge deve validar salaoId/plano)');
+    }
+    window.__bpIaLastMeta = { fonte: null, auth: iaAuthMode };
+
     const resp = await fetch(IA_EDGE_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
-      },
+      headers: iaHeaders,
       body: JSON.stringify({
         pergunta: q,
         contexto: contexto,
@@ -11664,7 +12667,7 @@ document.addEventListener('click', (e) => {
       try {
         if (window.BPOps && typeof window.BPOps.downloadIcs === 'function') {
           window.BPOps.downloadIcs();
-          if (typeof toast === 'function') toast('Agenda .ics descarregada', 'success');
+          if (typeof toast === 'function') toast('Agenda exportada.', 'success');
         } else if (typeof toast === 'function') {
           toast('Exportação de calendário indisponível', 'warning');
         }
@@ -11689,7 +12692,7 @@ document.addEventListener('click', (e) => {
     if (tool.classList.contains('ia-copiar-btn')) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(texto).then(function () {
-          if (typeof toast === 'function') toast('Texto copiado', 'success');
+          if (typeof toast === 'function') toast('Texto copiado.', 'success');
         }).catch(function () {
           if (typeof toast === 'function') toast('Não foi possível copiar', 'error');
         });
@@ -11703,7 +12706,7 @@ document.addEventListener('click', (e) => {
         navigator.share({ text: texto }).catch(function () {});
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(texto).then(function () {
-          if (typeof toast === 'function') toast('Texto copiado para partilhar', 'success');
+          if (typeof toast === 'function') toast('Texto copiado.', 'success');
         }).catch(function () {});
       }
       return;
@@ -11760,7 +12763,7 @@ document.addEventListener('click', (e) => {
 
 document.getElementById('ia-offline-retry')?.addEventListener('click', () => {
   if (navigator.onLine) { atualizarIAOffline();
-    toast('Conexão restabelecida!', 'success'); } else { toast('Ainda sem ligação', 'warning'); }
+    toast('Ligação restabelecida.', 'success'); } else { toast('Ainda sem ligação à internet.', 'warning'); }
 });
 
 // Upgrade modal — handler principal em plano-limites.js (bindUpgradeButtons / abrirWhatsAppVenda).
@@ -11949,7 +12952,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
   if (!dbDisponivel) {
     // Reforça a mensagem já dada acima, para o caso de o toast anterior
     // ter sido perdido durante a transição de ecrãs.
-    setTimeout(() => toast('Dados locais indisponíveis neste dispositivo. Algumas funcionalidades offline podem não funcionar até recarregar.', 'error'), 1400);
+    setTimeout(() => toast('Não foi possível aceder aos dados locais deste dispositivo. Tenta recarregar a página.', 'error'), 1400);
   }
 
   // Splash (removida após verificação de sessão)
@@ -12720,7 +13723,7 @@ window.renderBarraMeta = renderBarraMeta;
       var cat = (document.getElementById('desp-categoria') || {}).value || 'outro';
       var forn = (document.getElementById('desp-fornecedor') || {}).value || '';
       if (!desc || !valor || valor <= 0) {
-        if (typeof toast === 'function') toast('Preencha descrição e valor válido', 'error');
+        if (typeof toast === 'function') toast('Indica descrição e valor válidos.', 'warning');
         return;
       }
       if (typeof addMovimento === 'function') {
@@ -12736,13 +13739,26 @@ window.renderBarraMeta = renderBarraMeta;
       var d1 = document.getElementById('desp-desc'); if (d1) d1.value = '';
       var d2 = document.getElementById('desp-valor'); if (d2) d2.value = '';
       var d3 = document.getElementById('desp-fornecedor'); if (d3) d3.value = '';
-      if (typeof toast === 'function') toast('Despesa registada', 'success');
+      if (typeof toast === 'function') toast('Despesa registada.', 'success');
       if (typeof renderCaixa === 'function') renderCaixa();
       if (typeof updateUI === 'function') updateUI();
     };
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpFinanceInitDone) {
+      try {
+        ensureMenuItems();
+        enhanceDespesaModal();
+        enhanceVendaPagamento();
+        // hookDespesaSave deve ser idempotente (dataset bound)
+        hookDespesaSave();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpFinanceInitDone = true;
+
     try {
       ensureMenuItems();
       enhanceDespesaModal();
@@ -12842,7 +13858,7 @@ window.renderBarraMeta = renderBarraMeta;
     var list = loadStock();
     var nome = String(data.nome || "").trim();
     if (!nome) {
-      if (typeof toast === "function") toast("Nome do produto é obrigatório", "error");
+      if (typeof toast === "function") toast("Introduz o nome do produto.", "warning");
       return null;
     }
     var qtd = Math.max(0, Number(data.qtd) || 0);
@@ -12950,7 +13966,7 @@ window.renderBarraMeta = renderBarraMeta;
   function upsertFornecedor(data) {
     var nome = String(data.nome || "").trim();
     if (!nome) {
-      if (typeof toast === "function") toast("Nome do fornecedor obrigatório", "error");
+      if (typeof toast === "function") toast("Introduz o nome do fornecedor.", "warning");
       return null;
     }
     var list = loadForn();
@@ -12989,11 +14005,11 @@ window.renderBarraMeta = renderBarraMeta;
     var qtd = Math.abs(Number(data.quantidade) || 0);
     var valor = Math.max(0, Number(data.valor) || 0);
     if (!forn) {
-      if (typeof toast === "function") toast("Seleccione um fornecedor", "error");
+      if (typeof toast === "function") toast("Selecciona um fornecedor.", "warning");
       return null;
     }
     if (!produtoId || !findProduto(produtoId)) {
-      if (typeof toast === "function") toast("Seleccione um produto de stock", "error");
+      if (typeof toast === "function") toast("Selecciona um produto de stock.", "warning");
       return null;
     }
     if (!qtd) {
@@ -13247,7 +14263,7 @@ window.renderBarraMeta = renderBarraMeta;
     var sessoes = Math.max(1, parseInt(data.sessoes, 10) || 1);
     var validade = Math.max(0, parseInt(data.validade_dias, 10) || 90);
     if (!nome) {
-      if (typeof toast === "function") toast("Nome do pacote obrigatório", "error");
+      if (typeof toast === "function") toast("Introduz o nome do pacote.", "warning");
       return null;
     }
     var list = loadPacotes();
@@ -13287,7 +14303,7 @@ window.renderBarraMeta = renderBarraMeta;
       return null;
     }
     if (!cliente) {
-      if (typeof toast === "function") toast("Indique o cliente", "error");
+      if (typeof toast === "function") toast("Indica o cliente.", "warning");
       return null;
     }
     var exp = new Date();
@@ -13470,7 +14486,7 @@ window.renderBarraMeta = renderBarraMeta;
         sku: (document.getElementById("bp-st-sku") || {}).value
       });
       if (p) {
-        if (typeof toast === "function") toast("Produto adicionado", "success");
+        if (typeof toast === "function") toast("Produto adicionado.", "success");
         renderStock();
       }
     };
@@ -13562,7 +14578,7 @@ window.renderBarraMeta = renderBarraMeta;
         lancar_despesa: !!(document.getElementById("bp-cp-desp") || {}).checked
       });
       if (c) {
-        if (typeof toast === "function") toast("Compra registada · stock actualizado", "success");
+        if (typeof toast === "function") toast("Compra registada.", "success");
         renderForn();
       }
     };
@@ -13882,6 +14898,15 @@ window.renderBarraMeta = renderBarraMeta;
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpOpsInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpOpsInitDone = true;
+
     try { ensureMenuItems(); } catch (e) { console.warn("[ops-crm-comercial]", e); }
   }
   if (document.readyState === "loading") {
@@ -14427,11 +15452,20 @@ window.renderBarraMeta = renderBarraMeta;
       setTimeout(function () { try { input.focus(); } catch (e) {} }, 200);
     }
     if (clear) {
-      clear.onclick = function () {
-        if (!confirm('Apagar todas as mensagens deste dispositivo?')) return;
+      clear.onclick = async function () {
+        var ok = true;
+        if (typeof showConfirmModal === 'function') {
+          ok = await showConfirmModal(
+            'Limpar mensagens?',
+            'Todas as mensagens deste chat neste dispositivo serão apagadas. Esta ação não remove dados do salão noutros sítios.',
+            true,
+            { confirmLabel: 'Limpar', cancelLabel: 'Cancelar', variant: 'destructive' }
+          );
+        }
+        if (!ok) return;
         saveChat([]);
         renderChatBody();
-        if (typeof toast === 'function') toast('Histórico limpo', 'success');
+        if (typeof toast === 'function') toast('Histórico limpo.', 'success');
       };
     }
   }
@@ -14500,6 +15534,15 @@ window.renderBarraMeta = renderBarraMeta;
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpEquipaInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpEquipaInitDone = true;
+
     try { ensureMenuItems(); } catch (e) { console.warn('[equipa-fase3]', e); }
   }
   if (document.readyState === 'loading') {
@@ -15023,14 +16066,24 @@ window.renderBarraMeta = renderBarraMeta;
     );
     writeJson(BACKUP_META_KEY, { at: snap.created_at, size: JSON.stringify(snap).length });
     logAudit("backup", "Backup JSON descarregado", { at: snap.created_at });
-    if (typeof toast === "function") toast("Backup descarregado", "success");
+    if (typeof toast === "function") toast("Backup descarregado.", "success");
   }
   async function restoreBackupFromObject(snap) {
     if (!snap || !snap.state) {
       if (typeof toast === "function") toast("Ficheiro de backup inválido", "error");
       return false;
     }
-    if (!confirm("Restaurar backup? Os dados actuais em memória serão substituídos (IndexedDB).")) return false;
+    if (typeof showConfirmModal === "function") {
+      var _okRestore = await showConfirmModal(
+        "Restaurar backup?",
+        "Os dados actuais em memória neste dispositivo serão substituídos pelo conteúdo do ficheiro de backup. Confirma apenas se tens a certeza.",
+        true,
+        { confirmLabel: "Restaurar", cancelLabel: "Cancelar", variant: "destructive" }
+      );
+      if (!_okRestore) return false;
+    } else {
+      return false;
+    }
     try {
       var keys = ["clientes", "profissionais", "servicos", "movimentos", "agendamentos"];
       for (var ki = 0; ki < keys.length; ki++) {
@@ -15059,7 +16112,7 @@ window.renderBarraMeta = renderBarraMeta;
       }
       logAudit("restore", "Backup restaurado", { at: snap.created_at });
       if (typeof updateUI === "function") updateUI();
-      if (typeof toast === "function") toast("Backup restaurado", "success");
+      if (typeof toast === "function") toast("Backup restaurado.", "success");
       return true;
     } catch (e) {
       console.error(e);
@@ -15250,7 +16303,7 @@ window.renderBarraMeta = renderBarraMeta;
       btn.onclick = async function () {
         var ok = await aplicarReagendamento(agId, btn.getAttribute("data-apply-data"), btn.getAttribute("data-apply-hora"));
         if (ok) {
-          if (typeof toast === "function") toast("Reagendado com sucesso", "success");
+          if (typeof toast === "function") toast("Agendamento reagendado.", "success");
           if (typeof renderAgenda === "function") try { renderAgenda(); } catch (e) {}
           if (typeof updateUI === "function") try { updateUI(); } catch (e) {}
           renderReagendar();
@@ -15442,6 +16495,16 @@ window.renderBarraMeta = renderBarraMeta;
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpGestaoInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+        if (typeof loadFiliais === "function") loadFiliais();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpGestaoInitDone = true;
+
     try { ensureMenuItems(); loadFiliais(); } catch (e) {
       console.warn("[gestao-fase78]", e);
     }
@@ -15801,6 +16864,15 @@ window.renderBarraMeta = renderBarraMeta;
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpMarketingInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpMarketingInitDone = true;
+
     try {
       ensureMenuItems();
     } catch (e) {
@@ -16616,8 +17688,104 @@ window.renderBarraMeta = renderBarraMeta;
     session.pendingProfFoto = null;
     session.pendingProfScope = null;
   }
+  var FOTO_QUEUE_KEY = "bp_foto_upload_queue";
+
+  function getFotoQueue() {
+    try {
+      var raw = localStorage.getItem(FOTO_QUEUE_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  }
+  function saveFotoQueue(arr) {
+    try { localStorage.setItem(FOTO_QUEUE_KEY, JSON.stringify(arr || [])); } catch (e) {
+      console.warn("[BPMedia] foto queue save failed", e);
+    }
+  }
+  function enqueueFotoUpload(kind, entityId, dataUrl) {
+    if (!kind || !entityId || !dataUrl) return;
+    var q = getFotoQueue().filter(function (x) {
+      return !(x.kind === kind && x.entityId === entityId);
+    });
+    q.push({
+      kind: kind,
+      entityId: entityId,
+      dataUrl: dataUrl,
+      ts: Date.now(),
+      attempts: 0
+    });
+    // ET4.6: sem teto rígido; se storage falhar, foto continua no entity.foto (data:)
+    saveFotoQueue(q);
+  }
+  function removeFotoQueueItem(kind, entityId) {
+    saveFotoQueue(getFotoQueue().filter(function (x) {
+      return !(x.kind === kind && x.entityId === entityId);
+    }));
+  }
+
+  /** Processa fila de fotos offline quando há rede — lotes de 3. */
+  async function flushFotoUploadQueue() {
+    if (!navigator.onLine) return;
+    if (flushFotoUploadQueue._running) return;
+    flushFotoUploadQueue._running = true;
+    try {
+      var q = getFotoQueue();
+      if (!q.length) {
+        // Também varrer entidades com foto data: ainda pendente
+        try {
+          (state.clientes || []).forEach(function (c) {
+            if (c && c.id && c.foto && String(c.foto).indexOf("data:") === 0 && !c.foto_url) {
+              enqueueFotoUpload("clientes", c.id, c.foto);
+            }
+          });
+          (state.profissionais || []).forEach(function (p) {
+            if (p && p.id && p.foto && String(p.foto).indexOf("data:") === 0 && !p.foto_url) {
+              enqueueFotoUpload("profissionais", p.id, p.foto);
+            }
+          });
+          q = getFotoQueue();
+        } catch (_) {}
+      }
+      var batch = q.slice(0, 3);
+      var rest = q.slice(3);
+      for (var i = 0; i < batch.length; i++) {
+        if (!navigator.onLine) {
+          rest = batch.slice(i).concat(rest);
+          break;
+        }
+        var item = batch[i];
+        try {
+          var result = await withTimeout(uploadFotoStorage(item.kind, item.entityId, item.dataUrl), UPLOAD_MS);
+          var url = result && result.url ? result.url : null;
+          if (!url) {
+            item.attempts = (item.attempts || 0) + 1;
+            if (item.attempts < 10) rest.push(item);
+            continue;
+          }
+          var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
+          var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
+          if (item.kind === "clientes" && typeof updateCliente === "function") {
+            await updateCliente(item.entityId, patch);
+          } else if (item.kind === "profissionais" && typeof updateProfissional === "function") {
+            await updateProfissional(item.entityId, patch);
+          }
+          try { patchRowAvatar(item.kind, item.entityId); } catch (_) {}
+        } catch (e) {
+          item.attempts = (item.attempts || 0) + 1;
+          if (item.attempts < 10) rest.push(item);
+        }
+      }
+      saveFotoQueue(rest);
+    } finally {
+      flushFotoUploadQueue._running = false;
+    }
+  }
+
   function scheduleFotoUpload(kind, entityId, dataUrl) {
     if (!entityId || !dataUrl) return;
+    // Sempre enfileirar — garante offline e retry
+    enqueueFotoUpload(kind, entityId, dataUrl);
+    if (!navigator.onLine) return;
     var token = String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8);
     _uploadToken[kind + ":" + entityId] = token;
     withTimeout(uploadFotoStorage(kind, entityId, dataUrl), UPLOAD_MS).then(function (result) {
@@ -16627,6 +17795,7 @@ window.renderBarraMeta = renderBarraMeta;
         toastUploadOutcome(result || { url: null, error: "upload" }, { silentOk: true });
         return;
       }
+      removeFotoQueueItem(kind, entityId);
       // Cache-bust: mesmo path .jpg no Storage mantém URL pública — forçar ?v=
       var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
       var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
@@ -17011,7 +18180,7 @@ window.renderBarraMeta = renderBarraMeta;
         patchRowAvatar("clientes", id);
       } catch (e) {
         console.warn(e);
-        toastMsg("Erro ao processar imagem", "error");
+        toastMsg("Não foi possível processar a imagem.", "error");
       }
     };
     document.getElementById("bp-cli-foto-rm").onclick = async function () {
@@ -17022,7 +18191,7 @@ window.renderBarraMeta = renderBarraMeta;
         showPreview("bp-cli-foto-preview", null, id || "new");
         this.style.display = "none";
       }
-      toastMsg("Foto removida", "success");
+      toastMsg("Foto removida.", "success");
       patchRowAvatar("clientes", id);
     };
   }
@@ -17077,7 +18246,7 @@ window.renderBarraMeta = renderBarraMeta;
         patchRowAvatar("profissionais", id);
       } catch (e) {
         console.warn(e);
-        toastMsg("Erro ao processar imagem", "error");
+        toastMsg("Não foi possível processar a imagem.", "error");
       }
     };
     document.getElementById("bp-prof-foto-rm").onclick = async function () {
@@ -17088,7 +18257,7 @@ window.renderBarraMeta = renderBarraMeta;
         showPreview("bp-prof-foto-preview", null, id || "new");
         this.style.display = "none";
       }
-      toastMsg("Foto removida", "success");
+      toastMsg("Foto removida.", "success");
       patchRowAvatar("profissionais", id);
     };
   }
@@ -17596,29 +18765,42 @@ window.renderBarraMeta = renderBarraMeta;
           }
         } catch (e) {
           console.warn(e);
-          toastMsg("Erro ao processar imagem", "error");
+          toastMsg("Não foi possível processar a imagem.", "error");
         }
       };
     }
     body.querySelectorAll("[data-del-gal]").forEach(function (btn) {
       btn.onclick = function (e) {
         e.stopPropagation();
-        if (!confirm("Remover esta foto?")) return;
-        var delId = btn.getAttribute("data-del-gal");
-        var pidDel = (document.getElementById("bp-gal-prof") || {}).value;
-        if (pidDel && delId) removeFotoStorage("galeria/" + pidDel, delId);
-        removeFotoGaleria(delId);
-        deleteGaleriaRemoto(delId);
-        renderGaleria(pidDel);
-        toastMsg("Foto removida", "success");
+        (async function () {
+          var ok = true;
+          if (typeof showConfirmModal === "function") {
+            ok = await showConfirmModal(
+              "Remover foto?",
+              "Esta foto deixa de aparecer na galeria deste profissional. Podes voltar a adicionar outra mais tarde.",
+              true,
+              { confirmLabel: "Remover", cancelLabel: "Cancelar", variant: "destructive" }
+            );
+          }
+          if (!ok) return;
+          var delId = btn.getAttribute("data-del-gal");
+          var pidDel = (document.getElementById("bp-gal-prof") || {}).value;
+          if (pidDel && delId) removeFotoStorage("galeria/" + pidDel, delId);
+          removeFotoGaleria(delId);
+          deleteGaleriaRemoto(delId);
+          renderGaleria(pidDel);
+          toastMsg("Foto removida.", "success");
+        })();
       };
     });
-  }
 
-    // Lazy load imagens fora do viewport
+    // Lazy load imagens fora do viewport (body no scope de renderGaleria)
     setTimeout(function () {
-      bpGalObserve(body.querySelector(".bp-gal-grid") || body);
+      try {
+        if (body) bpGalObserve(body.querySelector(".bp-gal-grid") || body);
+      } catch (_) {}
     }, 30);
+  }
 
 
 
@@ -17661,6 +18843,16 @@ window.renderBarraMeta = renderBarraMeta;
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpMediaInitDone) {
+      try {
+        if (typeof ensureMenuItem === "function") ensureMenuItem();
+        if (typeof enhanceListAvatars === "function") enhanceListAvatars();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpMediaInitDone = true;
+
     try {
       ensureClientePhotoUI();
       ensureProfPhotoUI();
@@ -17725,6 +18917,20 @@ window.renderBarraMeta = renderBarraMeta;
     uploadFotoStorage: uploadFotoStorage,
     session: session
   };
+
+  window.addEventListener("online", function () {
+    setTimeout(function () { flushFotoUploadQueue(); }, 1200);
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && navigator.onLine) {
+      setTimeout(function () { flushFotoUploadQueue(); }, 1500);
+    }
+  });
+  // Expor para flush global após sync de dados
+  if (typeof window !== "undefined") {
+    window.bpFlushFotoUploadQueue = flushFotoUploadQueue;
+  }
+
 })();
 
 /* ===== FILE: agenda-polish.js ===== */
@@ -19227,6 +20433,9 @@ window.renderBarraMeta = renderBarraMeta;
       }
       lastPullAt = Date.now();
       if (typeof atualizarIndicadorSync === "function") atualizarIndicadorSync();
+      try {
+        if (typeof bpFlushFotoUploadQueue === "function") await bpFlushFotoUploadQueue();
+      } catch (_) {}
       return true;
     } catch (e) {
       if (typeof logErroSilencioso === "function") logErroSilencioso("bpSilentPull", e);

@@ -251,22 +251,60 @@ function _bumpEl(row, sel) {
 }
 
 let cartItems = [];
-const CART_STORAGE_KEY = 'bp_cart_items';
+// ET4.4: chave legada + chave por salão (isolamento multi-tenant no device)
+const CART_STORAGE_KEY_LEGACY = 'bp_cart_items';
+
+function cartStorageKey() {
+  try {
+    var sid = (typeof state !== 'undefined' && state.config && state.config.salaoId)
+      ? String(state.config.salaoId) : '';
+    if (sid) return 'bp_cart_items_' + sid;
+  } catch (_) {}
+  return CART_STORAGE_KEY_LEGACY;
+}
 
 // --- Persistência ---
 function saveCartToStorage() {
-  try { localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems)); } catch (e) {}
+  try { localStorage.setItem(cartStorageKey(), JSON.stringify(cartItems)); } catch (e) {}
 }
 
 function loadCartFromStorage() {
   try {
-    const data = localStorage.getItem(CART_STORAGE_KEY);
+    var key = cartStorageKey();
+    var data = localStorage.getItem(key);
+    // migração única: legado global → chave do salão actual
+    if (!data && key !== CART_STORAGE_KEY_LEGACY) {
+      data = localStorage.getItem(CART_STORAGE_KEY_LEGACY);
+      if (data) {
+        try { localStorage.setItem(key, data); } catch (_) {}
+        try { localStorage.removeItem(CART_STORAGE_KEY_LEGACY); } catch (_) {}
+      }
+    }
     if (data) {
       cartItems = JSON.parse(data);
+      if (!Array.isArray(cartItems)) cartItems = [];
       renderCart();
     }
   } catch (e) { cartItems = []; }
 }
+
+function clearCartStorageAll() {
+  cartItems = [];
+  try { localStorage.removeItem(CART_STORAGE_KEY_LEGACY); } catch (_) {}
+  try {
+    var key = cartStorageKey();
+    if (key) localStorage.removeItem(key);
+  } catch (_) {}
+  // limpar outras chaves de carrinho no device (troca de salão)
+  try {
+    for (var i = localStorage.length - 1; i >= 0; i--) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf('bp_cart_items') === 0) localStorage.removeItem(k);
+    }
+  } catch (_) {}
+}
+if (typeof window !== "undefined") window.clearCartStorageAll = clearCartStorageAll;
+
 
 // --- Renderização do carrinho com botões + / - e total detalhado ---
 function renderCart() {
@@ -388,11 +426,12 @@ async function removeItemFromCart(idx, skipConfirm) {
     if (typeof showConfirmModal === 'function') {
       choice = await showConfirmModal(
         'Remover item?',
-        '"' + (item.nome || 'Item') + '" tem ' + item.quantidade + ' unidades. Remover todas da venda?',
-        true
+        '"' + (item.nome || 'Item') + '" tem ' + item.quantidade + ' unidades. Queres remover todas da venda?',
+        true,
+        { confirmLabel: 'Remover', cancelLabel: 'Cancelar', variant: 'destructive' }
       );
     } else {
-      choice = confirm('"' + (item.nome || '') + '" tem ' + item.quantidade + ' unidades. Remover todas?');
+      choice = true;
     }
     if (!choice) {
       // Deixar só 1 unidade em vez de forçar decisão binária agressiva
@@ -426,15 +465,20 @@ async function removeItemFromCart(idx, skipConfirm) {
 }
 
 // --- Função central de adição ao carrinho (sem profissional) ---
-function addToCart(nome, valor) {
+async function addToCart(nome, valor) {
   const existingIndex = cartItems.findIndex(item => item.nome === nome);
   if (existingIndex !== -1) {
     const existing = cartItems[existingIndex];
     if (existing.precoUnit !== valor) {
-      const choice = confirm(
-        `"${escHtml(nome||"")}" já está no carrinho com preço ${fmtKz(existing.precoUnit)}.\n` +
-        `Deseja atualizar para ${fmtKz(valor)}? (Cancelar = manter os dois separados)`
-      );
+      let choice = false;
+      if (typeof showConfirmModal === 'function') {
+        choice = await showConfirmModal(
+          'Atualizar preço?',
+          '"' + (nome || 'Serviço') + '" já está no carrinho a ' + (typeof fmtKz === 'function' ? fmtKz(existing.precoUnit) : existing.precoUnit) + '. Queres atualizar para ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + '? Se cancelares, os dois preços ficam como linhas separadas.',
+          false,
+          { confirmLabel: 'Atualizar', cancelLabel: 'Manter separados', variant: 'default' }
+        );
+      }
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
@@ -443,7 +487,7 @@ function addToCart(nome, valor) {
         return;
       } else {
         cartItems.push({
-          nome: nome + ' (' + fmtKz(valor) + ')',
+          nome: nome + ' (' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + ')',
           quantidade: 1,
           precoUnit: valor,
           subtotal: valor
@@ -526,7 +570,7 @@ function openVendaModal() {
 // --- Limpar carrinho (após venda ou cancelamento) ---
 function clearCart() {
   cartItems = [];
-  localStorage.removeItem(CART_STORAGE_KEY);
+  localStorage.removeItem(cartStorageKey());
   renderCart();
 }
 
@@ -591,7 +635,7 @@ function setServicoModalMode(mode) {
 
 function _labelProfsServico(arr) {
   const list = arr || [];
-  if (!list.length) return 'Toda a equipa';
+  if (!list.length) return 'Sem profissionais associados';
   return list.map(function (x) {
     const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
     return byId ? byId.nome : x;

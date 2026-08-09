@@ -222,15 +222,61 @@
 /* ===== TABS ===== */
 .tab-pane {
   display: none;
-  opacity: 0;
-  transform: translateY(8px);
+  opacity: 1;
+  transform: none;
+  will-change: transform, opacity;
 }
 .tab-pane.active {
   display: block;
-  animation: fadeUp .3s forwards;
 }
-@keyframes fadeUp {
-  to { opacity: 1; transform: translateY(0); }
+/* Transição profissional horizontal (estilo plataformas maduras) */
+.tab-pane.bp-tab-in-right {
+  display: block;
+  animation: bpTabInRight 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.tab-pane.bp-tab-in-left {
+  display: block;
+  animation: bpTabInLeft 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.tab-pane.bp-tab-out-left {
+  display: block;
+  animation: bpTabOutLeft 0.24s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+  position: absolute;
+  left: 0; right: 0;
+  width: 100%;
+}
+.tab-pane.bp-tab-out-right {
+  display: block;
+  animation: bpTabOutRight 0.24s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+  position: absolute;
+  left: 0; right: 0;
+  width: 100%;
+}
+@keyframes bpTabInRight {
+  from { opacity: 0.92; transform: translateX(18%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes bpTabInLeft {
+  from { opacity: 0.92; transform: translateX(-18%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes bpTabOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-12%); }
+}
+@keyframes bpTabOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(12%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-pane.bp-tab-in-right,
+  .tab-pane.bp-tab-in-left,
+  .tab-pane.bp-tab-out-left,
+  .tab-pane.bp-tab-out-right {
+    animation-duration: 0.01ms !important;
+  }
 }
 /* Header: prioridades estáveis logo → nome → ações */
 .app-header-inner {
@@ -275,4 +321,16 @@
 }
 .sync-status[data-service-health="ok"] .sync-dot {
   background: var(--green-500, #22a06b);
+}
+
+
+/* ET4.9b — Modo offline (banner) eliminado */
+.offline-banner,
+#offline-banner {
+  display: none !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
 }

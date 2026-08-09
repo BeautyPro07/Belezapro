@@ -151,7 +151,7 @@
         </div>
       </header>
 
-      <div class="offline-banner" id="offline-banner" role="status"><span class="offline-banner-dot" aria-hidden="true"></span><span id="offline-banner-text">Modo offline — dados guardados neste dispositivo</span></div>
+      <div class="offline-banner" id="offline-banner" role="status" style="display:none!important" hidden aria-hidden="true"><span class="offline-banner-dot" aria-hidden="true"></span><span id="offline-banner-text">Sem ligação · Os dados continuam guardados neste dispositivo</span></div>
 
       <!-- CTA VENDA -->
       <button class="venda-cta-bar" id="nova-venda-hero-btn" aria-label="Registar nova venda">
@@ -1176,30 +1176,25 @@
   </div>
 
   <!-- MODAL CONFIRMAÇÃO (LOGOUT) -->
-  <div id="modal-confirm" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div id="modal-confirm" class="modal-overlay modal-overlay--center" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <div class="modal-confirm-sheet">
-      <div class="confirm-icon" style="font-size:1.5rem;font-weight:700;color:var(--amber-500);">!</div>
-      <h2 id="confirm-title" class="confirm-title">O senhor(a) sairá da aplicação?</h2>
-      <p id="confirm-message" class="confirm-message">As suas vendas e agendamentos estão guardados em segurança. Pode voltar a qualquer momento.</p>
+      <h2 id="confirm-title" class="confirm-title">Confirmar</h2>
+      <p id="confirm-message" class="confirm-message">Tem a certeza?</p>
       <div class="confirm-actions">
-        <button class="btn btn-secondary" id="confirm-cancel-btn" style="flex:1;">Regressar</button>
-        <button class="btn btn-danger" id="confirm-ok-btn" style="flex:1;">Sair agora</button>
+        <button type="button" class="btn btn-secondary btn-modal-compact" id="confirm-cancel-btn">Cancelar</button>
+        <button type="button" class="btn btn-danger btn-modal-compact" id="confirm-ok-btn">Eliminar</button>
       </div>
-      <label>
-        <input type="checkbox" id="keep-logged"> Manter-me ligado neste dispositivo
-      </label>
     </div>
   </div>
 
   <!-- MODAL ERRO -->
-  <div id="modal-erro" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="erro-title">
-    <div class="modal-confirm-sheet" style="text-align:center;">
-      <div class="confirm-icon" style="font-size:1.4rem;font-weight:700;color:var(--red-500);">!</div>
-      <h2 id="erro-title" class="confirm-title">Algo correu mal</h2>
-      <p id="erro-message" class="confirm-message">Ocorreu um erro ao processar a operação. Tente novamente.</p>
-      <div class="confirm-actions" style="justify-content:center;">
-        <button class="btn btn-primary" id="erro-tentar-btn" style="flex:1;">Tentar novamente</button>
-        <button class="btn btn-secondary" id="erro-cancelar-btn" style="flex:1;">Cancelar</button>
+  <div id="modal-erro" class="modal-overlay modal-overlay--center" role="dialog" aria-modal="true" aria-labelledby="erro-title">
+    <div class="modal-confirm-sheet modal-info-sheet">
+      <h2 id="erro-title" class="confirm-title">Não foi possível concluir</h2>
+      <p id="erro-message" class="confirm-message">Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.</p>
+      <div class="confirm-actions confirm-actions--end">
+        <button type="button" class="btn btn-secondary btn-modal-compact" id="erro-cancelar-btn">Fechar</button>
+        <button type="button" class="btn btn-primary btn-modal-compact" id="erro-tentar-btn">Tentar novamente</button>
       </div>
     </div>
   </div>
@@ -1339,14 +1334,24 @@
 
 
   <!-- Modal limpo: cliente não encontrado -->
-  <div id="modal-cliente-nao-encontrado" class="modal-overlay" role="dialog" aria-modal="true">
-    <div class="modal-confirm-sheet" style="text-align:left;">
-      <div class="confirm-title" style="margin-bottom:12px;">Cliente não encontrado</div>
-      <div class="confirm-message" style="text-align:left;line-height:1.5;color:var(--text-primary);">
-        Não encontrei o cliente. Verifica se o nome está correcto ou se o cliente que procura está cadastrado.
+
+  <!-- ET4.10 — Offline informativo (centro, leitura + Entendi, depois desaparece) -->
+  <div id="modal-offline-info" class="modal-overlay modal-overlay--center" role="dialog" aria-modal="true" aria-labelledby="offline-info-title" hidden>
+    <div class="modal-confirm-sheet modal-info-sheet">
+      <h2 id="offline-info-title" class="confirm-title">Sem ligação à internet</h2>
+      <p class="confirm-message">Estás sem ligação neste momento. As alterações que fizeres ficam guardadas neste dispositivo e serão sincronizadas automaticamente quando a rede voltar.</p>
+      <div class="confirm-actions confirm-actions--end">
+        <button type="button" class="btn btn-primary btn-modal-compact" id="modal-offline-info-ok">Entendi</button>
       </div>
-      <div class="confirm-actions" style="margin-top:20px;">
-        <button type="button" class="btn btn-primary btn-block" id="modal-cliente-nao-encontrado-ok">OK</button>
+    </div>
+  </div>
+
+  <div id="modal-cliente-nao-encontrado" class="modal-overlay modal-overlay--center" role="dialog" aria-modal="true" aria-labelledby="cliente-nao-encontrado-title">
+    <div class="modal-confirm-sheet modal-info-sheet">
+      <h2 id="cliente-nao-encontrado-title" class="confirm-title">Cliente não encontrado</h2>
+      <p class="confirm-message">Não encontrei o cliente. Verifica se o nome está correcto ou se o cliente que procura está cadastrado.</p>
+      <div class="confirm-actions confirm-actions--end">
+        <button type="button" class="btn btn-primary btn-modal-compact" id="modal-cliente-nao-encontrado-ok">Entendi</button>
       </div>
     </div>
   </div>

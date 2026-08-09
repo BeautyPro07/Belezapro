@@ -512,11 +512,20 @@
       setTimeout(function () { try { input.focus(); } catch (e) {} }, 200);
     }
     if (clear) {
-      clear.onclick = function () {
-        if (!confirm('Apagar todas as mensagens deste dispositivo?')) return;
+      clear.onclick = async function () {
+        var ok = true;
+        if (typeof showConfirmModal === 'function') {
+          ok = await showConfirmModal(
+            'Limpar mensagens?',
+            'Todas as mensagens deste chat neste dispositivo serão apagadas. Esta ação não remove dados do salão noutros sítios.',
+            true,
+            { confirmLabel: 'Limpar', cancelLabel: 'Cancelar', variant: 'destructive' }
+          );
+        }
+        if (!ok) return;
         saveChat([]);
         renderChatBody();
-        if (typeof toast === 'function') toast('Histórico limpo', 'success');
+        if (typeof toast === 'function') toast('Histórico limpo.', 'success');
       };
     }
   }
@@ -585,6 +594,15 @@
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpEquipaInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpEquipaInitDone = true;
+
     try { ensureMenuItems(); } catch (e) { console.warn('[equipa-fase3]', e); }
   }
   if (document.readyState === 'loading') {

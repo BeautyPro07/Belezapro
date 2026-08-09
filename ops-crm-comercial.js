@@ -60,7 +60,7 @@
     var list = loadStock();
     var nome = String(data.nome || "").trim();
     if (!nome) {
-      if (typeof toast === "function") toast("Nome do produto é obrigatório", "error");
+      if (typeof toast === "function") toast("Introduz o nome do produto.", "warning");
       return null;
     }
     var qtd = Math.max(0, Number(data.qtd) || 0);
@@ -168,7 +168,7 @@
   function upsertFornecedor(data) {
     var nome = String(data.nome || "").trim();
     if (!nome) {
-      if (typeof toast === "function") toast("Nome do fornecedor obrigatório", "error");
+      if (typeof toast === "function") toast("Introduz o nome do fornecedor.", "warning");
       return null;
     }
     var list = loadForn();
@@ -207,11 +207,11 @@
     var qtd = Math.abs(Number(data.quantidade) || 0);
     var valor = Math.max(0, Number(data.valor) || 0);
     if (!forn) {
-      if (typeof toast === "function") toast("Seleccione um fornecedor", "error");
+      if (typeof toast === "function") toast("Selecciona um fornecedor.", "warning");
       return null;
     }
     if (!produtoId || !findProduto(produtoId)) {
-      if (typeof toast === "function") toast("Seleccione um produto de stock", "error");
+      if (typeof toast === "function") toast("Selecciona um produto de stock.", "warning");
       return null;
     }
     if (!qtd) {
@@ -465,7 +465,7 @@
     var sessoes = Math.max(1, parseInt(data.sessoes, 10) || 1);
     var validade = Math.max(0, parseInt(data.validade_dias, 10) || 90);
     if (!nome) {
-      if (typeof toast === "function") toast("Nome do pacote obrigatório", "error");
+      if (typeof toast === "function") toast("Introduz o nome do pacote.", "warning");
       return null;
     }
     var list = loadPacotes();
@@ -505,7 +505,7 @@
       return null;
     }
     if (!cliente) {
-      if (typeof toast === "function") toast("Indique o cliente", "error");
+      if (typeof toast === "function") toast("Indica o cliente.", "warning");
       return null;
     }
     var exp = new Date();
@@ -688,7 +688,7 @@
         sku: (document.getElementById("bp-st-sku") || {}).value
       });
       if (p) {
-        if (typeof toast === "function") toast("Produto adicionado", "success");
+        if (typeof toast === "function") toast("Produto adicionado.", "success");
         renderStock();
       }
     };
@@ -780,7 +780,7 @@
         lancar_despesa: !!(document.getElementById("bp-cp-desp") || {}).checked
       });
       if (c) {
-        if (typeof toast === "function") toast("Compra registada · stock actualizado", "success");
+        if (typeof toast === "function") toast("Compra registada.", "success");
         renderForn();
       }
     };
@@ -1100,6 +1100,15 @@
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpOpsInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpOpsInitDone = true;
+
     try { ensureMenuItems(); } catch (e) { console.warn("[ops-crm-comercial]", e); }
   }
   if (document.readyState === "loading") {

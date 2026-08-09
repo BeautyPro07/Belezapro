@@ -77,6 +77,7 @@ function abrirDetalheAgendamentos(filtro = 'pendentes') {
 }
 
 function abrirFechoCaixa() {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
  const hojeStr = hoje();
  const movs = state.movimentos.filter(m => m.data === hojeStr);
  const vendas = movs.filter(m => m.tipo === 'venda');
@@ -141,10 +142,10 @@ function trapFocus(modal) {
   if (e.key === 'Tab') {
    if (e.shiftKey) {
     if (document.activeElement === firstElement) { e.preventDefault();
-     lastElement.focus(); }
+     if (lastElement) try { lastElement.focus(); } catch (_) {} }
    } else {
     if (document.activeElement === lastElement) { e.preventDefault();
-     firstElement.focus(); }
+     if (firstElement) try { firstElement.focus(); } catch (_) {} }
    }
   }
  });
@@ -158,15 +159,14 @@ if (originalOpenModal) {
   originalOpenModal(id);
   trapFocus(modal);
   const firstFocusable = modal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-  if (firstFocusable) setTimeout(() => firstFocusable.focus(), 100);
+  if (firstFocusable) setTimeout(function () { try { firstFocusable.focus(); } catch (_) {} }, 100);
  };
 }
 const originalCloseModal = window.closeModal;
 if (originalCloseModal) {
  window.closeModal = function(id) {
   originalCloseModal(id);
-  if (previousFocusedElement) { setTimeout(() => { previousFocusedElement.focus();
-    previousFocusedElement = null; }, 200); }
+  if (previousFocusedElement && previousFocusedElement.focus) { setTimeout(function () { try { previousFocusedElement.focus(); } catch (_) {} previousFocusedElement = null; }, 200); }
  };
 }
 
@@ -191,20 +191,59 @@ const svgPessoa = `<svg width="80" height="80" viewBox="0 0 80 80" fill="none" s
 // ====================================================================
 // NAVEGAÇÃO ENTRE ABAS
 // ====================================================================
+var BP_TAB_ORDER = ['dashboard', 'agenda', 'clientes', 'caixa', 'equipa', 'ia'];
+function bpTabIndex(id) {
+  var i = BP_TAB_ORDER.indexOf(id);
+  return i < 0 ? 0 : i;
+}
+function bpSwitchTabPane(fromId, toId) {
+  var from = fromId ? document.getElementById('tab-' + fromId) : null;
+  var to = document.getElementById('tab-' + toId);
+  if (!to) return;
+  var reduce = false;
+  try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+  var forward = bpTabIndex(toId) >= bpTabIndex(fromId || toId);
+  document.querySelectorAll('.tab-pane').forEach(function (p) {
+    p.classList.remove('active', 'bp-tab-in-right', 'bp-tab-in-left', 'bp-tab-out-left', 'bp-tab-out-right');
+  });
+  if (reduce || !from || from === to) {
+    to.classList.add('active');
+    return;
+  }
+  from.classList.add(forward ? 'bp-tab-out-left' : 'bp-tab-out-right');
+  to.classList.add('active', forward ? 'bp-tab-in-right' : 'bp-tab-in-left');
+  var clean = function () {
+    from.classList.remove('bp-tab-out-left', 'bp-tab-out-right');
+    to.classList.remove('bp-tab-in-right', 'bp-tab-in-left');
+    from.removeEventListener('animationend', clean);
+  };
+  from.addEventListener('animationend', clean);
+  setTimeout(clean, 320);
+}
+
 document.querySelectorAll('.nav-item').forEach(btn => {
- btn.addEventListener('click', function() {
+ btn.addEventListener('click', function(ev) {
+  // ET4.7: ao mudar de aba, matar tooltip do gráfico (não rouba toques)
+  try {
+    if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip();
+  } catch (_) {}
   const tab = this.dataset.tab;
   if (this.dataset.role) {
    const permitido = this.dataset.role.split(',').map(r => r.trim()).includes(normalizarRole(state.config.userRole));
    if (!permitido) {
-    toast('Não tem permissão para aceder a essa área.', 'error');
+    toast('Não tens acesso a esta área.', 'warning');
     return;
    }
   }
+  var prevTab = (typeof activeTab !== 'undefined') ? activeTab : null;
+  if (prevTab === tab) return;
   activeTab = tab;
   localStorage.setItem('bp_active_tab', tab);
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
+  bpSwitchTabPane(prevTab, tab);
+  if (tab !== 'dashboard') {
+    try { if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip(); } catch (_) {}
+    try { if (typeof fecharChartDrill === 'function') fecharChartDrill(); } catch (_) {}
+  }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   this.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n => n.setAttribute('aria-selected', 'false'));

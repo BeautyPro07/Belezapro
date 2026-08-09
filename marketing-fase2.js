@@ -326,6 +326,15 @@
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpMarketingInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpMarketingInitDone = true;
+
     try {
       ensureMenuItems();
     } catch (e) {

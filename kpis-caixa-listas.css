@@ -631,7 +631,8 @@
 /* Tooltip gráfico (Fase 4) */
 .chart-tooltip {
   position: fixed;
-  z-index: 9999;
+  /* ET4.7: abaixo da bottom-nav (z-index 500) — nunca cobrir abas */
+  z-index: 400;
   max-width: min(260px, 80vw);
   padding: 10px 12px;
   border-radius: 10px;
@@ -647,6 +648,7 @@
   white-space: pre-line;
 }
 .chart-tooltip.is-rich {
+  /* pointer-events só no botão via JS; contentor auto mas z < nav */
   pointer-events: auto;
 }
 .chart-tooltip .ct-title {

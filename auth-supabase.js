@@ -29,6 +29,7 @@ function bpClearSessionLocal() {
     localStorage.setItem('bp_logged_out', '1');
     localStorage.removeItem('bp_session_active');
     localStorage.removeItem('bp_salao_id_cache');
+    localStorage.removeItem('bp_user_role');
   } catch (_) {}
 }
 function bpHasLocalSession() {
@@ -71,8 +72,15 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
         m.classList.remove('open');
       });
       bpShowLoginShell();
-      if (typeof toast === 'function') toast('A sua sessão expirou. Inicie sessão novamente.', 'error');
+      if (typeof toast === 'function') toast('A sessão expirou. Inicia sessão novamente.', 'error');
     }
+  }
+  // ET4.2-P0-auth: refrescar permissões quando a sessão muda (sem expulsar offline-first)
+  if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'SIGNED_IN') {
+    try {
+      if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+    } catch (_) {}
   }
   logoutVoluntarioEmCurso = false;
 });
@@ -353,6 +361,13 @@ async function sincronizarConfigDoServidor() {
       try { localStorage.setItem('bp_plano_cache', state.config.plano); } catch (_) {}
       await saveConfig();
       if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+      // ET4.5: reconciliar contador de recibos com servidor + movimentos
+      try {
+        if (typeof bpSyncReciboCounter === 'function') await bpSyncReciboCounter();
+      } catch (_) {}
+      try {
+        if (typeof bpPullIAUsoFromSupabase === 'function') await bpPullIAUsoFromSupabase();
+      } catch (_) {}
     } else {
       await fetch(`${SUPABASE_URL}/rest/v1/salao_config`, {
         method: 'POST',
@@ -377,7 +392,7 @@ async function sincronizarConfigDoServidor() {
 document.getElementById('login-btn').addEventListener('click', async function() {
   const email    = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value.trim();
-  if (!email || !password) { toast('Preencha email e password', 'error'); return; }
+  if (!email || !password) { toast('Introduz o email e a palavra-passe.', 'warning'); return; }
   setButtonLoading(this, true);
   try {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });

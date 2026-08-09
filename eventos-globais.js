@@ -163,7 +163,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
       if (window.BPAgendaUI && typeof BPAgendaUI.waHref === 'function') href = BPAgendaUI.waHref(ag);
     } catch (_) {}
     if (!href) {
-      if (typeof toast === 'function') toast('Cliente sem telefone no registo', 'warning');
+      if (typeof toast === 'function') toast('Este cliente não tem telefone no registo.', 'warning');
       return;
     }
     const win = window.open(href, '_blank', 'noopener,noreferrer');
@@ -177,6 +177,8 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
   if (target) {
     e.preventDefault();
     e.stopPropagation();
+    // ET4.3: RBAC operacional (botão já tem data-role admin,gerente)
+    if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para cancelar agendamentos.')) return;
     const id = target.dataset.id;
     const ag = state.agendamentos.find(a => a.id === id);
     if (!ag) return;
@@ -189,7 +191,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
       // continua a existir (histórico), só deixa de contar como
       // pendente/realizado.
       await updateAgendamento(id, { status: 'cancelado' });
-      toast('Agendamento cancelado', 'warning');
+      toast('Agendamento cancelado.', 'warning');
     }
     return;
   }
@@ -199,7 +201,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
     e.preventDefault();
     e.stopPropagation();
     if (normalizarRole(state.config.userRole) !== 'admin') {
-      toast('Não tem permissão para executar esta acção.', 'error');
+      toast('Não tens permissão para esta ação.', 'warning');
       return;
     }
     const id = delProf.dataset.id;
@@ -252,13 +254,13 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
     e.preventDefault();
     e.stopPropagation();
     if (normalizarRole(state.config.userRole) !== 'admin') {
-      toast('Não tem permissão para executar esta acção.', 'error');
+      toast('Não tens permissão para esta ação.', 'warning');
       return;
     }
     const id = delServ.dataset.id;
     const serv = state.servicos.find(s => s.id === id);
     if (!serv) return;
-    const confirmed = await showConfirmModal('Eliminar Serviço?', `Tem a certeza que quer eliminar "${serv.nome}"? Esta acção não pode ser desfeita.`, true);
+    const confirmed = await showConfirmModal('Desactivar Serviço?', `Tem a certeza que quer desactivar "${serv.nome}"? Deixa de aparecer em novas vendas; o histórico mantém-se.`, true);
     if (confirmed) await deleteServico(id);
     return;
   }
@@ -269,7 +271,7 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
     e.stopPropagation();
     const papel = normalizarRole(state.config.userRole);
     if (papel !== 'admin' && papel !== 'gerente') {
-      toast('Não tem permissão para executar esta acção.', 'error');
+      toast('Não tens permissão para esta ação.', 'warning');
       return;
     }
     const id = delCliente.dataset.id;

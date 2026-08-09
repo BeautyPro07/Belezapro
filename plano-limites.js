@@ -62,7 +62,14 @@ function verificarLimite(tipo) {
       total = state.clientes.length;
       break;
     case 'profissionais':
-      total = state.profissionais.length;
+      // ET4-P1-05: contar apenas ativos (soft-delete não consome limite)
+      if (typeof getProfissionaisAtivos === 'function') {
+        total = getProfissionaisAtivos().length;
+      } else {
+        total = (state.profissionais || []).filter(function (p) {
+          return p && p.ativo !== false && p.ativo !== 0 && p.ativo !== 'false';
+        }).length;
+      }
       break;
   }
   if (total >= limite) {

@@ -6,6 +6,7 @@
 // ====================================================================
 
 function ativarAbaAtiva() {
+  try { if (typeof bpHideChartTooltip === 'function') bpHideChartTooltip(); } catch (_) {}
   const pane = document.getElementById('tab-' + activeTab);
   if (!pane) return;
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -35,6 +36,39 @@ function normalizarRole(role) {
   return 'operador';
 }
 
+/**
+ * ET4-P0-03 — autorização operacional (não só DOM).
+ * bpPode('admin') | bpPode(['admin','gerente'])
+ * Fail-safe: role desconhecida → operador (acesso mínimo).
+ */
+function bpPode(rolesPermitidos) {
+  const role = normalizarRole(
+    (typeof state !== 'undefined' && state.config && state.config.userRole)
+      ? state.config.userRole
+      : null
+  );
+  let allowed = rolesPermitidos;
+  if (allowed == null) return true;
+  if (typeof allowed === 'string') {
+    allowed = allowed.split(',').map(function (r) { return r.trim(); }).filter(Boolean);
+  }
+  if (!Array.isArray(allowed) || allowed.length === 0) return true;
+  return allowed.indexOf(role) !== -1;
+}
+
+function bpExigirRole(rolesPermitidos, mensagem) {
+  if (bpPode(rolesPermitidos)) return true;
+  if (typeof toast === 'function') {
+    toast(mensagem || 'Não tem permissão para esta operação.', 'error');
+  }
+  return false;
+}
+
+if (typeof window !== 'undefined') {
+  window.bpPode = bpPode;
+  window.bpExigirRole = bpExigirRole;
+}
+
 function aplicarPermissoes() {
   const role = normalizarRole(state.config.userRole);
   state.config.userRole = role;
@@ -59,7 +93,7 @@ function aplicarPermissoes() {
   const tabEquipaAtiva = document.getElementById('tab-equipa')?.classList.contains('active');
   if (equipaNav && equipaNav.style.display === 'none' && tabEquipaAtiva) {
     equipaNav.parentElement?.querySelector('.nav-item[data-tab="dashboard"]')?.click();
-    toast('Não tem permissão para aceder a essa área.', 'error');
+    toast('Não tens acesso a esta área.', 'warning');
   }
 }
 

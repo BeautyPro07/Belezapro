@@ -30,6 +30,9 @@
       }
       lastPullAt = Date.now();
       if (typeof atualizarIndicadorSync === "function") atualizarIndicadorSync();
+      try {
+        if (typeof bpFlushFotoUploadQueue === "function") await bpFlushFotoUploadQueue();
+      } catch (_) {}
       return true;
     } catch (e) {
       if (typeof logErroSilencioso === "function") logErroSilencioso("bpSilentPull", e);

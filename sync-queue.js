@@ -70,26 +70,122 @@ function saveSyncQueue(q) {
     const str = JSON.stringify(q);
     if (typeof storageSetSecure === 'function') storageSetSecure(SYNC_QUEUE_KEY, str);
     else localStorage.setItem(SYNC_QUEUE_KEY, str);
-  } catch (e) { logErroSilencioso('saveSyncQueue', e); }
+    // ET4.6: espelho em sessionStorage como contingência leve (não substitui IDB)
+    try { sessionStorage.setItem(SYNC_QUEUE_KEY + '_len', String((q && q.length) || 0)); } catch (_) {}
+  } catch (e) {
+    // Quota cheia: manter o máximo possível; nunca silenciar perda total
+    logErroSilencioso('saveSyncQueue', e);
+    try {
+      // Tentar gravar só metadados + últimos N se o payload for enorme
+      if (q && q.length > 100) {
+        const slim = q.map(function (op) {
+          return {
+            id: op.id,
+            tabela: op.tabela,
+            operacao: op.operacao,
+            ts: op.ts,
+            attempts: op.attempts,
+            failed: op.failed,
+            nextRetry: op.nextRetry,
+            payload: op.payload
+          };
+        });
+        localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(slim));
+      }
+    } catch (e2) {
+      logErroSilencioso('saveSyncQueue.fallback', e2);
+      if (typeof toast === 'function') {
+        toast('Armazenamento do dispositivo quase cheio. Liberte espaço — a fila tem ' + ((q && q.length) || 0) + ' ops.', 'warning');
+      }
+    }
+  }
 }
 
 function actualizarBannerOffline() {
+  // Banner topo continua desactivado (relatório: não intrusivo permanente).
   const banner = document.getElementById('offline-banner');
-  const txt = document.getElementById('offline-banner-text');
-  if (!banner) return;
-  if (navigator.onLine) {
+  if (banner) {
     banner.classList.remove('show');
-    return;
+    banner.style.display = 'none';
+    banner.setAttribute('aria-hidden', 'true');
   }
-  banner.classList.add('show');
-  if (txt) {
-    const fila = getSyncQueue();
-    const n = fila.filter(function (op) { return op.failed !== true; }).length;
-    txt.textContent = n > 0
-      ? ('Modo offline — ' + n + (n === 1 ? ' alteração' : ' alterações') + ' serão enviadas ao reconectar')
-      : 'Modo offline — dados guardados neste dispositivo';
-  }
+  // ET4.10: aviso offline centrado, uma vez por sessão, CTA Entendi.
+  try {
+    if (typeof bpMaybeShowOfflineInfoModal === 'function') bpMaybeShowOfflineInfoModal();
+  } catch (_) {}
 }
+
+/** Offline info modal — centro, obrigatório ler, depois desaparece (sessionStorage). */
+function bpMaybeShowOfflineInfoModal() {
+  try {
+    if (typeof navigator === 'undefined' || navigator.onLine) return;
+    if (sessionStorage.getItem('bp_offline_info_ack') === '1') return;
+    var modal = document.getElementById('modal-offline-info');
+    if (!modal) return;
+    if (modal.classList.contains('open')) return;
+    modal.hidden = false;
+    if (typeof openModal === 'function') openModal('modal-offline-info');
+    else {
+      modal.classList.add('open');
+      modal.style.display = 'flex';
+    }
+  } catch (_) {}
+}
+
+function bpAckOfflineInfoModal() {
+  try { sessionStorage.setItem('bp_offline_info_ack', '1'); } catch (_) {}
+  try {
+    if (typeof closeModal === 'function') closeModal('modal-offline-info');
+    else {
+      var modal = document.getElementById('modal-offline-info');
+      if (modal) {
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+        modal.hidden = true;
+      }
+    }
+  } catch (_) {}
+}
+
+if (typeof window !== 'undefined') {
+  window.bpMaybeShowOfflineInfoModal = bpMaybeShowOfflineInfoModal;
+  window.bpAckOfflineInfoModal = bpAckOfflineInfoModal;
+}
+
+(function bpBindOfflineInfoModal() {
+  function bind() {
+    var ok = document.getElementById('modal-offline-info-ok');
+    if (!ok || ok.dataset.bpBound) return;
+    ok.dataset.bpBound = '1';
+    ok.addEventListener('click', function () {
+      if (typeof bpAckOfflineInfoModal === 'function') bpAckOfflineInfoModal();
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+  // Uma vez por sessão de separador: se ainda não leu, mostra ao ficar offline.
+  window.addEventListener('offline', function () {
+    setTimeout(function () {
+      if (typeof bpMaybeShowOfflineInfoModal === 'function') bpMaybeShowOfflineInfoModal();
+    }, 200);
+  });
+  // Arranque já offline
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      setTimeout(function () {
+        if (typeof actualizarBannerOffline === 'function') actualizarBannerOffline();
+      }, 400);
+    });
+  } else {
+    setTimeout(function () {
+      if (typeof actualizarBannerOffline === 'function') actualizarBannerOffline();
+    }, 400);
+  }
+})();
+
 
 function atualizarIndicadorSync() {
   const text = document.getElementById('sync-text');
@@ -103,7 +199,7 @@ function atualizarIndicadorSync() {
   let label = '';
   if (offline) {
     stateKey = 'offline';
-    label = pendentes > 0 ? ('Offline · ' + pendentes + ' pend.') : 'Offline';
+    label = pendentes > 0 ? ('Sem rede · ' + pendentes + ' pend.') : 'Sem rede';
   } else if (pendentes > 0) {
     stateKey = 'pending';
     label = pendentes === 1 ? '1 pendente' : (pendentes + ' pendentes');
@@ -111,16 +207,9 @@ function atualizarIndicadorSync() {
     stateKey = 'error';
     label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
   } else if (typeof bpGetServiceHealth === 'function') {
-    // Saúde do serviço (latência / falhas HTTP) — só quando a fila está limpa
+    // ET4.10: sem labels de «servidor instável» no header (relatório + pedido do produto).
     try {
       var health = bpGetServiceHealth();
-      if (health && (health.level === 'degraded' || health.level === 'critical')) {
-        stateKey = health.level === 'critical' ? 'error' : 'pending';
-        label = health.label || (health.level === 'critical' ? 'Serviço instável' : 'Serviço lento');
-        if (health.stats && health.stats.avg) {
-          label += ' · ' + health.stats.avg + 'ms';
-        }
-      }
       if (typeof bpNotifyHealthIfNeeded === 'function') bpNotifyHealthIfNeeded(health);
     } catch (_) {}
   }
@@ -163,104 +252,129 @@ function addToSyncQueue(tabela, operacao, payload) {
     attempts: 0,
     failed: false
   });
+  // ET4.5: fila sem teto — nunca descartar ops (pedido de produto)
   saveSyncQueue(q);
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 async function flushSyncQueue() {
-  const q = getSyncQueue();
-  if (q.length === 0) return;
+  if (!navigator.onLine) return;
+  if (flushSyncQueue._running) return;
+  flushSyncQueue._running = true;
 
-  const MAX_ATTEMPTS = 5;
-  const restantes = [];
-  let interrompido = false;
-  const itensFalhos = [];
+  // ET4.6: filas grandes (600+) em lotes — progresso gravado, sem conflitos por "tudo ou nada"
+  const BATCH_SIZE = 25;
+  const MAX_ATTEMPTS = 8;
+  const YIELD_MS = 30;
 
-  for (let i = 0; i < q.length; i++) {
-    const op = q[i];
+  try {
+    let q = getSyncQueue();
+    if (!q.length) return;
 
-    if (op.failed === true) {
-      restantes.push(op);
-      continue;
-    }
+    const itensFalhos = [];
+    let processed = 0;
+    let interrompido = false;
 
-    if (interrompido) {
-      restantes.push(op);
-      continue;
-    }
-
-    // Respeitar o backoff exponencial
-    if (op.nextRetry && Date.now() < op.nextRetry) {
-      restantes.push(op);
-      continue;
-    }
-
-    try {
-      if (op.operacao === 'delete') {
-        const success = await supabaseDelete(op.tabela, op.payload.id);
-        if (success) {
-          removeDeletedItem(op.payload.id, op.tabela);  // só remover tombstone se delete remoto OK
-        }
-      } else {
-        if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload?.id, op.tabela)) {
+    while (q.length && navigator.onLine && !interrompido) {
+      const batch = [];
+      const defer = [];
+      for (let i = 0; i < q.length; i++) {
+        const op = q[i];
+        if (!op) continue;
+        if (op.failed === true) {
+          defer.push(op);
           continue;
         }
-        // Contingência: desactivação → PATCH dedicado (mais fiável que upsert)
-        const payload = op.payload || {};
-        const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
-        if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
-          await supabaseDeactivate(op.tabela, payload.id, {
-            data_desativacao: payload.data_desativacao || null,
-            updated_at: payload.updated_at || new Date().toISOString()
-          });
-        } else {
-          await supabaseUpsert(op.tabela, op.payload);
+        if (op.nextRetry && Date.now() < op.nextRetry) {
+          defer.push(op);
+          continue;
         }
-      }
-    } catch (err) {
-      // ================================================================
-      //  TRATAMENTO PARA LIMITE DE PLANO (não retentar)
-      // ================================================================
-      if (err.message === 'LIMITE_PLANO_ATINGIDO') {
-        toast('Operação bloqueada: limite do plano atingido.', 'error');
-        // Não colocar de volta na fila – descartar definitivamente
-        continue;
+        if (batch.length < BATCH_SIZE) batch.push(op);
+        else defer.push(op);
       }
 
-      if (err.message === 'SESSION_EXPIRED') {
-        restantes.push(op);
-        for (let j = i + 1; j < q.length; j++) {
-          restantes.push(q[j]);
-        }
-        saveSyncQueue(restantes);
-        await supabaseClient.auth.signOut();
-        interrompido = true;
+      if (!batch.length) {
+        // Só backoff/falhas — sair para não spin
+        saveSyncQueue(defer);
         break;
       }
 
-      op.attempts = (op.attempts || 0) + 1;
-
-      if (op.attempts >= MAX_ATTEMPTS) {
-        op.failed = true;
-        itensFalhos.push(op.id || 'item');
-        restantes.push(op);
-      } else {
-        const delay = Math.min(Math.pow(2, op.attempts) * 1000, 60000) + Math.random() * 1000;
-        op.nextRetry = Date.now() + delay;
-        restantes.push(op);
+      const restantesBatch = [];
+      for (let i = 0; i < batch.length; i++) {
+        if (!navigator.onLine) {
+          interrompido = true;
+          restantesBatch.push.apply(restantesBatch, batch.slice(i));
+          break;
+        }
+        const op = batch[i];
+        try {
+          if (op.operacao === 'delete') {
+            const success = await supabaseDelete(op.tabela, op.payload.id);
+            if (success && typeof removeDeletedItem === 'function') {
+              removeDeletedItem(op.payload.id, op.tabela);
+            }
+          } else {
+            if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload && op.payload.id, op.tabela)) {
+              continue;
+            }
+            const payload = op.payload || {};
+            const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
+            if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
+              await supabaseDeactivate(op.tabela, payload.id, {
+                data_desativacao: payload.data_desativacao || null,
+                updated_at: payload.updated_at || new Date().toISOString()
+              });
+            } else {
+              await supabaseUpsert(op.tabela, op.payload);
+            }
+          }
+          processed++;
+        } catch (err) {
+          if (err && err.message === 'LIMITE_PLANO_ATINGIDO') {
+            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido.', 'error');
+            continue;
+          }
+          if (err && (err.message === 'DUPLICADO_BLOQUEADO' || String(err.message || '').indexOf('DUPLICADO') >= 0)) {
+            if (typeof logErroSilencioso === 'function') logErroSilencioso('flushSyncQueue.duplicado', err);
+            // não retentar em loop
+            op.failed = true;
+            op.attempts = MAX_ATTEMPTS;
+            itensFalhos.push(op.id || 'item');
+            restantesBatch.push(op);
+            continue;
+          }
+          op.attempts = (op.attempts || 0) + 1;
+          if (op.attempts >= MAX_ATTEMPTS) {
+            op.failed = true;
+            itensFalhos.push(op.id || 'item');
+            restantesBatch.push(op);
+          } else {
+            const delay = Math.min(Math.pow(2, op.attempts) * 1000, 60000) + Math.random() * 1000;
+            op.nextRetry = Date.now() + delay;
+            restantesBatch.push(op);
+          }
+        }
       }
+
+      // Persistir progresso após cada lote (crítico com 600+)
+      q = restantesBatch.concat(defer);
+      saveSyncQueue(q);
+      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+
+      // Ceder à UI entre lotes
+      await new Promise(function (r) { setTimeout(r, YIELD_MS); });
     }
-  }
 
-  if (!interrompido) {
-    saveSyncQueue(restantes);
+    if (itensFalhos.length > 0 && typeof toast === 'function') {
+      toast('Falha ao sincronizar ' + itensFalhos.length + ' operação(ões) após várias tentativas. Toque no indicador de sync para reintentar.', 'error');
+    }
+    if (processed > 0 && typeof logErroSilencioso === 'function') {
+      try { console.info('[sync] flush processou', processed, 'ops; restam', getSyncQueue().length); } catch (_) {}
+    }
+    if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+  } finally {
+    flushSyncQueue._running = false;
   }
-
-  if (itensFalhos.length > 0) {
-    const msg = `Falha ao sincronizar ${itensFalhos.length} operação(ões) após ${MAX_ATTEMPTS} tentativas. Contacte o suporte.`;
-    toast(msg, 'error');
-  }
-  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
 // ====================================================================
@@ -274,7 +388,13 @@ dbPut = async function(store, item) {
   await _dbPutOriginal(store, item);
 
   const tabela = STORE_TO_TABLE[store];
-  if (!tabela || !state.config.salaoId) return item;
+  // ET4-P0-04: sem salaoId não há sync remoto (isolamento multi-tenant)
+  if (!tabela || !state.config || !state.config.salaoId) {
+    if (tabela && (!state.config || !state.config.salaoId)) {
+      try { console.warn('[sync-queue] dbPut sem salaoId — apenas local:', store, item && item.id); } catch (_) {}
+    }
+    return item;
+  }
 
   if (navigator.onLine) {
     try {
@@ -306,7 +426,13 @@ dbDelete = async function(store, id) {
 
   await _dbDeleteOriginal(store, id);
 
-  if (!tabela || !state.config.salaoId) return;
+  // ET4.4: alinhado a dbPut — sem salaoId não há delete remoto
+  if (!tabela || !state.config || !state.config.salaoId) {
+    if (tabela) {
+      try { console.warn('[sync-queue] dbDelete sem salaoId — apenas local:', store, id); } catch (_) {}
+    }
+    return;
+  }
   if (navigator.onLine) {
     try { await supabaseDelete(tabela, id); }
     catch { addToSyncQueue(tabela, 'delete', { id }); }
@@ -334,7 +460,33 @@ async function bpRetryFailedSync() {
 }
 if (typeof window !== 'undefined') {
   window.bpRetryFailedSync = bpRetryFailedSync;
+  // ET4.2-P1-sync-retry: toque no indicador tenta reenviar falhas + flush
+  (function bindSyncRetryClick() {
+    var el = document.getElementById('sync-status-container');
+    if (!el || el.dataset.bpSyncRetryBound) return;
+    el.dataset.bpSyncRetryBound = '1';
+    el.style.cursor = 'pointer';
+    el.title = el.title || 'Toque para tentar sincronizar novamente';
+    el.addEventListener('click', function () {
+      if (!navigator.onLine) {
+        if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
+        return;
+      }
+      if (typeof toast === 'function') toast('A sincronizar alterações…', 'info');
+      Promise.resolve()
+        .then(function () { return typeof bpRetryFailedSync === 'function' ? bpRetryFailedSync() : null; })
+        .then(function () { return typeof flushSyncQueue === 'function' ? flushSyncQueue() : null; })
+        .then(function () {
+          if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+        })
+        .catch(function (e) {
+          if (typeof logErroSilencioso === 'function') logErroSilencioso('syncRetryClick', e);
+        });
+    });
+  })();
+
   window.addEventListener('online', function () {
+    try { sessionStorage.removeItem('bp_offline_info_ack'); } catch (_) {}
     setTimeout(function () {
       if (typeof bpRetryFailedSync === 'function') bpRetryFailedSync();
     }, 1500);

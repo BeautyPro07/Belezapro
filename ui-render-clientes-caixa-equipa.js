@@ -476,7 +476,7 @@ function renderServicos() {
   container.innerHTML = servicosOrdenados.map(s => {
     const profs = (function () {
       const arr = s.profissionais || [];
-      if (!arr.length) return 'Todos os profissionais';
+      if (!arr.length) return 'Sem profissionais associados';
       return arr.map(function (x) {
         const byId = (state.profissionais || []).find(function (p) { return p.id === x; });
         if (byId) return byId.nome;
@@ -542,15 +542,26 @@ function populateAgendaSelects() {
   const servSel = document.getElementById('agenda-servico');
   if (!profSel || !servSel) return;
 
-  // Verificar se há serviços
-  if (state.servicos.length === 0) {
+  // Verificar se há serviços ativos
+  var _servActivosEmpty = (typeof getServicosAtivos === 'function')
+    ? getServicosAtivos()
+    : (state.servicos || []).filter(function (s) {
+        return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
+      });
+  if (!_servActivosEmpty.length) {
     servSel.innerHTML = '<option value="">Nenhum serviço disponível</option>';
     profSel.innerHTML = '<option value="">Nenhum profissional disponível</option>';
     return;
   }
 
   const prevServico = servSel.value;
-  servSel.innerHTML = state.servicos.map(s =>
+  // ET4.2-P1-03: só serviços ativos nos selects de agenda/venda
+  var servicosParaSelect = (typeof getServicosAtivos === 'function')
+    ? getServicosAtivos()
+    : (state.servicos || []).filter(function (s) {
+        return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
+      });
+  servSel.innerHTML = servicosParaSelect.map(s =>
     `<option value="${escHtml(s.nome)}">${escHtml(s.nome)}</option>`
   ).join('') + '<option value="Outro">Outro / Personalizado</option>';
   if (prevServico) servSel.value = prevServico;
@@ -570,12 +581,15 @@ function populateAgendaSelects() {
       profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
-      const nomes = serv && serv.profissionais && serv.profissionais.length > 0
-        ? serv.profissionais
-        : activos.map(p => p.nome);
-      profs = activos
-        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
-        .map(p => ({ id: p.id, nome: p.nome }));
+      const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
+      // ET4.5: sem profissionais no serviço → nenhum (não toda a equipa)
+      if (!nomes.length) {
+        profs = [];
+      } else {
+        profs = activos
+          .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
+          .map(p => ({ id: p.id, nome: p.nome }));
+      }
     }
     const prevProfId = profSel.value;
     profSel.innerHTML = profs.map(p =>
@@ -628,12 +642,14 @@ function populateVendaSelects() {
       profs = activos.map(p => ({ id: p.id, nome: p.nome }));
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
-      const nomes = serv && serv.profissionais && serv.profissionais.length > 0
-        ? serv.profissionais
-        : activos.map(p => p.nome);
-      profs = activos
-        .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
-        .map(p => ({ id: p.id, nome: p.nome }));
+      const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
+      if (!nomes.length) {
+        profs = [];
+      } else {
+        profs = activos
+          .filter(p => nomes.includes(p.nome) || nomes.includes(p.id))
+          .map(p => ({ id: p.id, nome: p.nome }));
+      }
     }
     profSel.innerHTML = `<option value="">Selecionar profissional</option>` +
       profs.map(p =>

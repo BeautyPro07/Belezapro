@@ -47,9 +47,18 @@ async function loadState(trocouDeSalao = false) {
     try { localStorage.removeItem('bp_deleted_items'); } catch (_) {}
     // Preferências e resíduos do salão anterior (P2)
     ['bp_filtro_clientes','bp_chart_periodo','bp_chart_offset','bp_chart_mostrar_valores',
-     'bp_hist_periodo','bp_caixa_data_exata','bp_carrinho','bp_last_venda_id'].forEach(k => {
+     'bp_hist_periodo','bp_caixa_data_exata','bp_carrinho','bp_last_venda_id','bp_cart_items'].forEach(k => {
       try { localStorage.removeItem(k); } catch (_) {}
     });
+    try {
+      if (typeof clearCartStorageAll === 'function') clearCartStorageAll();
+      else {
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+          var ck = localStorage.key(i);
+          if (ck && ck.indexOf('bp_cart_items') === 0) localStorage.removeItem(ck);
+        }
+      }
+    } catch (_) {}
     try { sessionStorage.removeItem('bp_last_venda_id'); } catch (_) {}
     state.histPeriodo = 'hoje';
     state.filtroClientes = 'todos';
@@ -138,7 +147,7 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
   const lista = state[tabela] || [];
   const itemOriginal = lista.find(item => item.id === id);
   if (!itemOriginal) {
-    toast(`${nomeEntidade} não encontrado(a).`, 'warning');
+    toast((nomeEntidade || 'Registo') + ' não encontrado(a).', 'warning');
     return false;
   }
 
@@ -167,7 +176,7 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
         }
       }
       if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-      toast(`${nomeEntidade} eliminado(a).`, 'success');
+      toast((nomeEntidade || 'Registo') + ' removido(a).', 'success');
       return true;
     } catch (e) {
       console.warn(`[delete ${tabela}] Falha ao sincronizar:`, e);
@@ -175,11 +184,11 @@ async function _deleteComRollback(tabela, id, nomeEntidade) {
         const soft = Object.assign({}, itemOriginal, { ativo: false, updated_at: new Date().toISOString() });
         addToSyncQueue('servicos', 'upsert', soft);
       }
-      toast(`${nomeEntidade} eliminado(a) localmente. Sync em fila.`, 'warning');
+      toast((nomeEntidade || 'Registo') + ' removido(a) neste dispositivo. Será sincronizado quando houver rede.', 'warning');
       return true;
     }
   } else {
-    toast(`${nomeEntidade} eliminado(a) (offline). Sync quando online.`, 'warning');
+    toast((nomeEntidade || 'Registo') + ' removido(a) neste dispositivo. Será sincronizado quando houver rede.', 'warning');
     return true;
   }
 }
@@ -230,7 +239,7 @@ async function creditarPontosCliente(clienteId, pontos) {
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
   const nome = (c.nome || '').trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
   if (existeNomeDuplicado('clientes', nome)) {
     toast('Já existe um cliente com este nome.', 'error');
@@ -246,7 +255,7 @@ async function addCliente(c) {
       state.clientes.push(n);
       updateUI();
     }
-    toast('Cliente adicionado à lista', 'success');
+    toast('Cliente adicionado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -313,6 +322,10 @@ async function updateCliente(id, data) {
 }
 
 async function deleteCliente(id) {
+  // ET4.4: RBAC operacional (UI já restringe admin/gerente)
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para eliminar clientes.')) {
+    return false;
+  }
   return _deleteComRollback('clientes', id, 'Cliente');
 }
 
@@ -374,7 +387,7 @@ async function addAgendamento(ag) {
   }
   if (!verificarLimite('agendamentos')) return null;
   if (!ag.profissional_id || String(ag.profissional_id).trim() === '') {
-    toast('Selecione um profissional antes de agendar.', 'error');
+    toast('Selecciona um profissional antes de agendar.', 'warning');
     return null;
   }
 
@@ -414,7 +427,7 @@ async function addAgendamento(ag) {
       updateUI();
     }
     if (typeof renderBadges === 'function') renderBadges();
-    toast('Agendamento marcado', 'success');
+    toast('Agendamento marcado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -428,6 +441,12 @@ async function addAgendamento(ag) {
 async function updateAgendamento(id, data) {
   const actual = (state.agendamentos || []).find(a => a.id === id);
   if (!actual) return null;
+  // ET4.3-cancel: cancelar via status exige admin/gerente
+  if (data && String(data.status || '').toLowerCase() === 'cancelado') {
+    if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para cancelar agendamentos.')) {
+      return null;
+    }
+  }
 
   const merged = { ...actual, ...data };
   const st = String(merged.status || 'agendado').toLowerCase();
@@ -479,17 +498,96 @@ async function deleteAgendamento(id) {
 // ====================================================================
 //  CRUD — PROFISSIONAL
 // ====================================================================
+
+/** ET4.5: serviço exige ≥1 profissional válido (activo) ou nome pendente (criação conjunta). */
+function bpValidarProfissionaisDoServico(lista, opts) {
+  opts = opts || {};
+  const pending = (opts.pendingNomes || []).map(function (x) { return String(x || '').trim(); }).filter(Boolean);
+  const arr = Array.isArray(lista) ? lista : [];
+  if (!arr.length) {
+    return { ok: false, msg: 'Seleccione pelo menos um profissional para o serviço.' };
+  }
+  const activos = typeof getProfissionaisAtivos === 'function'
+    ? getProfissionaisAtivos()
+    : (state.profissionais || []).filter(function (p) {
+        return typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(p) : (p && p.ativo !== false);
+      });
+  const valid = arr.filter(function (ref) {
+    const r = String(ref || '').trim();
+    if (!r) return false;
+    if (pending.indexOf(r) !== -1) return true;
+    return activos.some(function (p) {
+      return String(p.id) === r || String(p.nome) === r;
+    });
+  });
+  if (!valid.length) {
+    return { ok: false, msg: 'Associe pelo menos um profissional activo ao serviço.' };
+  }
+  return { ok: true, profissionais: valid };
+}
+
+/** ET4.5: profissional exige especialidade = serviço activo existente. */
+function bpValidarEspecialidadeProfissional(esp) {
+  const nome = String(esp || '').trim();
+  if (!nome) {
+    return { ok: false, msg: 'O profissional tem de ter pelo menos um serviço (especialidade).' };
+  }
+  const activos = typeof getServicosAtivos === 'function'
+    ? getServicosAtivos()
+    : (state.servicos || []).filter(function (s) {
+        return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
+      });
+  const hit = activos.find(function (s) { return String(s.nome) === nome || String(s.id) === nome; });
+  if (!hit) {
+    return { ok: false, msg: 'Especialidade inválida: escolha um serviço activo existente.' };
+  }
+  return { ok: true, servico: hit };
+}
+
+/** Liga profissional ao array profissionais do serviço. */
+async function bpLigarProfissionalAoServico(prof, servicoNome) {
+  if (!prof || !servicoNome) return;
+  const s = (state.servicos || []).find(function (x) {
+    return String(x.nome) === String(servicoNome) || String(x.id) === String(servicoNome);
+  });
+  if (!s) return;
+  const arr = Array.isArray(s.profissionais) ? s.profissionais.slice() : [];
+  const refs = [prof.nome, prof.id].filter(Boolean).map(String);
+  const already = arr.some(function (x) { return refs.indexOf(String(x)) !== -1; });
+  if (already) return;
+  arr.push(prof.nome || prof.id);
+  const patch = { profissionais: arr, updated_at: new Date().toISOString() };
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('servicos', s.id, patch);
+  } else {
+    const i = state.servicos.findIndex(function (x) { return x.id === s.id; });
+    if (i !== -1) state.servicos[i] = Object.assign({}, state.servicos[i], patch);
+  }
+  const item = (state.servicos || []).find(function (x) { return x.id === s.id; });
+  if (item) {
+    try { await dbPut('servicos', item); } catch (_) {}
+  }
+}
+
 async function addProfissional(p) {
   if (!verificarLimite('profissionais')) return null;
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem adicionar profissionais.')) return null;
   const nome = (p.nome || '').trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
+
+  // ET4.5: profissional sem serviço (especialidade) não é permitido
+  const espCheck = bpValidarEspecialidadeProfissional(p.especialidade);
+  if (!espCheck.ok) {
+    toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
+    return null;
+  }
 
   if (existeNomeDuplicado('profissionais', nome)) {
     toast('Já existe um profissional com este nome.', 'error');
     return null;
   }
 
-  const n = { ...p, id: uuid(), nome, ativo: p.ativo !== false };
+  const n = { ...p, id: uuid(), nome, especialidade: String(p.especialidade || '').trim(), ativo: p.ativo !== false };
   try {
     await dbPut('profissionais', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -498,7 +596,8 @@ async function addProfissional(p) {
       state.profissionais.push(n);
       updateUI();
     }
-    toast('Profissional adicionado à equipa', 'success');
+    try { await bpLigarProfissionalAoServico(n, n.especialidade); } catch (_) {}
+    toast('Profissional adicionado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -524,12 +623,21 @@ function getProfissionaisAtivos() {
   return (state.profissionais || []).filter(isProfissionalAtivo);
 }
 
+function getServicosAtivos() {
+  return (state.servicos || []).filter(isServicoAtivo);
+}
+if (typeof window !== 'undefined') {
+  window.getProfissionaisAtivos = getProfissionaisAtivos;
+  window.getServicosAtivos = getServicosAtivos;
+}
+
 /**
  * Soft-delete: destituir profissional sem DELETE remoto (evita 409 FK).
  * Remove associações em serviços; desactiva serviços que ficam sem equipa.
  */
 async function desassociarProfissional(id) {
   const p = (state.profissionais || []).find(function (x) { return x.id === id; });
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem destituir profissionais.')) return null;
   if (!p) {
     if (typeof toast === 'function') toast('Profissional não encontrado', 'error');
     return null;
@@ -629,7 +737,18 @@ async function desassociarProfissional(id) {
 
 async function updateProfissional(id, data) {
   const actual = (state.profissionais || []).find(p => p.id === id);
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem editar profissionais.')) return null;
   if (!actual) return null;
+
+  if (data.especialidade != null) {
+    const espCheck = typeof bpValidarEspecialidadeProfissional === 'function'
+      ? bpValidarEspecialidadeProfissional(data.especialidade)
+      : { ok: !!(data.especialidade && String(data.especialidade).trim()), msg: 'Especialidade obrigatória' };
+    if (!espCheck.ok) {
+      toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
+      return null;
+    }
+  }
 
   if (data.nome) {
     const nome = data.nome.trim();
@@ -652,6 +771,9 @@ async function updateProfissional(id, data) {
   }
   const item = state.profissionais.find(p => p.id === id);
   if (item) await dbPut('profissionais', item);
+  if (item && data && data.especialidade) {
+    try { await bpLigarProfissionalAoServico(item, data.especialidade); } catch (_) {}
+  }
 
   // Rename: actualizar nomes em serviços ligados (array legado de nomes)
   if (renamed && oldNome && newNome) {
@@ -693,22 +815,34 @@ async function updateProfissional(id, data) {
 }
 
 async function deleteProfissional(id) {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem eliminar profissionais.')) return false;
   return _deleteComRollback('profissionais', id, 'Profissional');
 }
 
 // ====================================================================
 //  CRUD — SERVIÇO
 // ====================================================================
-async function addServico(s) {
+async function addServico(s, opts) {
+  opts = opts || {};
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem criar serviços.')) return null;
   const nome = (s.nome || '').trim();
-  if (!nome) { toast('Nome é obrigatório', 'error'); return null; }
+  if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
+
+  // ET4.5: serviço sem profissionais — proibido (não existe "toda a equipa")
+  const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
+    ? bpValidarProfissionaisDoServico(s.profissionais, opts)
+    : { ok: Array.isArray(s.profissionais) && s.profissionais.length > 0, msg: 'Seleccione profissionais', profissionais: s.profissionais };
+  if (!profCheck.ok) {
+    toast(profCheck.msg || 'Seleccione pelo menos um profissional.', 'error');
+    return null;
+  }
 
   if (existeNomeDuplicado('servicos', nome)) {
     toast('Já existe um serviço com este nome.', 'error');
     return null;
   }
 
-  const n = { ...s, id: uuid(), nome };
+  const n = { ...s, id: uuid(), nome, profissionais: profCheck.profissionais || s.profissionais };
   await dbPut('servicos', n);
   if (window.BeautyStore && window.BeautyStore.pushToList) {
     window.BeautyStore.pushToList('servicos', n);
@@ -716,33 +850,101 @@ async function addServico(s) {
     state.servicos.push(n);
     updateUI();
   }
-  toast('Serviço criado e disponível', 'success');
+  toast('Serviço criado.', 'success');
   return n;
 }
 
 async function updateServico(id, data) {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem editar serviços.')) return null;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'profissionais')) {
+    const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
+      ? bpValidarProfissionaisDoServico(data.profissionais)
+      : { ok: Array.isArray(data.profissionais) && data.profissionais.length > 0, msg: 'Seleccione profissionais', profissionais: data.profissionais };
+    if (!profCheck.ok) {
+      toast(profCheck.msg || 'O serviço tem de ter pelo menos um profissional.', 'error');
+      return null;
+    }
+    data = Object.assign({}, data, { profissionais: profCheck.profissionais || data.profissionais });
+  }
   if (data.nome) {
     const nome = data.nome.trim();
     if (existeNomeDuplicado('servicos', nome, id)) {
       toast('Já existe um serviço com este nome.', 'error');
-      return;
+      return null;
     }
   }
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('servicos', id, data);
   } else {
     const i = state.servicos.findIndex(s => s.id === id);
-    if (i === -1) return;
+    if (i === -1) return null;
     state.servicos[i] = { ...state.servicos[i], ...data };
   }
   const item = state.servicos.find(s => s.id === id);
   if (item) await dbPut('servicos', item);
   if (!(window.BeautyStore && window.BeautyStore.subscribe)) updateUI();
+  return item || null;
 }
 
 async function deleteServico(id) {
-  return _deleteComRollback('servicos', id, 'Serviço');
+  // ET4.2-P1-03: soft-delete (ativo=false) — alinhado a profissionais; preserva histórico multi-dispositivo
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem desactivar serviços.')) return false;
+  return desativarServico(id);
 }
+
+/** Soft-delete de serviço (mesmo contrato que desassociarProfissional). */
+async function desativarServico(id) {
+  const s = (state.servicos || []).find(function (x) { return x.id === id; });
+  if (!s) {
+    if (typeof toast === 'function') toast('Serviço não encontrado', 'error');
+    return false;
+  }
+  if (!isServicoAtivo(s)) {
+    if (typeof toast === 'function') toast('Este serviço já está desactivado', 'warning');
+    return false;
+  }
+  const patch = {
+    ativo: false,
+    updated_at: new Date().toISOString()
+  };
+  if (window.BeautyStore && window.BeautyStore.updateInList) {
+    window.BeautyStore.updateInList('servicos', id, patch);
+  } else {
+    const i = state.servicos.findIndex(function (x) { return x.id === id; });
+    if (i !== -1) state.servicos[i] = Object.assign({}, state.servicos[i], patch);
+  }
+  const item = (state.servicos || []).find(function (x) { return x.id === id; });
+  let remotoOk = false;
+  try {
+    if (item) await dbPut('servicos', item);
+  } catch (e) {
+    console.error('[desativarServico]', e);
+  }
+  try {
+    if (navigator.onLine && typeof supabaseDeactivate === 'function' && state.config && state.config.salaoId) {
+      try {
+        await supabaseDeactivate('servicos', id, { updated_at: patch.updated_at });
+        remotoOk = true;
+      } catch (eRemoto) {
+        console.warn('[desativarServico] PATCH remoto falhou, fila de contingência', eRemoto);
+      }
+    }
+    if (!remotoOk && typeof addToSyncQueue === 'function' && item) {
+      addToSyncQueue('servicos', 'upsert', item);
+      if (navigator.onLine && typeof flushSyncQueue === 'function') {
+        try { await flushSyncQueue(); } catch (eFlush) {
+          console.warn('[desativarServico] flush', eFlush);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[desativarServico] sync', e);
+  }
+  if (typeof updateUI === 'function') updateUI();
+  if (typeof toast === 'function') toast('Serviço desactivado.', 'success');
+  return true;
+}
+
 
 function getServicoById(id) {
   return state.servicos.find(s => s.id === id);
@@ -753,11 +955,12 @@ function getServicoByNome(nome) {
 }
 
 function getProfissionaisPorServico(nomeServico) {
-  const servico = state.servicos.find(s => s.nome === nomeServico);
-  if (servico && servico.profissionais && servico.profissionais.length > 0) {
-    return servico.profissionais;
+  // ET4.5: sem associação explícita → lista vazia (nunca "toda a equipa")
+  const servico = (state.servicos || []).find(s => s.nome === nomeServico);
+  if (servico && Array.isArray(servico.profissionais) && servico.profissionais.length > 0) {
+    return servico.profissionais.slice();
   }
-  return state.profissionais.map(p => p.nome);
+  return [];
 }
 
 // ====================================================================
@@ -777,7 +980,7 @@ async function registarVenda(dados) {
     }
 
     if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
-      toast('Adicione pelo menos um serviço à venda.', 'error');
+      toast('Adiciona pelo menos um serviço à venda.', 'warning');
       return null;
     }
 
@@ -865,6 +1068,7 @@ async function registarVenda(dados) {
  * Marca movimento status=cancelado e zera comissao_gerada (guarda valor em comissao_estornada).
  */
 async function cancelarVenda(movimentoId, motivo) {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para cancelar vendas.')) return false;
   try {
     if (!movimentoId || typeof state === 'undefined') return false;
     const mov = (state.movimentos || []).find(function (m) { return m.id === movimentoId; });

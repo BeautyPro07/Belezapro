@@ -178,19 +178,11 @@
       }
     } catch (_) {}
 
+    // ET4.9b: sem avisos ao utilizador sobre «ligação ao servidor» / saúde do serviço.
+    // A sincronização continua em silêncio; apenas log interno se necessário.
     if (!worsened) return;
-    if (Date.now() < _alertCooldownUntil) return;
-    _alertCooldownUntil = Date.now() + 60000;
-
-    var msg =
-      health.level === 'critical'
-        ? 'Ligação ao servidor instável. Os dados continuam seguros neste dispositivo.'
-        : 'Servidor mais lento que o habitual. A sincronização pode demorar.';
     try {
-      if (typeof toast === 'function') toast(msg, health.level === 'critical' ? 'error' : 'info');
-    } catch (_) {}
-    try {
-      bpLogError('service-health', new Error(health.label), {
+      bpLogError('service-health', new Error(health.label || 'health'), {
         level: health.level,
         reasons: health.reasons,
         stats: health.stats

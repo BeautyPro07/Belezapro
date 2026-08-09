@@ -572,6 +572,117 @@ function getUsoIAHoje() {
 function setUsoIAHoje(n) {
   localStorage.setItem(chaveIAPerguntas(), String(Math.max(0, n | 0)));
   actualizarContadorIA();
+  // ET4.6: propagar contador para Supabase (salao_config + tabela ia_uso_diario se existir)
+  try {
+    if (typeof bpPushIAUsoToSupabase === 'function') {
+      Promise.resolve(bpPushIAUsoToSupabase(Math.max(0, n | 0))).catch(function () {});
+    }
+  } catch (_) {}
+}
+
+/** Lê uso remoto e fica com max(local, remoto) — multi-dispositivo no mesmo dia. */
+async function bpPullIAUsoFromSupabase() {
+  try {
+    if (!navigator.onLine || !state.config || !state.config.salaoId) return null;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return null;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session || !session.access_token) return null;
+    const dia = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token
+    };
+    // Preferir tabela dedicada
+    let remote = null;
+    try {
+      const r1 = await fetch(
+        SUPABASE_URL + '/rest/v1/ia_uso_diario?salao_id=eq.' + encodeURIComponent(state.config.salaoId) +
+        '&dia=eq.' + encodeURIComponent(dia) + '&select=perguntas',
+        { headers: headers }
+      );
+      if (r1.ok) {
+        const rows = await r1.json();
+        if (rows && rows[0] && rows[0].perguntas != null) remote = parseInt(rows[0].perguntas, 10);
+      }
+    } catch (_) {}
+    // Fallback salao_config
+    if (remote == null || isNaN(remote)) {
+      try {
+        const r2 = await fetch(
+          SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId) +
+          '&select=ia_perguntas_hoje,ia_perguntas_dia',
+          { headers: headers }
+        );
+        if (r2.ok) {
+          const rows = await r2.json();
+          if (rows && rows[0]) {
+            const d = rows[0].ia_perguntas_dia;
+            if (d === dia && rows[0].ia_perguntas_hoje != null) {
+              remote = parseInt(rows[0].ia_perguntas_hoje, 10);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    if (remote == null || isNaN(remote)) return null;
+    const local = getUsoIAHoje();
+    if (remote > local) setUsoIAHoje(remote);
+    return remote;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function bpPushIAUsoToSupabase(n) {
+  try {
+    if (!navigator.onLine || !state.config || !state.config.salaoId) return false;
+    if (typeof supabaseClient === 'undefined' || !supabaseClient) return false;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session || !session.access_token) return false;
+    const dia = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    };
+    // Tabela ia_uso_diario (PK salao_id+dia)
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/ia_uso_diario', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          salao_id: state.config.salaoId,
+          dia: dia,
+          perguntas: n,
+          updated_at: new Date().toISOString()
+        })
+      });
+    } catch (_) {}
+    // Espelho em salao_config
+    try {
+      await fetch(
+        SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId),
+        {
+          method: 'PATCH',
+          headers: headers,
+          body: JSON.stringify({
+            ia_perguntas_hoje: n,
+            ia_perguntas_dia: dia,
+            updated_at: new Date().toISOString()
+          })
+        }
+      );
+    } catch (_) {}
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.bpPullIAUsoFromSupabase = bpPullIAUsoFromSupabase;
+  window.bpPushIAUsoToSupabase = bpPushIAUsoToSupabase;
 }
 
 
@@ -792,6 +903,11 @@ async function perguntarIA(pergunta) {
     }
   } catch (eLocal) {}
 
+  // ET4.2-P0: IA online só admin/gerente (aba já filtrada; reforço operacional)
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para usar o agente IA.')) {
+    return null;
+  }
+
   const contextoRaw = buildContextoIA();
   if (contextoRaw && contextoRaw.erro) {
     toast(contextoRaw.erro, 'warning');
@@ -808,12 +924,44 @@ async function perguntarIA(pergunta) {
   window.__bpIaLastMeta = { fonte: null };
   try { _bpIaSetHeaderStatus('busy', 'A contactar o agente…'); _bpIaSetComposerStatus('A processar…'); } catch (_) {}
   try {
+    // ET4-P0-02: preferir JWT de sessão (least privilege); ANON só como fallback controlado
+    var iaHeaders = { 'Content-Type': 'application/json' };
+    var iaAuthMode = 'anon-fallback';
+    try {
+      if (typeof getAuthHeaders === 'function') {
+        var authH = await getAuthHeaders();
+        if (authH && authH.Authorization) {
+          iaHeaders['Authorization'] = authH.Authorization;
+          if (authH.apikey) iaHeaders['apikey'] = authH.apikey;
+          else if (typeof SUPABASE_ANON_KEY !== 'undefined') iaHeaders['apikey'] = SUPABASE_ANON_KEY;
+          iaAuthMode = 'user-jwt';
+        }
+      }
+    } catch (eAuth) {
+      if (eAuth && eAuth.message === 'SESSION_EXPIRED') {
+        console.warn('[IA] sessão expirada — fallback local sem consumir cota remota');
+        var fbSess = typeof responderIALocal === 'function' ? responderIALocal(q) : null;
+        if (fbSess) {
+          iaHistorico.push({ pergunta: q, resposta: fbSess, fonte: 'local' });
+          if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
+          window.__bpIaLastMeta = { fonte: 'local', auth: 'session-expired' };
+          return fbSess;
+        }
+        return 'Sessão expirada. Inicie sessão novamente para usar o agente IA online.';
+      }
+    }
+    if (iaAuthMode !== 'user-jwt') {
+      if (typeof SUPABASE_ANON_KEY !== 'undefined') {
+        iaHeaders['Authorization'] = 'Bearer ' + SUPABASE_ANON_KEY;
+        iaHeaders['apikey'] = SUPABASE_ANON_KEY;
+      }
+      console.warn('[IA] sem JWT de utilizador — a usar ANON (Edge deve validar salaoId/plano)');
+    }
+    window.__bpIaLastMeta = { fonte: null, auth: iaAuthMode };
+
     const resp = await fetch(IA_EDGE_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
-      },
+      headers: iaHeaders,
       body: JSON.stringify({
         pergunta: q,
         contexto: contexto,
@@ -1664,7 +1812,7 @@ document.addEventListener('click', (e) => {
       try {
         if (window.BPOps && typeof window.BPOps.downloadIcs === 'function') {
           window.BPOps.downloadIcs();
-          if (typeof toast === 'function') toast('Agenda .ics descarregada', 'success');
+          if (typeof toast === 'function') toast('Agenda exportada.', 'success');
         } else if (typeof toast === 'function') {
           toast('Exportação de calendário indisponível', 'warning');
         }
@@ -1689,7 +1837,7 @@ document.addEventListener('click', (e) => {
     if (tool.classList.contains('ia-copiar-btn')) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(texto).then(function () {
-          if (typeof toast === 'function') toast('Texto copiado', 'success');
+          if (typeof toast === 'function') toast('Texto copiado.', 'success');
         }).catch(function () {
           if (typeof toast === 'function') toast('Não foi possível copiar', 'error');
         });
@@ -1703,7 +1851,7 @@ document.addEventListener('click', (e) => {
         navigator.share({ text: texto }).catch(function () {});
       } else if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(texto).then(function () {
-          if (typeof toast === 'function') toast('Texto copiado para partilhar', 'success');
+          if (typeof toast === 'function') toast('Texto copiado.', 'success');
         }).catch(function () {});
       }
       return;
@@ -1760,7 +1908,7 @@ document.addEventListener('click', (e) => {
 
 document.getElementById('ia-offline-retry')?.addEventListener('click', () => {
   if (navigator.onLine) { atualizarIAOffline();
-    toast('Conexão restabelecida!', 'success'); } else { toast('Ainda sem ligação', 'warning'); }
+    toast('Ligação restabelecida.', 'success'); } else { toast('Ainda sem ligação à internet.', 'warning'); }
 });
 
 // Upgrade modal — handler principal em plano-limites.js (bindUpgradeButtons / abrirWhatsAppVenda).

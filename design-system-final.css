@@ -347,19 +347,21 @@ select.input-field {
 }
 
 /* ===== TOAST ===== */
+/* ET4.8 — alinhado a modais-toast-fab (não sobrescrever com fundo saturado) */
 .toast {
-  background: var(--text-primary);
-  color: var(--card-white);
-  border-radius: var(--radius-md);
-  padding: 12px 18px;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  box-shadow: var(--shadow-modal);
+  background: var(--card-white, #fff);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  box-shadow: 0 4px 20px rgba(28, 26, 24, 0.12);
   bottom: 88px;
+  z-index: 1900;
 }
-.toast.success { background: var(--green); }
-.toast.error { background: var(--red); }
-.toast.warning { background: var(--gold-dark); }
+.toast.success { background: var(--card-white, #fff); }
+.toast.error { background: var(--card-white, #fff); }
+.toast.warning { background: var(--card-white, #fff); }
 
 /* ===== FILTER / POPOVER ===== */
 .agenda-filter-popover {

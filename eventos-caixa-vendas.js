@@ -6,8 +6,9 @@
 //  CORREÇÃO: adicionado profissional_id e renderBadges() no modal-finalizar-save
 // ====================================================================
 
-// Despesa
+// Despesa — ET4.2-P0: RBAC operacional (alinhado a data-role admin,gerente)
 document.getElementById('add-despesa-btn').addEventListener('click', () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para registar despesas.')) return;
   const d = document.getElementById('desp-desc');
   const v = document.getElementById('desp-valor');
   const c = document.getElementById('desp-categoria');
@@ -18,11 +19,12 @@ document.getElementById('add-despesa-btn').addEventListener('click', () => {
   setTimeout(function () { if (d) try { d.focus(); } catch (e) {} }, 100);
 });
 document.getElementById('modal-despesa-save').addEventListener('click', async () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para registar despesas.')) return;
   const desc = document.getElementById('desp-desc').value.trim();
   const valor = Number(document.getElementById('desp-valor').value);
   const categoria = (document.getElementById('desp-categoria') || {}).value || 'outro';
-  if (!desc) { toast('Indique a descrição da despesa', 'error'); return; }
-  if (!valor || valor <= 0 || isNaN(valor)) { toast('Indique um valor válido', 'error'); return; }
+  if (!desc) { toast('Indica a descrição da despesa.', 'warning'); return; }
+  if (!valor || valor <= 0 || isNaN(valor)) { toast('Indica um valor válido.', 'warning'); return; }
   await addMovimento({
     tipo: 'despesa',
     descricao: desc,
@@ -32,13 +34,14 @@ document.getElementById('modal-despesa-save').addEventListener('click', async ()
   closeModal('modal-despesa');
   document.getElementById('desp-desc').value = '';
   document.getElementById('desp-valor').value = '';
-  toast('Despesa registada', 'success');
+  toast('Despesa registada.', 'success');
   if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
-// Fundo
+// Fundo — ET4.2-P0: RBAC admin/gerente
 document.getElementById('ajustar-fundo-btn').addEventListener('click', () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para ajustar o fundo de caixa.')) return;
   const el = document.getElementById('fundo-valor');
   const atual = Number(state.config && state.config.fundo) || 0;
   if (el) el.value = atual;
@@ -50,12 +53,14 @@ document.getElementById('ajustar-fundo-btn').addEventListener('click', () => {
   setTimeout(function () { if (el) try { el.focus(); el.select(); } catch (e) {} }, 100);
 });
 document.getElementById('modal-fundo-save').addEventListener('click', async () => {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para ajustar o fundo de caixa.')) return;
+
   const v = Number(document.getElementById('fundo-valor').value);
   if (isNaN(v) || v < 0) { toast('Valor inválido', 'error'); return; }
   state.config.fundo = v;
   await saveConfig();
   closeModal('modal-fundo');
-  toast('Fundo actualizado', 'success');
+  toast('Fundo de caixa actualizado.', 'success');
   if (typeof updateUI === 'function') updateUI();
 });
 document.getElementById('modal-fundo-cancel').addEventListener('click', () => closeModal('modal-fundo'));
@@ -75,7 +80,7 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
   const valor = parseFloat(ciValor.value);
   if (wasDisabled) ciValor.disabled = true;
   if (!nome || !valor || valor <= 0) { 
-    toast('Preencha serviço e valor válido', 'error'); 
+    toast('Indica serviço e valor válidos.', 'warning'); 
     return; 
   }
 
@@ -103,7 +108,7 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
 const vendaSaveBtn = document.getElementById('modal-venda-save');
 if (vendaSaveBtn) {
   vendaSaveBtn.onclick = async function(e) {
-    if (!cartItems.length) { toast('Adicione pelo menos um serviço à venda', 'error'); return; }
+    if (!cartItems.length) { toast('Adiciona pelo menos um serviço à venda.', 'warning'); return; }
     const cliente = document.getElementById('venda-cliente').value || 'Avulso';
     const profissionalId = document.getElementById('venda-profissional').value;
     const metodoPagamento = document.getElementById('venda-pagamento').value;
@@ -171,9 +176,17 @@ if (vendaSaveBtn) {
 }
 
 // Cancelar venda – limpar carrinho com confirmação e fechar modal
-document.getElementById('modal-venda-cancel').addEventListener('click', () => {
+document.getElementById('modal-venda-cancel').addEventListener('click', async () => {
   if (cartItems.length > 0) {
-    const confirmCancel = confirm('Tem a certeza que deseja cancelar? O carrinho será limpo.');
+    let confirmCancel = true;
+    if (typeof showConfirmModal === 'function') {
+      confirmCancel = await showConfirmModal(
+        'Limpar carrinho?',
+        'Os serviços adicionados a esta venda serão removidos. Podes voltar a montar a venda a qualquer momento.',
+        true,
+        { confirmLabel: 'Limpar', cancelLabel: 'Manter', variant: 'destructive' }
+      );
+    }
     if (!confirmCancel) return;
   }
   if (typeof window.clearCart === 'function') {
@@ -248,7 +261,7 @@ document.getElementById('modal-finalizar-save').addEventListener('click', async 
   });
   
   closeModal('modal-finalizar');
-  toast('Atendimento finalizado e venda registada!', 'success');
+  toast('Venda registada.', 'success');
   
   // Atualizar UI e badge
   updateUI();
@@ -261,6 +274,8 @@ document.getElementById('modal-finalizar-cancel').addEventListener('click', () =
 //  CONFIRMAR FECHO DE CAIXA (persistência)
 // ====================================================================
 async function confirmarFechoCaixa() {
+  if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
+
   const hojeStr = hoje();
   const movs = state.movimentos.filter(m => m.data === hojeStr);
   const vendas = movs.filter(m => m.tipo === 'venda');
@@ -302,7 +317,7 @@ async function confirmarFechoCaixa() {
     if (!Array.isArray(state.fechos_caixa)) state.fechos_caixa = [];
     state.fechos_caixa.push(registro);
   }
-  toast('Caixa fechado com sucesso', 'success');
+  toast('Caixa fechado.', 'success');
   closeModal('modal-fecho');
   updateUI();
 }
@@ -460,7 +475,7 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
 
   function procurar() {
     if (!periodoLoc) {
-      toast('Seleccione primeiro o período.', 'warning');
+      toast('Selecciona primeiro o período.', 'warning');
       return;
     }
     const nome = (input && input.value || '').trim().toLowerCase();

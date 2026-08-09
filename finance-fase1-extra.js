@@ -536,7 +536,7 @@
       var cat = (document.getElementById('desp-categoria') || {}).value || 'outro';
       var forn = (document.getElementById('desp-fornecedor') || {}).value || '';
       if (!desc || !valor || valor <= 0) {
-        if (typeof toast === 'function') toast('Preencha descrição e valor válido', 'error');
+        if (typeof toast === 'function') toast('Indica descrição e valor válidos.', 'warning');
         return;
       }
       if (typeof addMovimento === 'function') {
@@ -552,13 +552,26 @@
       var d1 = document.getElementById('desp-desc'); if (d1) d1.value = '';
       var d2 = document.getElementById('desp-valor'); if (d2) d2.value = '';
       var d3 = document.getElementById('desp-fornecedor'); if (d3) d3.value = '';
-      if (typeof toast === 'function') toast('Despesa registada', 'success');
+      if (typeof toast === 'function') toast('Despesa registada.', 'success');
       if (typeof renderCaixa === 'function') renderCaixa();
       if (typeof updateUI === 'function') updateUI();
     };
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpFinanceInitDone) {
+      try {
+        ensureMenuItems();
+        enhanceDespesaModal();
+        enhanceVendaPagamento();
+        // hookDespesaSave deve ser idempotente (dataset bound)
+        hookDespesaSave();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpFinanceInitDone = true;
+
     try {
       ensureMenuItems();
       enhanceDespesaModal();

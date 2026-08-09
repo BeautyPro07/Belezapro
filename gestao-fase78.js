@@ -498,14 +498,24 @@
     );
     writeJson(BACKUP_META_KEY, { at: snap.created_at, size: JSON.stringify(snap).length });
     logAudit("backup", "Backup JSON descarregado", { at: snap.created_at });
-    if (typeof toast === "function") toast("Backup descarregado", "success");
+    if (typeof toast === "function") toast("Backup descarregado.", "success");
   }
   async function restoreBackupFromObject(snap) {
     if (!snap || !snap.state) {
       if (typeof toast === "function") toast("Ficheiro de backup inválido", "error");
       return false;
     }
-    if (!confirm("Restaurar backup? Os dados actuais em memória serão substituídos (IndexedDB).")) return false;
+    if (typeof showConfirmModal === "function") {
+      var _okRestore = await showConfirmModal(
+        "Restaurar backup?",
+        "Os dados actuais em memória neste dispositivo serão substituídos pelo conteúdo do ficheiro de backup. Confirma apenas se tens a certeza.",
+        true,
+        { confirmLabel: "Restaurar", cancelLabel: "Cancelar", variant: "destructive" }
+      );
+      if (!_okRestore) return false;
+    } else {
+      return false;
+    }
     try {
       var keys = ["clientes", "profissionais", "servicos", "movimentos", "agendamentos"];
       for (var ki = 0; ki < keys.length; ki++) {
@@ -534,7 +544,7 @@
       }
       logAudit("restore", "Backup restaurado", { at: snap.created_at });
       if (typeof updateUI === "function") updateUI();
-      if (typeof toast === "function") toast("Backup restaurado", "success");
+      if (typeof toast === "function") toast("Backup restaurado.", "success");
       return true;
     } catch (e) {
       console.error(e);
@@ -725,7 +735,7 @@
       btn.onclick = async function () {
         var ok = await aplicarReagendamento(agId, btn.getAttribute("data-apply-data"), btn.getAttribute("data-apply-hora"));
         if (ok) {
-          if (typeof toast === "function") toast("Reagendado com sucesso", "success");
+          if (typeof toast === "function") toast("Agendamento reagendado.", "success");
           if (typeof renderAgenda === "function") try { renderAgenda(); } catch (e) {}
           if (typeof updateUI === "function") try { updateUI(); } catch (e) {}
           renderReagendar();
@@ -917,6 +927,16 @@
   }
 
   function init() {
+    // ET4-P1-02: listeners só uma vez; re-ensure de menus permitido após login
+    if (window.__bpGestaoInitDone) {
+      try {
+        if (typeof ensureMenuItems === "function") ensureMenuItems();
+        if (typeof loadFiliais === "function") loadFiliais();
+      } catch (eRe) {}
+      return;
+    }
+    window.__bpGestaoInitDone = true;
+
     try { ensureMenuItems(); loadFiliais(); } catch (e) {
       console.warn("[gestao-fase78]", e);
     }

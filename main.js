@@ -86,7 +86,7 @@ document.addEventListener('DOMContentLoaded', async function init() {
   if (!dbDisponivel) {
     // Reforça a mensagem já dada acima, para o caso de o toast anterior
     // ter sido perdido durante a transição de ecrãs.
-    setTimeout(() => toast('Dados locais indisponíveis neste dispositivo. Algumas funcionalidades offline podem não funcionar até recarregar.', 'error'), 1400);
+    setTimeout(() => toast('Não foi possível aceder aos dados locais deste dispositivo. Tenta recarregar a página.', 'error'), 1400);
   }
 
   // Splash (removida após verificação de sessão)

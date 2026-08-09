@@ -317,6 +317,9 @@ function toSupabaseFormat(tabela, item) {
         profissional: item.profissional || '',
         itens: item.itens || [],
         metodo_pagamento: item.metodoPagamento || 'Numerário',
+        recibo_num: item.reciboNum || item.recibo_num || null,
+        comissao_gerada: item.comissao_gerada != null ? Number(item.comissao_gerada) : null,
+        // cliente_id não existe no schema remoto actual (PGRST204) — nome em `cliente`
         data: item.data,
         hora: item.hora,
         updated_at: item.updated_at,
@@ -391,10 +394,13 @@ function fromSupabaseFormat(tabela, row) {
         descricao:       row.descricao,
         valor:           row.valor,
         cliente:         row.cliente,
+        cliente_id:      row.cliente_id || null,
         profissional_id: row.profissional_id || null,
         profissional:    row.profissional || '',
         itens:           row.itens || [],
         metodoPagamento: row.metodo_pagamento,
+        reciboNum:       row.recibo_num || row.reciboNum || null,
+        comissao_gerada: row.comissao_gerada != null ? Number(row.comissao_gerada) : 0,
         data:            row.data,
         hora:            row.hora,
         updated_at:      row.updated_at,
@@ -735,6 +741,8 @@ async function carregarDoSupabase() {
     for (const c of state.clientes)      await dbPutLocal('clientes',      c);
     for (const a of state.agendamentos)  await dbPutLocal('agendamentos',  a);
     for (const m of state.movimentos)    await dbPutLocal('movimentos',    m);
+    // ET4.5: após pull, alinhar sequência de recibos ao max local/remoto
+    try { if (typeof bpSyncReciboCounter === 'function') await bpSyncReciboCounter(); } catch (_) {}
     for (const p of state.profissionais) await dbPutLocal('profissionais', p);
     for (const s of state.servicos)      await dbPutLocal('servicos',      s);
 
