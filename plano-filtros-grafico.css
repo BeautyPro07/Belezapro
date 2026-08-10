@@ -23,6 +23,14 @@
 }
 
 /* ===== FILTROS CLIENTES ===== */
+.filtro-frequencia {
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 10px !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600;
+  border-radius: 999px;
+}
 .filtro-frequencia.active {
   background: var(--gold) !important;
   color: var(--card-white) !important;

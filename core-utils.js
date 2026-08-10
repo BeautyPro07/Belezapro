@@ -212,6 +212,59 @@ function toast(msg, type, opts) {
   toastTimer = setTimeout(function () { el.classList.remove('show'); }, dur);
 }
 
+
+/**
+ * Feedback de validação: modal orientador → «Entendi» → foco no campo.
+ * Não bloqueia em silêncio; o utilizador lê a orientação e só depois é levado ao campo.
+ */
+function bpFocarCampoForm(fieldId) {
+  if (!fieldId) return;
+  try {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    el.setAttribute('aria-invalid', 'true');
+    el.classList.add('bp-field-invalid');
+    if (typeof el.focus === 'function') el.focus();
+    if (typeof el.scrollIntoView === 'function') {
+      try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+    }
+    clearTimeout(el._bpInvalidTimer);
+    el._bpInvalidTimer = setTimeout(function () {
+      try {
+        el.removeAttribute('aria-invalid');
+        el.classList.remove('bp-field-invalid');
+      } catch (_) {}
+    }, 6000);
+  } catch (_) {}
+}
+
+function bpNotifyFormError(message, fieldId, type) {
+  var msg = String(message || 'Verifique os campos obrigatórios e tente novamente.');
+  var title = 'Quase lá';
+  var goField = function () {
+    setTimeout(function () { bpFocarCampoForm(fieldId); }, 80);
+  };
+  // Modal centrado com CTA «Entendi»; ao fechar, foca o campo
+  if (typeof mostrarErro === 'function' && document.getElementById('modal-erro')) {
+    mostrarErro(msg, null, title, goField, { okLabel: 'Entendi' });
+    return;
+  }
+  if (typeof showConfirmModal === 'function') {
+    showConfirmModal(title, msg, false, {
+      confirmLabel: 'Entendi',
+      cancelLabel: 'Voltar',
+      variant: 'default'
+    }).then(function () { goField(); }).catch(function () { goField(); });
+    return;
+  }
+  if (typeof toast === 'function') toast(msg, type || 'warning', { duration: 4000 });
+  goField();
+}
+if (typeof window !== 'undefined') {
+  window.bpNotifyFormError = bpNotifyFormError;
+  window.bpFocarCampoForm = bpFocarCampoForm;
+}
+
 function animateKpi(id, txt) {
   const el = document.getElementById(id);
   if (!el) { return; }
@@ -257,16 +310,38 @@ document.addEventListener('click', function (e) {
 }, true);
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
+  // Empilhamento: fechar primeiro o modal de topo (erro / confirm / offline)
+  var erroEl = document.getElementById('modal-erro');
+  if (erroEl && erroEl.classList.contains('open')) {
+    // mostrarErro regista _bpFinish no overlay
+    if (typeof erroEl._bpFinish === 'function') {
+      try { erroEl._bpFinish(false); } catch (_) { closeModal('modal-erro'); }
+    } else {
+      closeModal('modal-erro');
+    }
+    e.preventDefault();
+    return;
+  }
+  var confirmEl = document.getElementById('modal-confirm');
+  if (confirmEl && confirmEl.classList.contains('open')) return; // showConfirmModal trata Escape
+  var offEl = document.getElementById('modal-offline-info');
+  if (offEl && offEl.classList.contains('open')) return;
   const open = document.querySelector('.modal-overlay.open');
-  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro' || open.id === 'modal-offline-info') return;
+  if (!open) return;
   closeModal(open.id);
 });
 
 function setButtonLoading(button, isLoading) {
   if (!button) return;
-  if (isLoading) { button.classList.add('is-loading');
-    button.disabled = true; } else { button.classList.remove('is-loading');
-    button.disabled = false; }
+  if (isLoading) {
+    button.classList.add('is-loading');
+    button.disabled = true;
+    try { button.setAttribute('aria-busy', 'true'); } catch (_) {}
+  } else {
+    button.classList.remove('is-loading');
+    button.disabled = false;
+    try { button.removeAttribute('aria-busy'); } catch (_) {}
+  }
 }
 
 // ====================================================================
@@ -289,7 +364,40 @@ function showConfirmModal(title, message, danger = true, opts) {
     opts = opts || {};
     const variant = opts.variant || (danger ? 'destructive' : 'default');
     titleEl.textContent = title || 'Tem a certeza?';
-    msgEl.textContent = message || 'Esta acção não pode ser desfeita.';
+    try { msgEl.classList.remove('confirm-message--summary'); } catch (_) {}
+    try { msgEl.style.whiteSpace = ''; } catch (_) {}
+    if (opts.summaryLayout && message) {
+      var _esc = function (s) {
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      };
+      var lines = String(message).split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      var rows = [];
+      var notes = [];
+      lines.forEach(function (line) {
+        var idx = line.indexOf(':');
+        if (idx > 0 && idx < 24) {
+          var lab = line.slice(0, idx).trim();
+          var val = line.slice(idx + 1).trim();
+          rows.push(
+            '<div class="bp-confirm-summary-row">' +
+            '<span class="bp-confirm-summary-label">' + _esc(lab) + '</span>' +
+            '<span class="bp-confirm-summary-value">' + _esc(val) + '</span></div>'
+          );
+        } else {
+          notes.push(_esc(line));
+        }
+      });
+      try { msgEl.classList.add('confirm-message--summary'); msgEl.style.whiteSpace = 'normal'; } catch (_) {}
+      msgEl.innerHTML =
+        (rows.length ? '<div class="bp-confirm-summary">' + rows.join('') + '</div>' : '') +
+        (notes.length ? '<p class="bp-confirm-summary-note">' + notes.join(' ') + '</p>' : '');
+    } else {
+      msgEl.textContent = message || 'Esta acção não pode ser desfeita.';
+    }
     cancelBtn.textContent = opts.cancelLabel || 'Cancelar';
     cancelBtn.className = 'btn btn-secondary btn-modal-compact';
     if (variant === 'destructive' || danger) {
@@ -316,39 +424,90 @@ function showConfirmModal(title, message, danger = true, opts) {
       const lab = overlay.querySelector('label');
       if (lab && lab.querySelector('#keep-logged')) lab.style.display = 'none';
     } catch (_) {}
-    const newOk = () => { closeModal('modal-confirm'); resolve(true); };
-    const newCancel = () => { closeModal('modal-confirm'); resolve(false); };
-    okBtn.onclick = newOk;
-    cancelBtn.onclick = newCancel;
-    overlay.onclick = (e) => { if (e.target === overlay) { closeModal('modal-confirm'); resolve(false); } };
+    var settled = false;
+    var finish = function (val) {
+      if (settled) return;
+      settled = true;
+      try { document.removeEventListener('keydown', onEsc, true); } catch (_) {}
+      closeModal('modal-confirm');
+      resolve(val);
+    };
+    var onEsc = function (e) {
+      if (e.key !== 'Escape') return;
+      if (!overlay.classList.contains('open')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    };
+    const newOk2 = function () { finish(true); };
+    const newCancel2 = function () { finish(false); };
+    okBtn.onclick = newOk2;
+    cancelBtn.onclick = newCancel2;
+    overlay.onclick = function (e) {
+      if (e.target === overlay) finish(false);
+    };
+    document.addEventListener('keydown', onEsc, true);
     openModal('modal-confirm');
-    setTimeout(function () { try { if (cancelBtn && typeof cancelBtn.focus === 'function') cancelBtn.focus(); } catch (_) {} }, 150);
+    setTimeout(function () {
+      try {
+        if (okBtn && typeof okBtn.focus === 'function') okBtn.focus();
+      } catch (_) {}
+    }, 150);
   });
 }
 
 // ====================================================================
 //  MODAL DE ERRO (Fase 7)
 // ====================================================================
-function mostrarErro(mensagem, acaoTentar = null, titulo) {
+function mostrarErro(mensagem, acaoTentar = null, titulo, onClose, opts) {
   const modal = document.getElementById('modal-erro');
   const msgEl = document.getElementById('erro-message');
   const titleEl = document.getElementById('erro-title');
   const tentarBtn = document.getElementById('erro-tentar-btn');
   const cancelarBtn = document.getElementById('erro-cancelar-btn');
-  if (!modal) return;
+  if (!modal) {
+    if (typeof onClose === 'function') {
+      try { onClose(); } catch (_) {}
+    }
+    return;
+  }
+  opts = opts || {};
   if (titleEl) titleEl.textContent = titulo || 'Não foi possível concluir';
-  msgEl.textContent = mensagem || 'Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.';
-  if (cancelarBtn) cancelarBtn.textContent = 'Fechar';
+  if (msgEl) msgEl.textContent = mensagem || 'Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.';
+  var okText = opts.okLabel || 'Fechar';
+  if (cancelarBtn) {
+    cancelarBtn.textContent = okText;
+    // Validação: um único CTA visível e legível
+    try {
+      cancelarBtn.className = 'btn btn-primary btn-modal-compact';
+    } catch (_) {}
+  }
   if (tentarBtn) {
     tentarBtn.textContent = 'Tentar novamente';
     tentarBtn.style.display = typeof acaoTentar === 'function' ? '' : 'none';
   }
-  const newTentar = () => { closeModal('modal-erro'); if (typeof acaoTentar === 'function') acaoTentar(); };
-  const newCancelar = () => { closeModal('modal-erro'); };
-  if (tentarBtn) tentarBtn.onclick = newTentar;
-  if (cancelarBtn) cancelarBtn.onclick = newCancelar;
-  modal.onclick = (e) => { if (e.target === modal) closeModal('modal-erro'); };
+  var settled = false;
+  var finish = function (runTry) {
+    if (settled) return;
+    settled = true;
+    try { modal._bpFinish = null; } catch (_) {}
+    closeModal('modal-erro');
+    if (runTry && typeof acaoTentar === 'function') {
+      try { acaoTentar(); } catch (_) {}
+    } else if (typeof onClose === 'function') {
+      try { onClose(); } catch (_) {}
+    }
+  };
+  try { modal._bpFinish = finish; } catch (_) {}
+  if (tentarBtn) tentarBtn.onclick = function () { finish(true); };
+  if (cancelarBtn) cancelarBtn.onclick = function () { finish(false); };
+  modal.onclick = function (e) { if (e.target === modal) finish(false); };
   openModal('modal-erro');
+  setTimeout(function () {
+    try {
+      if (cancelarBtn && typeof cancelarBtn.focus === 'function') cancelarBtn.focus();
+    } catch (_) {}
+  }, 120);
 }
 
 

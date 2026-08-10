@@ -46,13 +46,26 @@
 }
 
 /* ===== FOCUS VISIBLE ===== */
+/* Campos de formulário: só borda 1px (definida em design-system / componentes-base).
+   Botões/links: outline fino 1px — sem border-color forçado (evita "duas linhas"). */
 *:focus-visible {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px !important;
-  border-color: var(--gold) !important;
+  outline: 1px solid var(--gold);
+  outline-offset: 1px;
 }
-button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
-  outline: 2px solid var(--gold) !important;
+input.input-field:focus-visible,
+select.input-field:focus-visible,
+textarea.input-field:focus-visible,
+.input-field:focus-visible,
+input.input-field:focus,
+select.input-field:focus,
+textarea.input-field:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--gold) !important;
+  outline-offset: 1px;
 }
 
 /* ===== CORREÇÃO DE CONTRASTE ===== */

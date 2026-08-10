@@ -48,3 +48,13 @@ const SERVICOS_DEFAULT = [
 ];
 
 const RBAC_ROLES = ['admin', 'gerente', 'operador'];
+
+/** R13 — lista central de métodos de pagamento (venda / finalizar / split). */
+var BP_METODOS_PAGAMENTO = [
+  { value: 'Numerário', label: 'Numerário' },
+  { value: 'Multicaixa Express', label: 'Multicaixa Express' },
+  { value: 'Transferência', label: 'Transferência' },
+  { value: 'Cartão', label: 'Cartão' },
+  { value: '__split__', label: 'Split' }
+];
+if (typeof window !== 'undefined') window.BP_METODOS_PAGAMENTO = BP_METODOS_PAGAMENTO;

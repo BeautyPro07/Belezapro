@@ -53,6 +53,16 @@ const SERVICOS_DEFAULT = [
 
 const RBAC_ROLES = ['admin', 'gerente', 'operador'];
 
+/** R13 — lista central de métodos de pagamento (venda / finalizar / split). */
+var BP_METODOS_PAGAMENTO = [
+  { value: 'Numerário', label: 'Numerário' },
+  { value: 'Multicaixa Express', label: 'Multicaixa Express' },
+  { value: 'Transferência', label: 'Transferência' },
+  { value: 'Cartão', label: 'Cartão' },
+  { value: '__split__', label: 'Split' }
+];
+if (typeof window !== 'undefined') window.BP_METODOS_PAGAMENTO = BP_METODOS_PAGAMENTO;
+
 /* ===== FILE: core-utils.js ===== */
 // ====================================================================
 //  CORE — UTILITÁRIOS (extraído do app.js na Fase A da modularização)
@@ -268,6 +278,59 @@ function toast(msg, type, opts) {
   toastTimer = setTimeout(function () { el.classList.remove('show'); }, dur);
 }
 
+
+/**
+ * Feedback de validação: modal orientador → «Entendi» → foco no campo.
+ * Não bloqueia em silêncio; o utilizador lê a orientação e só depois é levado ao campo.
+ */
+function bpFocarCampoForm(fieldId) {
+  if (!fieldId) return;
+  try {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    el.setAttribute('aria-invalid', 'true');
+    el.classList.add('bp-field-invalid');
+    if (typeof el.focus === 'function') el.focus();
+    if (typeof el.scrollIntoView === 'function') {
+      try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+    }
+    clearTimeout(el._bpInvalidTimer);
+    el._bpInvalidTimer = setTimeout(function () {
+      try {
+        el.removeAttribute('aria-invalid');
+        el.classList.remove('bp-field-invalid');
+      } catch (_) {}
+    }, 6000);
+  } catch (_) {}
+}
+
+function bpNotifyFormError(message, fieldId, type) {
+  var msg = String(message || 'Verifique os campos obrigatórios e tente novamente.');
+  var title = 'Quase lá';
+  var goField = function () {
+    setTimeout(function () { bpFocarCampoForm(fieldId); }, 80);
+  };
+  // Modal centrado com CTA «Entendi»; ao fechar, foca o campo
+  if (typeof mostrarErro === 'function' && document.getElementById('modal-erro')) {
+    mostrarErro(msg, null, title, goField, { okLabel: 'Entendi' });
+    return;
+  }
+  if (typeof showConfirmModal === 'function') {
+    showConfirmModal(title, msg, false, {
+      confirmLabel: 'Entendi',
+      cancelLabel: 'Voltar',
+      variant: 'default'
+    }).then(function () { goField(); }).catch(function () { goField(); });
+    return;
+  }
+  if (typeof toast === 'function') toast(msg, type || 'warning', { duration: 4000 });
+  goField();
+}
+if (typeof window !== 'undefined') {
+  window.bpNotifyFormError = bpNotifyFormError;
+  window.bpFocarCampoForm = bpFocarCampoForm;
+}
+
 function animateKpi(id, txt) {
   const el = document.getElementById(id);
   if (!el) { return; }
@@ -313,16 +376,38 @@ document.addEventListener('click', function (e) {
 }, true);
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
+  // Empilhamento: fechar primeiro o modal de topo (erro / confirm / offline)
+  var erroEl = document.getElementById('modal-erro');
+  if (erroEl && erroEl.classList.contains('open')) {
+    // mostrarErro regista _bpFinish no overlay
+    if (typeof erroEl._bpFinish === 'function') {
+      try { erroEl._bpFinish(false); } catch (_) { closeModal('modal-erro'); }
+    } else {
+      closeModal('modal-erro');
+    }
+    e.preventDefault();
+    return;
+  }
+  var confirmEl = document.getElementById('modal-confirm');
+  if (confirmEl && confirmEl.classList.contains('open')) return; // showConfirmModal trata Escape
+  var offEl = document.getElementById('modal-offline-info');
+  if (offEl && offEl.classList.contains('open')) return;
   const open = document.querySelector('.modal-overlay.open');
-  if (!open || open.id === 'modal-confirm' || open.id === 'modal-erro' || open.id === 'modal-offline-info') return;
+  if (!open) return;
   closeModal(open.id);
 });
 
 function setButtonLoading(button, isLoading) {
   if (!button) return;
-  if (isLoading) { button.classList.add('is-loading');
-    button.disabled = true; } else { button.classList.remove('is-loading');
-    button.disabled = false; }
+  if (isLoading) {
+    button.classList.add('is-loading');
+    button.disabled = true;
+    try { button.setAttribute('aria-busy', 'true'); } catch (_) {}
+  } else {
+    button.classList.remove('is-loading');
+    button.disabled = false;
+    try { button.removeAttribute('aria-busy'); } catch (_) {}
+  }
 }
 
 // ====================================================================
@@ -345,7 +430,40 @@ function showConfirmModal(title, message, danger = true, opts) {
     opts = opts || {};
     const variant = opts.variant || (danger ? 'destructive' : 'default');
     titleEl.textContent = title || 'Tem a certeza?';
-    msgEl.textContent = message || 'Esta acção não pode ser desfeita.';
+    try { msgEl.classList.remove('confirm-message--summary'); } catch (_) {}
+    try { msgEl.style.whiteSpace = ''; } catch (_) {}
+    if (opts.summaryLayout && message) {
+      var _esc = function (s) {
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      };
+      var lines = String(message).split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      var rows = [];
+      var notes = [];
+      lines.forEach(function (line) {
+        var idx = line.indexOf(':');
+        if (idx > 0 && idx < 24) {
+          var lab = line.slice(0, idx).trim();
+          var val = line.slice(idx + 1).trim();
+          rows.push(
+            '<div class="bp-confirm-summary-row">' +
+            '<span class="bp-confirm-summary-label">' + _esc(lab) + '</span>' +
+            '<span class="bp-confirm-summary-value">' + _esc(val) + '</span></div>'
+          );
+        } else {
+          notes.push(_esc(line));
+        }
+      });
+      try { msgEl.classList.add('confirm-message--summary'); msgEl.style.whiteSpace = 'normal'; } catch (_) {}
+      msgEl.innerHTML =
+        (rows.length ? '<div class="bp-confirm-summary">' + rows.join('') + '</div>' : '') +
+        (notes.length ? '<p class="bp-confirm-summary-note">' + notes.join(' ') + '</p>' : '');
+    } else {
+      msgEl.textContent = message || 'Esta acção não pode ser desfeita.';
+    }
     cancelBtn.textContent = opts.cancelLabel || 'Cancelar';
     cancelBtn.className = 'btn btn-secondary btn-modal-compact';
     if (variant === 'destructive' || danger) {
@@ -372,39 +490,90 @@ function showConfirmModal(title, message, danger = true, opts) {
       const lab = overlay.querySelector('label');
       if (lab && lab.querySelector('#keep-logged')) lab.style.display = 'none';
     } catch (_) {}
-    const newOk = () => { closeModal('modal-confirm'); resolve(true); };
-    const newCancel = () => { closeModal('modal-confirm'); resolve(false); };
-    okBtn.onclick = newOk;
-    cancelBtn.onclick = newCancel;
-    overlay.onclick = (e) => { if (e.target === overlay) { closeModal('modal-confirm'); resolve(false); } };
+    var settled = false;
+    var finish = function (val) {
+      if (settled) return;
+      settled = true;
+      try { document.removeEventListener('keydown', onEsc, true); } catch (_) {}
+      closeModal('modal-confirm');
+      resolve(val);
+    };
+    var onEsc = function (e) {
+      if (e.key !== 'Escape') return;
+      if (!overlay.classList.contains('open')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    };
+    const newOk2 = function () { finish(true); };
+    const newCancel2 = function () { finish(false); };
+    okBtn.onclick = newOk2;
+    cancelBtn.onclick = newCancel2;
+    overlay.onclick = function (e) {
+      if (e.target === overlay) finish(false);
+    };
+    document.addEventListener('keydown', onEsc, true);
     openModal('modal-confirm');
-    setTimeout(function () { try { if (cancelBtn && typeof cancelBtn.focus === 'function') cancelBtn.focus(); } catch (_) {} }, 150);
+    setTimeout(function () {
+      try {
+        if (okBtn && typeof okBtn.focus === 'function') okBtn.focus();
+      } catch (_) {}
+    }, 150);
   });
 }
 
 // ====================================================================
 //  MODAL DE ERRO (Fase 7)
 // ====================================================================
-function mostrarErro(mensagem, acaoTentar = null, titulo) {
+function mostrarErro(mensagem, acaoTentar = null, titulo, onClose, opts) {
   const modal = document.getElementById('modal-erro');
   const msgEl = document.getElementById('erro-message');
   const titleEl = document.getElementById('erro-title');
   const tentarBtn = document.getElementById('erro-tentar-btn');
   const cancelarBtn = document.getElementById('erro-cancelar-btn');
-  if (!modal) return;
+  if (!modal) {
+    if (typeof onClose === 'function') {
+      try { onClose(); } catch (_) {}
+    }
+    return;
+  }
+  opts = opts || {};
   if (titleEl) titleEl.textContent = titulo || 'Não foi possível concluir';
-  msgEl.textContent = mensagem || 'Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.';
-  if (cancelarBtn) cancelarBtn.textContent = 'Fechar';
+  if (msgEl) msgEl.textContent = mensagem || 'Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.';
+  var okText = opts.okLabel || 'Fechar';
+  if (cancelarBtn) {
+    cancelarBtn.textContent = okText;
+    // Validação: um único CTA visível e legível
+    try {
+      cancelarBtn.className = 'btn btn-primary btn-modal-compact';
+    } catch (_) {}
+  }
   if (tentarBtn) {
     tentarBtn.textContent = 'Tentar novamente';
     tentarBtn.style.display = typeof acaoTentar === 'function' ? '' : 'none';
   }
-  const newTentar = () => { closeModal('modal-erro'); if (typeof acaoTentar === 'function') acaoTentar(); };
-  const newCancelar = () => { closeModal('modal-erro'); };
-  if (tentarBtn) tentarBtn.onclick = newTentar;
-  if (cancelarBtn) cancelarBtn.onclick = newCancelar;
-  modal.onclick = (e) => { if (e.target === modal) closeModal('modal-erro'); };
+  var settled = false;
+  var finish = function (runTry) {
+    if (settled) return;
+    settled = true;
+    try { modal._bpFinish = null; } catch (_) {}
+    closeModal('modal-erro');
+    if (runTry && typeof acaoTentar === 'function') {
+      try { acaoTentar(); } catch (_) {}
+    } else if (typeof onClose === 'function') {
+      try { onClose(); } catch (_) {}
+    }
+  };
+  try { modal._bpFinish = finish; } catch (_) {}
+  if (tentarBtn) tentarBtn.onclick = function () { finish(true); };
+  if (cancelarBtn) cancelarBtn.onclick = function () { finish(false); };
+  modal.onclick = function (e) { if (e.target === modal) finish(false); };
   openModal('modal-erro');
+  setTimeout(function () {
+    try {
+      if (cancelarBtn && typeof cancelarBtn.focus === 'function') cancelarBtn.focus();
+    } catch (_) {}
+  }, 120);
 }
 
 
@@ -2235,56 +2404,86 @@ dbDelete = async function(store, id) {
   }
 };
 
-/** Contingência: reabrir ops failed (ex. destituir) e tentar de novo. */
+/** Contingência: reabrir ops failed e limpar backoff (nextRetry). */
 async function bpRetryFailedSync() {
   const q = getSyncQueue();
   let changed = false;
   for (const op of q) {
-    if (op.failed) {
+    if (!op) continue;
+    if (op.failed || op.nextRetry || (op.attempts && op.attempts > 0)) {
       op.failed = false;
       op.attempts = 0;
       op.nextRetry = 0;
       changed = true;
     }
   }
-  if (changed) {
-    saveSyncQueue(q);
-    if (typeof flushSyncQueue === 'function') await flushSyncQueue();
-  }
+  if (changed) saveSyncQueue(q);
+  if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 if (typeof window !== 'undefined') {
   window.bpRetryFailedSync = bpRetryFailedSync;
-  // ET4.2-P1-sync-retry: toque no indicador tenta reenviar falhas + flush
+  // Toque no indicador: reabre tudo e faz flush
   (function bindSyncRetryClick() {
-    var el = document.getElementById('sync-status-container');
-    if (!el || el.dataset.bpSyncRetryBound) return;
-    el.dataset.bpSyncRetryBound = '1';
-    el.style.cursor = 'pointer';
-    el.title = el.title || 'Toque para tentar sincronizar novamente';
-    el.addEventListener('click', function () {
-      if (!navigator.onLine) {
-        if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
-        return;
-      }
-      if (typeof toast === 'function') toast('A sincronizar alterações…', 'info');
-      Promise.resolve()
-        .then(function () { return typeof bpRetryFailedSync === 'function' ? bpRetryFailedSync() : null; })
-        .then(function () { return typeof flushSyncQueue === 'function' ? flushSyncQueue() : null; })
-        .then(function () {
-          if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-        })
-        .catch(function (e) {
-          if (typeof logErroSilencioso === 'function') logErroSilencioso('syncRetryClick', e);
-        });
-    });
+    function bind() {
+      var el = document.getElementById('sync-status-container');
+      if (!el || el.dataset.bpSyncRetryBound) return;
+      el.dataset.bpSyncRetryBound = '1';
+      el.style.cursor = 'pointer';
+      el.setAttribute('role', 'button');
+      el.title = 'Toque para sincronizar agora';
+      el.addEventListener('click', function () {
+        if (!navigator.onLine) {
+          if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
+          return;
+        }
+        if (typeof toast === 'function') toast('A sincronizar alterações…', 'info');
+        Promise.resolve()
+          .then(function () { return bpRetryFailedSync(); })
+          .then(function () {
+            var rest = (typeof getSyncQueue === 'function') ? getSyncQueue().length : 0;
+            if (typeof toast === 'function') {
+              if (rest === 0) toast('Tudo sincronizado.', 'success');
+              else toast('Ainda restam ' + rest + ' operação(ões). Toque de novo ou verifique a ligação.', 'warning');
+            }
+          })
+          .catch(function (e) {
+            if (typeof logErroSilencioso === 'function') logErroSilencioso('syncRetryClick', e);
+          });
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+    else bind();
+    setTimeout(bind, 800);
   })();
 
+  // Rede recuperada → limpar backoff e flush imediato
   window.addEventListener('online', function () {
     try { sessionStorage.removeItem('bp_offline_info_ack'); } catch (_) {}
     setTimeout(function () {
       if (typeof bpRetryFailedSync === 'function') bpRetryFailedSync();
-    }, 1500);
+    }, 600);
   });
+
+  // App volta ao primeiro plano com rede → flush
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) return;
+    if (!navigator.onLine) return;
+    setTimeout(function () {
+      if (typeof getSyncQueue === 'function' && getSyncQueue().length && typeof flushSyncQueue === 'function') {
+        flushSyncQueue();
+      }
+    }, 400);
+  });
+
+  // Enquanto houver pendentes e rede, tentar de 25 em 25s (não só no evento online)
+  setInterval(function () {
+    if (!navigator.onLine) return;
+    if (typeof getSyncQueue !== 'function') return;
+    var q = getSyncQueue();
+    if (!q || !q.length) return;
+    if (typeof flushSyncQueue === 'function') flushSyncQueue();
+  }, 25000);
 }
 
 /* ===== FILE: sync-rest.js ===== */
@@ -2339,6 +2538,48 @@ function _bpIsFotoUrlSchemaError(msg) {
   if (s.includes('could not find') && s.includes('column')) return true;
   if (s.includes('unexpected') && s.includes('foto')) return true;
   return false;
+}
+
+
+// ====================================================================
+//  TOLERÂNCIA: colunas ausentes no schema (PGRST204) — strip + retry
+// ====================================================================
+function _bpExtractMissingColumn(msg) {
+  var s = String(msg || '');
+  var m = s.match(/Could not find the '([^']+)' column/i);
+  if (m) return m[1];
+  m = s.match(/column\s+"([^"]+)"\s+of\s+relation/i);
+  if (m) return m[1];
+  return null;
+}
+
+function _bpGetMissingCols(tabela) {
+  try {
+    var raw = localStorage.getItem('bp_schema_missing_' + tabela);
+    if (!raw) return [];
+    var arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) { return []; }
+}
+
+function _bpRememberMissingCol(tabela, col) {
+  if (!tabela || !col) return;
+  try {
+    var arr = _bpGetMissingCols(tabela);
+    if (arr.indexOf(col) < 0) {
+      arr.push(col);
+      localStorage.setItem('bp_schema_missing_' + tabela, JSON.stringify(arr));
+    }
+  } catch (_) {}
+}
+
+function _bpStripKnownMissing(tabela, payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  var cols = _bpGetMissingCols(tabela);
+  if (!cols.length) return payload;
+  var out = Object.assign({}, payload);
+  cols.forEach(function (c) { delete out[c]; });
+  return out;
 }
 
 function _bpStripFotoUrl(payload) {
@@ -2411,6 +2652,7 @@ async function supabaseUpsert(tabela, item) {
     }
 
     let payload = toSupabaseFormat(tabela, item);
+    payload = _bpStripKnownMissing(tabela, payload);
     // Se já sabemos que a coluna não existe, nunca enviar foto_url
     if (_bpSchemaFotoUrl === false && payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url')) {
       payload = _bpStripFotoUrl(payload);
@@ -2494,6 +2736,49 @@ async function supabaseUpsert(tabela, item) {
         if (resp2.ok) return;
       } catch (e2) {
         if (e2.message === 'SESSION_EXPIRED') throw e2;
+      }
+    }
+    // PGRST204: coluna ausente — recordar, remover e reintentar uma vez
+    var missingCol = _bpExtractMissingColumn(errorMsg);
+    if (missingCol && item) {
+      try {
+        _bpRememberMissingCol(tabela, missingCol);
+        console.warn('[sync-rest] Coluna ausente no schema: ' + tabela + '.' + missingCol + ' — a sincronizar sem ela.');
+        var authHeaders3 = await getAuthHeaders();
+        var payload3 = _bpStripKnownMissing(tabela, toSupabaseFormat(tabela, item));
+        delete payload3[missingCol];
+        var resp3 = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders3,
+            'Prefer': 'resolution=merge-duplicates',
+          },
+          body: JSON.stringify(payload3),
+        });
+        if (resp3.status === 401) throw new Error('SESSION_EXPIRED');
+        if (resp3.ok) return;
+        // Pode faltar outra coluna — extrair e tentar mais uma vez
+        var body3 = '';
+        try { body3 = await resp3.text(); } catch (_) {}
+        var missing2 = _bpExtractMissingColumn(body3);
+        if (missing2) {
+          _bpRememberMissingCol(tabela, missing2);
+          delete payload3[missing2];
+          var resp4 = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...authHeaders3,
+              'Prefer': 'resolution=merge-duplicates',
+            },
+            body: JSON.stringify(payload3),
+          });
+          if (resp4.status === 401) throw new Error('SESSION_EXPIRED');
+          if (resp4.ok) return;
+        }
+      } catch (e3) {
+        if (e3 && e3.message === 'SESSION_EXPIRED') throw e3;
       }
     }
     console.error(`[sync-rest] Falha ao fazer upsert em ${tabela} (id: ${item?.id || 'desconhecido'}):`, errorMsg);
@@ -2595,8 +2880,9 @@ function toSupabaseFormat(tabela, item) {
   }
 
   switch (tabela) {
-    case 'movimentos':
-      return {
+    case 'movimentos': {
+      // Nunca enviar cliente_id (PGRST204 histórico). R50 só se schema permitir.
+      var mov = {
         id: item.id,
         salao_id: salaoId,
         tipo: item.tipo,
@@ -2606,14 +2892,21 @@ function toSupabaseFormat(tabela, item) {
         profissional_id: isValidUUID(item.profissional_id) ? item.profissional_id : null,
         profissional: item.profissional || '',
         itens: item.itens || [],
-        metodo_pagamento: item.metodoPagamento || 'Numerário',
+        metodo_pagamento: item.metodoPagamento || item.metodo_pagamento || null,
         recibo_num: item.reciboNum || item.recibo_num || null,
         comissao_gerada: item.comissao_gerada != null ? Number(item.comissao_gerada) : null,
-        // cliente_id não existe no schema remoto actual (PGRST204) — nome em `cliente`
         data: item.data,
         hora: item.hora,
         updated_at: item.updated_at,
       };
+      var missMov = _bpGetMissingCols('movimentos');
+      function _okCol(c) { return missMov.indexOf(c) < 0; }
+      if (_okCol('status')) mov.status = item.status || 'activo';
+      if (_okCol('comissao_estornada') && item.comissao_estornada != null) mov.comissao_estornada = Number(item.comissao_estornada);
+      if (_okCol('cancelado_em') && item.cancelado_em) mov.cancelado_em = item.cancelado_em;
+      if (_okCol('cancelado_motivo') && item.cancelado_motivo) mov.cancelado_motivo = item.cancelado_motivo;
+      return mov;
+    }
     case 'agendamentos':
       return {
         id: item.id,
@@ -3477,17 +3770,53 @@ async function creditarPontosCliente(clienteId, pontos) {
   return next;
 }
 
+
+/** R46 — telefone obrigatório: exactamente 9 dígitos e começa por 9. */
+function bpValidarTelefoneCliente(tel) {
+  var digits = String(tel == null ? '' : tel).replace(/\D/g, '');
+  if (!digits || digits.length !== 9 || digits.charAt(0) !== '9') {
+    return {
+      ok: false,
+      message: 'O contacto deve ter 9 dígitos e começar por 9 (ex.: 923456789). Corrija o número para continuar.'
+    };
+  }
+  return { ok: true, telefone: digits };
+}
+if (typeof window !== 'undefined') {
+  window.bpValidarTelefoneCliente = bpValidarTelefoneCliente;
+}
+
+/** R48 — clientes utilizáveis em novas operações. */
+function bpClientesActivos() {
+  return (typeof state !== 'undefined' && state.clientes ? state.clientes : []).filter(function (c) {
+    if (!c || !c.nome) return false;
+    if (c.ativo === false || c.ativo === 0 || c.ativo === 'false') return false;
+    return true;
+  });
+}
+if (typeof window !== 'undefined') window.bpClientesActivos = bpClientesActivos;
+
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
   const nome = (c.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  if (existeNomeDuplicado('clientes', nome)) {
-    toast('Já existe um cliente com este nome.', 'error');
+  // R46 — telefone obrigatório (camada de negócio)
+  var telCheck = typeof bpValidarTelefoneCliente === 'function'
+    ? bpValidarTelefoneCliente(c && c.telefone)
+    : { ok: false, message: 'O contacto deve ter 9 dígitos e começar por 9 (ex.: 923456789). Corrija o número para continuar.' };
+  if (!telCheck.ok) {
+    toast(telCheck.message || 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.', 'warning');
     return null;
   }
 
-  const n = { ...c, id: uuid(), nome, pontos: Number(c.pontos) || 0 };
+  // R47
+  if (existeNomeDuplicado('clientes', nome)) {
+    toast('Já existe um cliente com este nome. Adicione o sobrenome ou outros dados para identificar corretamente o cliente.', 'error');
+    return null;
+  }
+
+  const n = { ...c, id: uuid(), nome, telefone: telCheck.telefone, pontos: Number(c.pontos) || 0 };
   try {
     await dbPut('clientes', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -3511,11 +3840,22 @@ async function updateCliente(id, data) {
   const actual = (state.clientes || []).find(c => c.id === id);
   if (!actual) return null;
 
+  if (data && Object.prototype.hasOwnProperty.call(data, 'telefone')) {
+    var telU = typeof bpValidarTelefoneCliente === 'function'
+      ? bpValidarTelefoneCliente(data.telefone)
+      : { ok: false };
+    if (!telU.ok) {
+      toast((telU && telU.message) || 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.', 'warning');
+      return null;
+    }
+    data = Object.assign({}, data, { telefone: telU.telefone });
+  }
+
   if (data.nome) {
     const nome = data.nome.trim();
     data = { ...data, nome };
     if (existeNomeDuplicado('clientes', nome, id)) {
-      toast('Já existe um cliente com este nome.', 'error');
+      toast('Já existe um cliente com este nome. Adicione o sobrenome ou outros dados para identificar corretamente o cliente.', 'error');
       return null;
     }
   }
@@ -3816,11 +4156,15 @@ async function addProfissional(p) {
   const nome = (p.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  // ET4.5: profissional sem serviço (especialidade) não é permitido
-  const espCheck = bpValidarEspecialidadeProfissional(p.especialidade);
-  if (!espCheck.ok) {
-    toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
-    return null;
+  // R29: pode existir na equipa sem serviço; R28 se especialidade preenchida deve ser válida
+  var espRaw = String(p.especialidade || '').trim();
+  if (espRaw) {
+    const espCheck = bpValidarEspecialidadeProfissional(espRaw);
+    if (!espCheck.ok) {
+      toast(espCheck.msg || 'Especialidade inválida: escolha um serviço activo existente.', 'error');
+      return null;
+    }
+    espRaw = String((espCheck.servico && espCheck.servico.nome) || espRaw);
   }
 
   if (existeNomeDuplicado('profissionais', nome)) {
@@ -3828,7 +4172,7 @@ async function addProfissional(p) {
     return null;
   }
 
-  const n = { ...p, id: uuid(), nome, especialidade: String(p.especialidade || '').trim(), ativo: p.ativo !== false };
+  const n = { ...p, id: uuid(), nome, especialidade: espRaw, ativo: p.ativo !== false };
   try {
     await dbPut('profissionais', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -3837,8 +4181,10 @@ async function addProfissional(p) {
       state.profissionais.push(n);
       updateUI();
     }
-    try { await bpLigarProfissionalAoServico(n, n.especialidade); } catch (_) {}
-    toast('Profissional adicionado.', 'success');
+    if (espRaw) {
+      try { await bpLigarProfissionalAoServico(n, espRaw); } catch (_) {}
+    }
+    toast(espRaw ? 'Profissional adicionado.' : 'Profissional adicionado. Associe um serviço para o utilizar em vendas e agenda.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -4069,12 +4415,19 @@ async function addServico(s, opts) {
   const nome = (s.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  // ET4.5: serviço sem profissionais — proibido (não existe "toda a equipa")
+  // R33 — preço obrigatório > 0
+  var precoBase = Number(s.precoBase);
+  if (!Number.isFinite(precoBase) || precoBase <= 0) {
+    toast('Informe um preço válido superior a zero.', 'warning');
+    return null;
+  }
+
+  // R34 — serviço sem profissionais — proibido
   const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
     ? bpValidarProfissionaisDoServico(s.profissionais, opts)
     : { ok: Array.isArray(s.profissionais) && s.profissionais.length > 0, msg: 'Seleccione profissionais', profissionais: s.profissionais };
   if (!profCheck.ok) {
-    toast(profCheck.msg || 'Seleccione pelo menos um profissional.', 'error');
+    toast(profCheck.msg || 'Associa pelo menos um profissional a este serviço.', 'error');
     return null;
   }
 
@@ -4083,7 +4436,7 @@ async function addServico(s, opts) {
     return null;
   }
 
-  const n = { ...s, id: uuid(), nome, profissionais: profCheck.profissionais || s.profissionais };
+  const n = { ...s, id: uuid(), nome, precoBase: precoBase, profissionais: profCheck.profissionais || s.profissionais };
   await dbPut('servicos', n);
   if (window.BeautyStore && window.BeautyStore.pushToList) {
     window.BeautyStore.pushToList('servicos', n);
@@ -4097,6 +4450,14 @@ async function addServico(s, opts) {
 
 async function updateServico(id, data) {
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem editar serviços.')) return null;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'precoBase')) {
+    var pb = Number(data.precoBase);
+    if (!Number.isFinite(pb) || pb <= 0) {
+      toast('Informe um preço válido superior a zero.', 'warning');
+      return null;
+    }
+    data = Object.assign({}, data, { precoBase: pb });
+  }
   if (data && Object.prototype.hasOwnProperty.call(data, 'profissionais')) {
     const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
       ? bpValidarProfissionaisDoServico(data.profissionais)
@@ -4207,38 +4568,366 @@ function getProfissionaisPorServico(nomeServico) {
 // ====================================================================
 //  VENDA / MOVIMENTO
 // ====================================================================
+
+/**
+ * ETAPA1 — Motor central de validação de venda (R01–R06, R08–R15, R17, R54–R58).
+ * Retorna { ok, code, field, title, message, total, itens, clienteNome, ... }
+ * Não persiste. Não depende só da UI.
+ */
+function bpValidarOperacaoVenda(dados) {
+  dados = dados || {};
+  var itensIn = Array.isArray(dados.itens) ? dados.itens : [];
+  if (!itensIn.length) {
+    return {
+      ok: false,
+      code: 'R05',
+      field: 'ci-servico-sel',
+      title: 'Itens da venda',
+      message: 'Adicione pelo menos um serviço ou produto antes de continuar.'
+    };
+  }
+
+  var itensNorm = [];
+  for (var i = 0; i < itensIn.length; i++) {
+    var it = itensIn[i] || {};
+    var nome = String(it.nome || '').trim();
+    if (!nome || nome === '__custom' || nome === 'Outro') {
+      return {
+        ok: false,
+        code: 'R17',
+        field: 'ci-servico-sel',
+        title: 'Serviço',
+        message: 'Seleccione um serviço do catálogo. Serviços personalizados não são permitidos na venda.'
+      };
+    }
+    var qty = Number(it.quantidade);
+    if (!Number.isFinite(qty) || qty < 1 || Math.floor(qty) !== qty) {
+      return {
+        ok: false,
+        code: 'R08',
+        field: 'cart-items-list',
+        title: 'Quantidade',
+        message: 'A quantidade deve ser um número inteiro igual ou superior a 1.'
+      };
+    }
+    var precoUnit = Number(it.precoUnit != null ? it.precoUnit : (Number(it.subtotal) / qty));
+    if (!Number.isFinite(precoUnit) || precoUnit <= 0) {
+      return {
+        ok: false,
+        code: 'R09',
+        field: 'ci-valor',
+        title: 'Preço',
+        message: 'Informe um preço válido superior a zero.'
+      };
+    }
+    var subtotal = Math.round(precoUnit * qty * 100) / 100;
+    var serv = null;
+    try {
+      if (typeof getServicoByNome === 'function') serv = getServicoByNome(nome);
+      if (!serv && typeof state !== 'undefined') {
+        serv = (state.servicos || []).find(function (s) {
+          return s && (String(s.nome) === nome || String(s.id) === nome);
+        });
+      }
+    } catch (_) {}
+    if (!serv) {
+      return {
+        ok: false,
+        code: 'R17',
+        field: 'ci-servico-sel',
+        title: 'Serviço',
+        message: 'Seleccione um serviço do catálogo. Serviços personalizados não são permitidos na venda.'
+      };
+    }
+    var servAtivo = typeof isServicoAtivo === 'function' ? isServicoAtivo(serv) : (serv.ativo !== false);
+    if (!servAtivo) {
+      return {
+        ok: false,
+        code: 'R06',
+        field: 'ci-servico-sel',
+        title: 'Serviço',
+        message: 'Este serviço não está disponível para novas vendas.'
+      };
+    }
+    itensNorm.push({
+      nome: String(serv.nome || nome),
+      quantidade: qty,
+      precoUnit: precoUnit,
+      subtotal: subtotal,
+      servico_id: serv.id || null
+    });
+  }
+
+  var clienteNome = String(dados.cliente || '').trim();
+  if (!clienteNome || clienteNome === 'Avulso' || clienteNome === 'Anónimo') {
+    return {
+      ok: false,
+      code: 'R01',
+      field: 'venda-cliente',
+      title: 'Cliente',
+      message: 'Selecione um cliente para continuar.'
+    };
+  }
+  var clienteHit = null;
+  try {
+    if (typeof state !== 'undefined') {
+      clienteHit = (state.clientes || []).find(function (c) {
+        return c && (String(c.nome) === clienteNome || String(c.id) === clienteNome);
+      });
+    }
+  } catch (_) {}
+  if (!clienteHit) {
+    return {
+      ok: false,
+      code: 'R01',
+      field: 'venda-cliente',
+      title: 'Cliente',
+      message: 'Selecione um cliente para continuar.'
+    };
+  }
+  if (clienteHit.ativo === false || clienteHit.ativo === 0 || clienteHit.ativo === 'false') {
+    return {
+      ok: false,
+      code: 'R48',
+      field: 'venda-cliente',
+      title: 'Cliente',
+      message: 'Este cliente não está activo. Escolha outro cliente para continuar.'
+    };
+  }
+
+  var profId = dados.profissional_id != null ? String(dados.profissional_id).trim() : '';
+  if (!profId) {
+    return {
+      ok: false,
+      code: 'R02',
+      field: 'venda-profissional',
+      title: 'Profissional',
+      message: 'Selecione o profissional responsável pela venda para continuar.'
+    };
+  }
+  var prof = null;
+  try {
+    if (typeof state !== 'undefined') {
+      prof = (state.profissionais || []).find(function (p) {
+        return p && String(p.id) === profId;
+      });
+    }
+  } catch (_) {}
+  if (!prof) {
+    return {
+      ok: false,
+      code: 'R02',
+      field: 'venda-profissional',
+      title: 'Profissional',
+      message: 'Selecione o profissional responsável pela venda para continuar.'
+    };
+  }
+  var profAtivo = typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(prof) : (prof.ativo !== false);
+  if (!profAtivo) {
+    return {
+      ok: false,
+      code: 'R04',
+      field: 'venda-profissional',
+      title: 'Profissional',
+      message: 'Este profissional não está activo. Escolha um profissional disponível.'
+    };
+  }
+
+  for (var j = 0; j < itensNorm.length; j++) {
+    var nomeS = itensNorm[j].nome;
+    var serv2 = null;
+    try {
+      if (typeof getServicoByNome === 'function') serv2 = getServicoByNome(nomeS);
+      if (!serv2 && typeof state !== 'undefined') {
+        serv2 = (state.servicos || []).find(function (s) {
+          return s && String(s.nome) === nomeS;
+        });
+      }
+    } catch (_) {}
+    var lista = (serv2 && Array.isArray(serv2.profissionais)) ? serv2.profissionais : [];
+    if (!lista.length) {
+      return {
+        ok: false,
+        code: 'R35',
+        field: 'venda-profissional',
+        title: 'Profissional',
+        message: 'Este serviço não possui um profissional disponível. Associe um profissional ao serviço antes de continuar.'
+      };
+    }
+    var habilitado = lista.some(function (ref) {
+      var r = String(ref || '');
+      return r === String(prof.id) || r === String(prof.nome || '');
+    });
+    if (!habilitado) {
+      return {
+        ok: false,
+        code: 'R03',
+        field: 'venda-profissional',
+        title: 'Profissional',
+        message: 'Este profissional não está habilitado para o serviço selecionado. Escolha um profissional disponível para este serviço.'
+      };
+    }
+  }
+
+  var total = 0;
+  for (var k = 0; k < itensNorm.length; k++) {
+    total += Number(itensNorm[k].subtotal) || 0;
+  }
+  total = Math.round(total * 100) / 100;
+  if (!Number.isFinite(total) || total <= 0) {
+    return {
+      ok: false,
+      code: 'R11',
+      field: 'cart-total-area',
+      title: 'Total',
+      message: 'O total da venda é inválido. Verifique os serviços, quantidades e valores antes de continuar.'
+    };
+  }
+
+  var metodo = String(dados.metodoPagamento != null ? dados.metodoPagamento : '').trim();
+  if (metodo === 'Transferência Bancária') metodo = 'Transferência';
+  if (metodo === 'Outro' || metodo === 'outro') metodo = '';
+  var metodosOk = {
+    'Numerário': true,
+    'Multicaixa Express': true,
+    'Transferência': true,
+    'Cartão': true,
+    'Split': true,
+    '__split__': true
+  };
+  if (!metodo || !metodosOk[metodo]) {
+    return {
+      ok: false,
+      code: 'R12',
+      field: 'venda-pagamento',
+      title: 'Pagamento',
+      message: 'Selecione o método de pagamento para continuar.'
+    };
+  }
+
+  var pagamentos = Array.isArray(dados.pagamentos) ? dados.pagamentos : null;
+  if (metodo === '__split__' || metodo === 'Split') {
+    if (!pagamentos || !pagamentos.length) {
+      return {
+        ok: false,
+        code: 'R14',
+        field: 'venda-pagamento',
+        title: 'Pagamento dividido',
+        message: 'Os valores dos pagamentos divididos devem corresponder exatamente ao total da venda.'
+      };
+    }
+    var soma = 0;
+    for (var p = 0; p < pagamentos.length; p++) {
+      var v = Number(pagamentos[p] && (pagamentos[p].valor != null ? pagamentos[p].valor : pagamentos[p]));
+      if (!Number.isFinite(v) || v <= 0) {
+        return {
+          ok: false,
+          code: 'R15',
+          field: 'venda-pagamento',
+          title: 'Pagamento',
+          message: 'Informe um valor de pagamento superior a zero.'
+        };
+      }
+      soma += v;
+    }
+    soma = Math.round(soma * 100) / 100;
+    if (Math.abs(soma - total) > 0.009) {
+      return {
+        ok: false,
+        code: 'R14',
+        field: 'venda-pagamento',
+        title: 'Pagamento dividido',
+        message: 'Os valores dos pagamentos divididos devem corresponder exatamente ao total da venda.'
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    code: 'OK',
+    total: total,
+    itens: itensNorm,
+    clienteNome: String(clienteHit.nome || clienteNome),
+    cliente_id: clienteHit.id || dados.cliente_id || null,
+    profissional_id: String(prof.id),
+    profissionalNome: String(prof.nome || ''),
+    metodoPagamento: metodo === '__split__' ? 'Split' : metodo,
+    pagamentos: pagamentos
+  };
+}
+
+function bpFocarCampoVenda(fieldId) {
+  if (!fieldId) return;
+  try {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    try { el.classList.add('bp-field-invalid'); } catch (_) {}
+    setTimeout(function () {
+      try { el.focus(); } catch (_) {}
+      try {
+        if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } catch (_) {}
+    }, 80);
+    setTimeout(function () {
+      try { el.classList.remove('bp-field-invalid'); } catch (_) {}
+    }, 4000);
+  } catch (_) {}
+}
+
+/** Feedback de validação da venda: modal → Entendi → foco no campo. */
+function bpNotificarValidacaoVenda(result) {
+  if (!result || result.ok) return;
+  var title = result.title || 'Quase lá';
+  var msg = result.message || 'Verifique os dados da venda e tente novamente.';
+  var field = result.field;
+  var after = function () {
+    if (typeof bpFocarCampoVenda === 'function') bpFocarCampoVenda(field);
+  };
+  try {
+    if (typeof mostrarErro === 'function') {
+      mostrarErro(msg, null, title, after, { okLabel: 'Entendi' });
+    } else if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError(msg, field);
+    } else if (typeof toast === 'function') {
+      toast(msg, 'warning');
+      after();
+    }
+  } catch (_) {
+    after();
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.bpValidarOperacaoVenda = bpValidarOperacaoVenda;
+  window.bpNotificarValidacaoVenda = bpNotificarValidacaoVenda;
+  window.bpFocarCampoVenda = bpFocarCampoVenda;
+}
+
+
 async function registarVenda(dados) {
   try {
-    const clienteNome = String(dados.cliente || '').trim() || 'Avulso';
-    let clienteId = dados.cliente_id || null;
-    if (!clienteId && typeof resolverClienteIdPorNome === 'function') {
-      clienteId = resolverClienteIdPorNome(clienteNome);
-    } else if (!clienteId && clienteNome && clienteNome !== 'Avulso' && clienteNome !== 'Anónimo') {
-      const hit = (state.clientes || []).find(c =>
-        String(c.nome || '').trim().toLowerCase() === clienteNome.toLowerCase()
-      );
-      if (hit) clienteId = hit.id;
-    }
-
-    if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
-      toast('Adiciona pelo menos um serviço à venda.', 'warning');
+    // Camada de negócio: mesmas regras da UI (R60/R65)
+    var vcheck = typeof bpValidarOperacaoVenda === 'function'
+      ? bpValidarOperacaoVenda(dados)
+      : { ok: false, message: 'Validação indisponível.' };
+    if (!vcheck || !vcheck.ok) {
+      if (typeof bpNotificarValidacaoVenda === 'function') bpNotificarValidacaoVenda(vcheck);
+      else if (typeof toast === 'function' && vcheck) toast(vcheck.message || 'Dados da venda incompletos.', 'warning');
       return null;
     }
 
-    const total = dados.itens.reduce((acc, i) => acc + (Number(i.subtotal) || 0), 0);
-    if (total <= 0) {
-      toast('O valor total da venda tem de ser superior a zero.', 'error');
-      return null;
-    }
-
-    const descricao = dados.itens.map(i => i.nome).join(', ');
+    const clienteNome = vcheck.clienteNome;
+    let clienteId = vcheck.cliente_id || null;
+    const total = vcheck.total;
+    const itensOk = vcheck.itens;
+    const descricao = itensOk.map(function (i) { return i.nome; }).join(', ');
     const id = uuid();
     // Comissão sobre valor líquido (total da venda); taxa do profissional
     let comissao = 0;
-    if (dados.profissional_id) {
+    if (vcheck.profissional_id) {
       try {
         var _taxa = (typeof getTaxaComissao === 'function')
-          ? Number(getTaxaComissao(dados.profissional_id)) || 0
+          ? Number(getTaxaComissao(vcheck.profissional_id)) || 0
           : 0;
         if (typeof calcularComissao === 'function') {
           comissao = Number(calcularComissao(total, _taxa)) || 0;
@@ -4255,17 +4944,19 @@ async function registarVenda(dados) {
       valor: total,
       cliente: clienteNome,
       cliente_id: clienteId || null,
-      profissional_id: dados.profissional_id || null,
-      profissional: dados.profissional || 'Não atribuído',
+      profissional_id: vcheck.profissional_id,
+      profissional: vcheck.profissionalNome,
       comissao_gerada: comissao,
-      itens: dados.itens.map(i => ({
-        nome: i.nome,
-        quantidade: Number(i.quantidade) || 1,
-        precoUnit: Number(i.precoUnit) || Number(i.subtotal) || 0,
-        subtotal: Number(i.subtotal) || 0
-      })),
-      metodoPagamento: dados.metodoPagamento || 'Numerário',
-      pagamentos: Array.isArray(dados.pagamentos) ? dados.pagamentos : null,
+      itens: itensOk.map(function (i) {
+        return {
+          nome: i.nome,
+          quantidade: i.quantidade,
+          precoUnit: i.precoUnit,
+          subtotal: i.subtotal
+        };
+      }),
+      metodoPagamento: vcheck.metodoPagamento,
+      pagamentos: vcheck.pagamentos,
       data: hoje(),
       hora: horaAgora(),
       reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
@@ -4347,6 +5038,13 @@ async function cancelarVenda(movimentoId, motivo) {
   }
 }
 if (typeof window !== 'undefined') window.cancelarVenda = cancelarVenda;
+
+/** True se o movimento é venda e não está cancelada (R50 / KPIs). */
+function bpVendaActiva(m) {
+  if (!m || m.tipo !== 'venda') return false;
+  return String(m.status || 'activo').toLowerCase() !== 'cancelado';
+}
+if (typeof window !== 'undefined') window.bpVendaActiva = bpVendaActiva;
 
 async function addMovimento(mov) {
   const n = { ...mov, id: uuid(), data: hoje(), hora: horaAgora() };
@@ -4606,7 +5304,7 @@ function renderDashboard() {
   const ags = state.agendamentos || [];
 
   const vendasPeriodo = movs.filter(m =>
-    m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim
+    m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado' && m.data >= intervalo.inicio && m.data <= intervalo.fim
   );
   const totalRev = _somaVendas(vendasPeriodo);
   const totalVendas = vendasPeriodo.length;
@@ -4753,7 +5451,7 @@ function renderDashboard() {
   const caixaEl = document.getElementById('dash-caixa-saldo');
   if (caixaEl) {
     const hojeStr = hoje();
-    const entradas = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === hojeStr));
+    const entradas = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === hojeStr && String(m.status || '').toLowerCase() !== 'cancelado'));
     const saidas = movs.filter(m => m.tipo === 'despesa' && m.data === hojeStr)
       .reduce((s, m) => s + (Number(m.valor) || 0), 0);
     const saldo = (Number(state.config && state.config.fundo) || 0) + entradas - saidas;
@@ -4783,7 +5481,7 @@ function renderDashboard() {
         const st = _statusAg(a);
         return st === 'nao_realizado' || st === 'nao-realizado';
       });
-      let mensagemVazio = 'Nenhum atendimento pendente hoje';
+      let mensagemVazio = 'Sem atendimentos pendentes';
       if (temRealizados && !temExpirados) mensagemVazio = 'Todos os atendimentos de hoje foram realizados';
       else if (temExpirados && !temRealizados) mensagemVazio = 'Sem atendimentos pendentes';
       cont.innerHTML = `<div class="empty-state"><p>${mensagemVazio}</p></div>`;
@@ -5491,7 +6189,7 @@ function abrirKpiTemporalSheet() {
 function _refreshKpiTemporalPreview(periodo) {
   const intervalo = calcularIntervaloPeriodo(periodo, 0);
   const movs = (state.movimentos || []).filter(function (m) {
-    return m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim;
+    return m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado' && m.data >= intervalo.inicio && m.data <= intervalo.fim;
   });
   const rev = _somaVendas(movs);
   const rangeEl = document.getElementById('kpi-temporal-range');
@@ -5839,7 +6537,7 @@ function renderCaixa() {
   const hojeStr = hoje();
   const _num = (v) => Number(v) || 0;
   const entradas = state.movimentos
-    .filter(m => m.data === hojeStr && m.tipo === 'venda')
+    .filter(m => m.data === hojeStr && m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado')
     .reduce((s, m) => s + _num(m.valor), 0);
   const despesas = state.movimentos
     .filter(m => m.data === hojeStr && m.tipo === 'despesa')
@@ -5856,7 +6554,7 @@ function renderCaixa() {
     ? formatarDataISO(dOntem)
     : dOntem.getFullYear() + '-' + String(dOntem.getMonth() + 1).padStart(2, '0') + '-' + String(dOntem.getDate()).padStart(2, '0');
   const totalOntem = state.movimentos
-    .filter(m => m.data === ontemStr && m.tipo === 'venda')
+    .filter(m => m.data === ontemStr && m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado')
     .reduce((s, m) => s + _num(m.valor), 0);
   const variacaoEl = document.getElementById('caixa-variacao');
   if (variacaoEl) {
@@ -6141,9 +6839,9 @@ function populateAgendaSelects() {
     : (state.servicos || []).filter(function (s) {
         return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
       });
-  servSel.innerHTML = servicosParaSelect.map(s =>
+  servSel.innerHTML = '<option value="">Seleccionar serviço</option>' + servicosParaSelect.map(s =>
     `<option value="${escHtml(s.nome)}">${escHtml(s.nome)}</option>`
-  ).join('') + '<option value="Outro">Outro / Personalizado</option>';
+  ).join('');
   if (prevServico) servSel.value = prevServico;
 
   const filtrarProfsAgenda = (servicoNome) => {
@@ -6157,12 +6855,11 @@ function populateAgendaSelects() {
     }
 
     let profs;
-    if (!servicoNome || servicoNome === 'Outro') {
-      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
+    if (!servicoNome) {
+      profs = [];
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
-      // ET4.5: sem profissionais no serviço → nenhum (não toda a equipa)
       if (!nomes.length) {
         profs = [];
       } else {
@@ -6172,7 +6869,7 @@ function populateAgendaSelects() {
       }
     }
     const prevProfId = profSel.value;
-    profSel.innerHTML = profs.map(p =>
+    profSel.innerHTML = '<option value="">Seleccionar profissional</option>' + profs.map(p =>
       `<option value="${p.id}">${escHtml(p.nome)}</option>`
     ).join('');
     if (profs.some(p => p.id === prevProfId)) profSel.value = prevProfId;
@@ -6204,8 +6901,7 @@ function populateVendaSelects() {
   catSel.innerHTML = `<option value="">Selecionar serviço</option>` +
     servicosActivos.map(s =>
       `<option value="${escHtml(s.nome)}" data-preco="${s.precoBase}">${escHtml(s.nome)}</option>`
-    ).join('') +
-    '<option value="__custom" data-preco="">Outro (personalizado)</option>';
+    ).join('');
 
   const filtrarProfsVenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia
@@ -6218,8 +6914,9 @@ function populateVendaSelects() {
     }
 
     let profs;
-    if (!servicoNome || servicoNome === '__custom') {
-      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
+    if (!servicoNome) {
+      // R03: sem serviço seleccionado, não listar profissionais genéricos
+      profs = [];
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
@@ -6231,7 +6928,7 @@ function populateVendaSelects() {
           .map(p => ({ id: p.id, nome: p.nome }));
       }
     }
-    profSel.innerHTML = `<option value="">Selecionar profissional</option>` +
+    profSel.innerHTML = `<option value="">Seleccionar profissional</option>` +
       profs.map(p =>
         `<option value="${p.id}">${escHtml(p.nome)}</option>`
       ).join('');
@@ -6242,9 +6939,7 @@ function populateVendaSelects() {
     filtrarProfsVenda(this.value);
     const opt = this.options[this.selectedIndex];
     const ciValor = document.getElementById('ci-valor');
-    if (this.value === '__custom') {
-      if (ciValor) { ciValor.value = ''; ciValor.disabled = false; ciValor.style.opacity = '1'; }
-    } else if (opt && opt.dataset.preco) {
+    if (opt && opt.dataset.preco) {
       if (ciValor) { ciValor.value = opt.dataset.preco; ciValor.disabled = true; ciValor.style.opacity = '0.7'; }
     } else {
       if (ciValor) { ciValor.value = ''; ciValor.disabled = false; ciValor.style.opacity = '1'; }
@@ -8298,16 +8993,19 @@ function abrirDetalheVenda(id) {
   if (venda.itens && venda.itens.length > 0) {
     itensHtml =
       '<div class="bp-view-section-title">Itens</div>' +
-      '<div class="bp-view-dl">' +
-      '<div class="detalhe-itens-header" style="padding:10px 14px;border-bottom:1px solid var(--border-soft);">' +
+      '<div class="bp-view-dl bp-view-dl--itens">' +
+      '<div class="detalhe-itens-header">' +
       '<span>Descrição</span><span style="text-align:right">Qtd</span><span style="text-align:right">Unit.</span><span style="text-align:right">Total</span></div>' +
       venda.itens.map(function (item) {
+        var q = item.quantidade || 1;
+        var unit = (item.precoUnit != null ? item.precoUnit : item.subtotal);
+        var sub = item.subtotal;
         return (
-          '<div class="detalhe-item-row" style="padding-left:14px;padding-right:14px;">' +
+          '<div class="detalhe-item-row">' +
           '<span class="desc">' + escHtml(item.nome) + '</span>' +
-          '<span class="qty">' + (item.quantidade || 1) + '</span>' +
-          '<span class="pu">' + fmtKz(item.precoUnit != null ? item.precoUnit : item.subtotal) + '</span>' +
-          '<span class="sub">' + fmtKz(item.subtotal) + '</span></div>'
+          '<span class="qty">' + q + '</span>' +
+          '<span class="pu">' + fmtKz(unit) + '</span>' +
+          '<span class="sub">' + fmtKz(sub) + '</span></div>'
         );
       }).join('') +
       '</div>';
@@ -8323,12 +9021,20 @@ function abrirDetalheVenda(id) {
       '<div class="bp-view-row"><span class="bp-view-label">Profissional</span><span class="bp-view-value">' + escHtml(nomeProf || '—') + '</span></div>' +
       '<div class="bp-view-row"><span class="bp-view-label">Quando</span><span class="bp-view-value">' + escHtml(String(venda.data || '')) + ' · ' + escHtml(String(venda.hora || '').slice(0, 5)) + '</span></div>' +
       '<div class="bp-view-row"><span class="bp-view-label">Pagamento</span><span class="bp-view-value"><span class="pagamento-badge">' + escHtml(mp) + '</span></span></div>' +
+      (String(venda.status || '').toLowerCase() === 'cancelado' ? '<div class="bp-view-row"><span class="bp-view-label">Estado</span><span class="bp-view-value">Cancelada' + (venda.cancelado_motivo ? (' · ' + escHtml(venda.cancelado_motivo)) : '') + '</span></div>' : '') +
       '</div>' +
       itensHtml +
       '<div class="bp-view-total"><span class="bp-view-label">Total</span><span class="bp-view-value">' + fmtKz(Number(venda.valor) || 0) + '</span></div>';
   }
   const tit = document.getElementById('detalhe-venda-titulo');
   if (tit) tit.textContent = ref ? ('Ref. ' + ref) : 'Detalhe da venda';
+  var btnCanc = document.getElementById('btn-cancelar-venda');
+  if (btnCanc) {
+    var jaCanc = String(venda.status || '').toLowerCase() === 'cancelado';
+    var pode = typeof bpPode === 'function' ? bpPode(['admin', 'gerente']) : true;
+    btnCanc.style.display = (!jaCanc && pode) ? '' : 'none';
+    btnCanc.disabled = jaCanc;
+  }
   openModal('modal-detalhe-venda');
 }
 
@@ -8555,10 +9261,12 @@ function adjustQuantity(idx, delta) {
     removeItemFromCart(idx, true);
     return;
   }
-  item.quantidade = newQty;
+  item.quantidade = Math.floor(Number(newQty)) || 1;
+  if (item.quantidade < 1) item.quantidade = 1;
   item.subtotal = item.quantidade * item.precoUnit;
   _cartAnim = { type: 'qty', idx: idx, nome: item.nome };
   renderCart();
+  if (typeof updateVendaSaveButton === 'function') updateVendaSaveButton();
 }
 
 // --- Remover item (com confirmação) ---
@@ -8610,15 +9318,34 @@ async function removeItemFromCart(idx, skipConfirm) {
 
 // --- Função central de adição ao carrinho (sem profissional) ---
 async function addToCart(nome, valor) {
-  const existingIndex = cartItems.findIndex(item => item.nome === nome);
+  // R17: manter o nome exacto do catálogo (nunca sufixar preço — quebrava a validação)
+  nome = String(nome || '').trim();
+  valor = Number(valor);
+  if (!nome || !Number.isFinite(valor) || valor <= 0) {
+    if (typeof toast === 'function') toast('Informe um preço válido superior a zero.', 'warning');
+    return;
+  }
+  const existingIndex = cartItems.findIndex(function (item) {
+    return item && item.nome === nome && Number(item.precoUnit) === valor;
+  });
   if (existingIndex !== -1) {
     const existing = cartItems[existingIndex];
-    if (existing.precoUnit !== valor) {
+    existing.quantidade += 1;
+    existing.subtotal = existing.quantidade * existing.precoUnit;
+    _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
+    renderCart();
+    return;
+  }
+  // Mesmo serviço, preço diferente → linha separada, nome de catálogo intacto
+  const sameNameIdx = cartItems.findIndex(function (item) { return item && item.nome === nome; });
+  if (sameNameIdx !== -1) {
+    const existing = cartItems[sameNameIdx];
+    if (Number(existing.precoUnit) !== valor) {
       let choice = false;
       if (typeof showConfirmModal === 'function') {
         choice = await showConfirmModal(
           'Atualizar preço?',
-          '"' + (nome || 'Serviço') + '" já está no carrinho a ' + (typeof fmtKz === 'function' ? fmtKz(existing.precoUnit) : existing.precoUnit) + '. Queres atualizar para ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + '? Se cancelares, os dois preços ficam como linhas separadas.',
+          '"' + nome + '" já está no carrinho a ' + (typeof fmtKz === 'function' ? fmtKz(existing.precoUnit) : existing.precoUnit) + '. Queres atualizar para ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + '? Se cancelares, os dois preços ficam como linhas separadas.',
           false,
           { confirmLabel: 'Atualizar', cancelLabel: 'Manter separados', variant: 'default' }
         );
@@ -8626,30 +9353,14 @@ async function addToCart(nome, valor) {
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
-        _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
-        renderCart();
-        return;
-      } else {
-        cartItems.push({
-          nome: nome + ' (' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + ')',
-          quantidade: 1,
-          precoUnit: valor,
-          subtotal: valor
-        });
-        _cartAnim = { type: 'add', idx: cartItems.length - 1, nome: cartItems[cartItems.length - 1].nome };
+        _cartAnim = { type: 'qty', idx: sameNameIdx, nome: existing.nome };
         renderCart();
         return;
       }
     }
-    existing.quantidade += 1;
-    existing.subtotal = existing.quantidade * existing.precoUnit;
-    _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
-    renderCart();
-    return;
   }
-
   cartItems.push({
-    nome,
+    nome: nome,
     quantidade: 1,
     precoUnit: valor,
     subtotal: valor
@@ -8685,15 +9396,19 @@ function openVendaModal() {
     loadCartFromStorage();
     const clientSel = document.getElementById('venda-cliente');
     if (clientSel) {
-      const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
-        .concat((state.clientes || []).map(c =>
-          `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
-        ));
+      const opts = ['<option value="">Seleccionar cliente</option>']
+        .concat((state.clientes || []).filter(function (c) {
+          if (!c || !c.nome) return false;
+          if (c.ativo === false || c.ativo === 0 || c.ativo === 'false') return false;
+          return true;
+        }).map(function (c) {
+          return '<option value="' + escHtml(c.nome) + '">' + escHtml(c.nome) + '</option>';
+        }));
       clientSel.innerHTML = opts.join('');
     }
     if (typeof populateVendaSelects === 'function') populateVendaSelects();
     const pag = document.getElementById('venda-pagamento');
-    if (pag && !pag.value) pag.value = 'Numerário';
+    if (pag) pag.value = '';
     renderCart();
     updateVendaSaveButton();
     if (typeof openModal === 'function') openModal('modal-venda');
@@ -8773,8 +9488,14 @@ function setServicoModalMode(mode) {
   const form = document.getElementById('servico-form-panel');
   if (modal) modal.setAttribute('data-mode', mode);
   if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
-  if (view) view.hidden = mode !== 'view';
-  if (form) form.hidden = mode !== 'edit';
+  if (view) {
+    view.hidden = mode !== 'view';
+    try { view.style.display = mode === 'view' ? '' : 'none'; } catch (_) {}
+  }
+  if (form) {
+    form.hidden = mode !== 'edit';
+    try { form.style.display = mode === 'edit' ? '' : 'none'; } catch (_) {}
+  }
 }
 
 function _labelProfsServico(arr) {
@@ -9042,29 +9763,98 @@ function bpTabIndex(id) {
   var i = BP_TAB_ORDER.indexOf(id);
   return i < 0 ? 0 : i;
 }
+/** Slide foto-a-foto ~160ms: páginas adjacentes, stacking absoluto, sem faísca. */
 function bpSwitchTabPane(fromId, toId) {
   var from = fromId ? document.getElementById('tab-' + fromId) : null;
   var to = document.getElementById('tab-' + toId);
   if (!to) return;
+
   var reduce = false;
-  try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
-  var forward = bpTabIndex(toId) >= bpTabIndex(fromId || toId);
+  try {
+    reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_) {}
+
+  var ALL_ANIM = [
+    'bp-tab-slide-from', 'bp-tab-slide-to',
+    'bp-tab-from-left', 'bp-tab-from-right',
+    'bp-tab-to-from-right', 'bp-tab-to-from-left',
+    'bp-tab-fade-in', 'bp-tab-fade-out',
+    'bp-tab-in-right', 'bp-tab-in-left', 'bp-tab-out-left', 'bp-tab-out-right'
+  ];
+
+  function clearAnim(p) {
+    if (!p) return;
+    ALL_ANIM.forEach(function (c) { p.classList.remove(c); });
+  }
+
   document.querySelectorAll('.tab-pane').forEach(function (p) {
-    p.classList.remove('active', 'bp-tab-in-right', 'bp-tab-in-left', 'bp-tab-out-left', 'bp-tab-out-right');
+    clearAnim(p);
+    if (p !== to && p !== from) p.classList.remove('active');
   });
+
   if (reduce || !from || from === to) {
+    if (from && from !== to) from.classList.remove('active');
+    clearAnim(to);
     to.classList.add('active');
     return;
   }
-  from.classList.add(forward ? 'bp-tab-out-left' : 'bp-tab-out-right');
-  to.classList.add('active', forward ? 'bp-tab-in-right' : 'bp-tab-in-left');
+
+  // Evitar estados a meio de animação anterior
+  clearAnim(from);
+  clearAnim(to);
+
+  var forward = bpTabIndex(toId) >= bpTabIndex(fromId);
+  var main = document.querySelector('.main-content');
+  if (main) main.classList.add('bp-tab-animating');
+
+  // Medir altura com a aba actual (visível); evita minHeight 0 e colapso
+  var h = 0;
+  try {
+    h = Math.max(
+      (from && from.offsetHeight) || 0,
+      (main && main.clientHeight) || 0,
+      240
+    );
+    if (main) main.style.minHeight = h + 'px';
+  } catch (_) {}
+
+  var cleaned = false;
   var clean = function () {
-    from.classList.remove('bp-tab-out-left', 'bp-tab-out-right');
-    to.classList.remove('bp-tab-in-right', 'bp-tab-in-left');
-    from.removeEventListener('animationend', clean);
+    if (cleaned) return;
+    cleaned = true;
+    clearAnim(from);
+    clearAnim(to);
+    from.classList.remove('active');
+    to.classList.add('active');
+    if (main) {
+      main.classList.remove('bp-tab-animating');
+      try { main.style.minHeight = ''; } catch (_) {}
+    }
+    try { to.removeEventListener('animationend', onEnd); } catch (_) {}
   };
-  from.addEventListener('animationend', clean);
-  setTimeout(clean, 320);
+  var onEnd = function (e) {
+    if (e && e.target !== to) return;
+    clean();
+  };
+
+  // Preparar estados iniciais ANTES do paint da animação (evita faísca no 1.º frame)
+  from.classList.add('bp-tab-slide-from');
+  from.classList.remove('active');
+  to.classList.add('active', 'bp-tab-slide-to');
+  // Posição inicial sem animação
+  to.style.transform = forward ? 'translate3d(100%,0,0)' : 'translate3d(-100%,0,0)';
+  from.style.transform = 'translate3d(0,0,0)';
+
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      to.style.transform = '';
+      from.style.transform = '';
+      from.classList.add(forward ? 'bp-tab-from-left' : 'bp-tab-from-right');
+      to.classList.add(forward ? 'bp-tab-to-from-right' : 'bp-tab-to-from-left');
+      to.addEventListener('animationend', onEnd);
+      setTimeout(clean, 220);
+    });
+  });
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -9277,8 +10067,12 @@ document.getElementById('nova-venda-hero-btn').addEventListener('click', openVen
 
 document.getElementById('fab-agendar').addEventListener('click', () => {
   const sel = document.getElementById('agenda-cliente');
-  sel.innerHTML = '<option value="">Selecionar cliente</option>' + state.clientes.map(c =>
-    `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`).join('');
+  var _cliAct = typeof bpClientesActivos === 'function' ? bpClientesActivos() : (state.clientes || []).filter(function (c) {
+    return c && c.nome && c.ativo !== false && c.ativo !== 0 && c.ativo !== 'false';
+  });
+  sel.innerHTML = '<option value="">Seleccionar cliente</option>' + _cliAct.map(function (c) {
+    return '<option value="' + escHtml(c.nome) + '">' + escHtml(c.nome) + '</option>';
+  }).join('');
   populateAgendaSelects();
   const now = new Date();
   const isoNow = now.toISOString().slice(0, 16);
@@ -9297,19 +10091,70 @@ document.getElementById('fab-agendar').addEventListener('click', () => {
 // CORREÇÃO: modal-agenda-save separa ID e nome do profissional
 document.getElementById('modal-agenda-save').addEventListener('click', async () => {
   const editId = (document.getElementById('agenda-edit-id') || {}).value || '';
-  const cliente = document.getElementById('agenda-cliente').value;
-  const servico = document.getElementById('agenda-servico').value;
-  const profissionalId = document.getElementById('agenda-profissional').value;
-  const datetime = document.getElementById('agenda-datetime').value;
-  const preco = parseFloat(document.getElementById('agenda-preco').value);
-  if (!cliente || !servico || !datetime) { toast('Preenche os campos obrigatórios.', 'warning'); return; }
-  if (!profissionalId) { toast('Selecciona um profissional.', 'warning'); return; }
-  if (isNaN(preco) || preco <= 0) { toast('Insira um preço válido', 'error'); return; }
-  if (!datetime.includes('T')) { toast('Data e hora inválidas', 'error'); return; }
+  const cliente = (document.getElementById('agenda-cliente') || {}).value || '';
+  const servico = (document.getElementById('agenda-servico') || {}).value || '';
+  const profissionalId = (document.getElementById('agenda-profissional') || {}).value || '';
+  const datetime = (document.getElementById('agenda-datetime') || {}).value || '';
+  const preco = parseFloat((document.getElementById('agenda-preco') || {}).value);
+  // R37–R40 — uma pendência de cada vez
+  if (!cliente) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Selecione um cliente para continuar.', 'agenda-cliente');
+    else toast('Selecione um cliente para continuar.', 'warning');
+    return;
+  }
+  var cliObj = (state.clientes || []).find(function (c) { return c && c.nome === cliente; });
+  if (!cliObj || cliObj.ativo === false || cliObj.ativo === 0 || cliObj.ativo === 'false') {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Este cliente não está activo. Escolha outro cliente para continuar.', 'agenda-cliente');
+    else toast('Este cliente não está activo. Escolha outro cliente para continuar.', 'warning');
+    return;
+  }
+  if (!servico || servico === 'Outro') {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Seleccione um serviço do catálogo.', 'agenda-servico');
+    else toast('Seleccione um serviço do catálogo.', 'warning');
+    return;
+  }
+  if (!datetime || !datetime.includes('T')) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique a data e a hora do atendimento.', 'agenda-datetime');
+    else toast('Indique a data e a hora do atendimento.', 'warning');
+    return;
+  }
+  if (!profissionalId) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Seleccione um profissional.', 'agenda-profissional');
+    else toast('Seleccione um profissional.', 'warning');
+    return;
+  }
+  if (isNaN(preco) || preco <= 0) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Informe um preço válido superior a zero.', 'agenda-preco');
+    else toast('Informe um preço válido superior a zero.', 'warning');
+    return;
+  }
   const data = datetime.split('T')[0];
   const hora = datetime.split('T')[1].slice(0, 5);
-  const profObj = state.profissionais.find(p => p.id === profissionalId);
-  const profissionalNome = profObj ? profObj.nome : '';
+  const profObj = (state.profissionais || []).find(p => p.id === profissionalId);
+  if (!profObj || (typeof isProfissionalAtivo === 'function' ? !isProfissionalAtivo(profObj) : profObj.ativo === false)) {
+    toast('Seleccione um profissional activo.', 'warning');
+    return;
+  }
+  // R41 — compatibilidade serviço/profissional
+  const servObj = (state.servicos || []).find(s => s && s.nome === servico);
+  if (!servObj || (typeof isServicoAtivo === 'function' ? !isServicoAtivo(servObj) : servObj.ativo === false)) {
+    toast('Seleccione um serviço disponível.', 'warning');
+    return;
+  }
+  const listaP = Array.isArray(servObj.profissionais) ? servObj.profissionais : [];
+  if (!listaP.length) {
+    toast('Este serviço não possui um profissional disponível. Associe um profissional ao serviço antes de continuar.', 'warning');
+    return;
+  }
+  const hab = listaP.some(function (ref) {
+    var r = String(ref || '');
+    return r === String(profObj.id) || r === String(profObj.nome || '');
+  });
+  if (!hab) {
+    toast('Este profissional não está habilitado para o serviço selecionado. Escolha um profissional disponível para este serviço.', 'warning');
+    return;
+  }
+  const profissionalNome = profObj.nome || '';
   let clienteId = null;
   if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
   else {
@@ -9389,8 +10234,20 @@ document.getElementById('agenda-add-cliente-rapido').addEventListener('click', (
 document.getElementById('modal-cliente-rapido-save').addEventListener('click', async () => {
   const nome = document.getElementById('cliente-rapido-nome').value.trim();
   const telefone = document.getElementById('cliente-rapido-telefone').value.trim();
-  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
-  const result = await addCliente({ nome, telefone, notas: '' });
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Introduza o nome do cliente para continuar.', 'cliente-rapido-nome');
+    else toast('Introduza o nome do cliente para continuar.', 'warning');
+    return;
+  }
+  var telR = typeof bpValidarTelefoneCliente === 'function'
+    ? bpValidarTelefoneCliente(telefone)
+    : { ok: false, message: 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.' };
+  if (!telR.ok) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError(telR.message, 'cliente-rapido-telefone');
+    else toast(telR.message, 'warning');
+    return;
+  }
+  const result = await addCliente({ nome, telefone: telR.telefone, notas: '' });
   if (result) {
     try {
       if (window.BPMedia && BPMedia.takePendingClienteFoto) {
@@ -9426,9 +10283,14 @@ function setClienteModalMode(mode) {
   if (sheet) {
     sheet.classList.toggle('modal-sheet--view', mode === 'view');
   }
-  if (view) view.hidden = mode !== 'view';
-  if (form) form.hidden = mode !== 'edit';
-  // Campos sempre editáveis no form (nunca "fantasma")
+  if (view) {
+    view.hidden = mode !== 'view';
+    try { view.style.display = mode === 'view' ? '' : 'none'; } catch (_) {}
+  }
+  if (form) {
+    form.hidden = mode !== 'edit';
+    try { form.style.display = mode === 'edit' ? '' : 'none'; } catch (_) {}
+  }
   ['cliente-nome', 'cliente-telefone', 'cliente-notas'].forEach(function (fid) {
     const el = document.getElementById(fid);
     if (el) {
@@ -9460,6 +10322,9 @@ document.getElementById('add-cliente-btn').addEventListener('click', () => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  try {
+    if (window.BPMedia && typeof BPMedia.clearPendingClienteFoto === 'function') BPMedia.clearPendingClienteFoto();
+  } catch (_) {}
   openModal('modal-cliente');
 });
 
@@ -9468,13 +10333,20 @@ document.getElementById('modal-cliente-save').addEventListener('click', async ()
   let telefone = document.getElementById('cliente-telefone').value.trim();
   const notas = document.getElementById('cliente-notas').value.trim();
   const id = document.getElementById('cliente-id').value;
-  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
-  const telDigits = telefone.replace(/\D/g, '');
-  if (telDigits && telDigits.length !== 9) {
-    toast('Contacto deve ter exactamente 9 dígitos, ou deixe em branco.', 'error');
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Introduza o nome do cliente para continuar.', 'cliente-nome');
+    else toast('Introduza o nome do cliente para continuar.', 'warning');
     return;
   }
-  telefone = telDigits;
+  var telChk = typeof bpValidarTelefoneCliente === 'function'
+    ? bpValidarTelefoneCliente(telefone)
+    : { ok: false, message: 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.' };
+  if (!telChk.ok) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError(telChk.message, 'cliente-telefone');
+    else toast(telChk.message, 'warning');
+    return;
+  }
+  telefone = telChk.telefone;
   if (id) {
     // ET4.3: só toast/fecha se a actualização efectivamente ocorreu
     const upd = await updateCliente(id, { nome, telefone, notas });
@@ -9617,8 +10489,14 @@ function setProfModalMode(mode) {
   const form = document.getElementById('prof-form-panel');
   if (modal) modal.setAttribute('data-mode', mode);
   if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
-  if (view) view.hidden = mode !== 'view';
-  if (form) form.hidden = mode !== 'edit';
+  if (view) {
+    view.hidden = mode !== 'view';
+    try { view.style.display = mode === 'view' ? '' : 'none'; } catch (_) {}
+  }
+  if (form) {
+    form.hidden = mode !== 'edit';
+    try { form.style.display = mode === 'edit' ? '' : 'none'; } catch (_) {}
+  }
   ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(function (fid) {
     const el = document.getElementById(fid);
     if (el) {
@@ -9754,6 +10632,15 @@ document.getElementById('add-prof-btn')?.addEventListener('click', () => {
     if (el) el.value = fid === 'prof-taxa' ? '0' : '';
   });
   popularEspecialidadesProf('');
+  try {
+    var esp = document.getElementById('prof-esp');
+    if (esp) esp.value = '';
+    var box = document.getElementById('prof-criar-servico-box');
+    if (box) box.style.display = 'none';
+  } catch (_) {}
+  try {
+    if (window.BPMedia && typeof BPMedia.clearPendingProfFoto === 'function') BPMedia.clearPendingProfFoto();
+  } catch (_) {}
   openModal('modal-prof');
 });
 
@@ -9770,16 +10657,29 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   const taxa = parseFloat(document.getElementById('prof-taxa')?.value);
   const meta = parseFloat(document.getElementById('prof-meta')?.value);
 
-  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
-  if (!idade || isNaN(parseInt(idade, 10))) { toast('Idade é obrigatória', 'error'); return; }
-  if (!dataContratual) { toast('Data contratual é obrigatória', 'error'); return; }
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Introduza o nome do profissional para continuar.', 'prof-nome');
+    else toast('Introduza o nome do profissional para continuar.', 'warning');
+    return;
+  }
+  if (!idade || isNaN(parseInt(idade, 10))) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('A idade é obrigatória. Indique a idade do profissional para continuar.', 'prof-idade', 'warning');
+    else toast('A idade é obrigatória. Indique a idade do profissional para continuar.', 'warning');
+    return;
+  }
+  if (!dataContratual) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('A data contratual é obrigatória. Seleccione a data para continuar.', 'prof-data-contratual', 'warning');
+    else toast('A data contratual é obrigatória. Seleccione a data para continuar.', 'warning');
+    return;
+  }
   // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
   if (espSelect === '__criar') {
     const criado = await bpCriarServicoDesdeProfModal();
     if (!criado) return;
     especialidade = criado;
   }
-  if (!especialidade) { toast('Selecciona uma especialidade ou cria uma nova.', 'warning'); return; }
+  // R29: especialidade opcional no cadastro; sem ela o profissional não entra em vendas/agenda filtradas
+  if (!especialidade) { especialidade = ''; }
   if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
     toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
@@ -9861,13 +10761,23 @@ document.getElementById('modal-servico-save').addEventListener('click', async ()
   const duracao = (!isNaN(durRaw) && durRaw >= 5) ? durRaw : 60;
   const id = document.getElementById('servico-id').value;
   const profissionais = typeof getSelectedProfissionais === 'function' ? getSelectedProfissionais() : [];
-  if (!nome || isNaN(precoBase) || precoBase <= 0) {
-    toast('Indica nome e preço válidos.', 'warning');
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique o nome do serviço para continuar.', 'servico-nome');
+    else toast('Indique o nome do serviço para continuar.', 'warning');
+    return;
+  }
+  if (isNaN(precoBase) || precoBase <= 0) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Informe um preço válido superior a zero.', 'servico-preco');
+    else toast('Informe um preço válido superior a zero.', 'warning');
     return;
   }
   // ET4.5: profissionais obrigatórios — proibido vazio / "toda a equipa"
   if (!profissionais || !profissionais.length) {
-    toast('Associa pelo menos um profissional a este serviço.', 'warning');
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('Associe pelo menos um profissional a este serviço para continuar.', 'servico-profissionais-container');
+    } else {
+      toast('Associe pelo menos um profissional a este serviço para continuar.', 'warning');
+    }
     return;
   }
   const payload = { nome, precoBase, profissionais: profissionais, duracao };
@@ -10074,10 +10984,9 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
   const catSel = document.getElementById('ci-servico-sel');
   const ciValor = document.getElementById('ci-valor');
   let nome = catSel.value;
-  if (nome === '__custom') { 
-    nome = prompt('Nome do serviço / produto:'); 
-    if (!nome || !nome.trim()) return;
-    nome = nome.trim(); 
+  if (nome === '__custom' || nome === 'Outro') {
+    if (typeof toast === 'function') toast('Seleccione um serviço do catálogo.', 'warning');
+    return;
   }
   const wasDisabled = ciValor.disabled;
   ciValor.disabled = false;
@@ -10112,52 +11021,69 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
 const vendaSaveBtn = document.getElementById('modal-venda-save');
 if (vendaSaveBtn) {
   vendaSaveBtn.onclick = async function(e) {
-    if (!cartItems.length) { toast('Adiciona pelo menos um serviço à venda.', 'warning'); return; }
-    const cliente = document.getElementById('venda-cliente').value || 'Avulso';
-    const profissionalId = document.getElementById('venda-profissional').value;
-    const metodoPagamento = document.getElementById('venda-pagamento').value;
-    
-    // Buscar o nome do profissional
-    const profObj = state.profissionais.find(p => p.id === profissionalId);
+    if (this.disabled || this.getAttribute('aria-busy') === 'true') return;
+    const cliente = (document.getElementById('venda-cliente') || {}).value || '';
+    const profissionalId = (document.getElementById('venda-profissional') || {}).value || '';
+    const metodoPagamento = (document.getElementById('venda-pagamento') || {}).value || '';
+
+    const profObj = (state.profissionais || []).find(function (p) { return p && p.id === profissionalId; });
     const profissionalNome = profObj ? profObj.nome : '';
-    
-    // Profissional opcional (comissões); venda walk-in não bloqueia
-    setButtonLoading(this, true);
-    try {
-      let clienteId = null;
-      try {
-        if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
-        else {
-          const hit = (state.clientes || []).find(c => c.nome === cliente);
-          if (hit) clienteId = hit.id;
-        }
-      } catch (e) {}
-      // F13 — pagamento dividido (se activo)
-      var pagamentosSplit = null;
-      var metodoFinal = metodoPagamento;
-      if (metodoPagamento === '__split__' && typeof window.BPFinance !== 'undefined' && BPFinance.lerPagamentosSplit) {
-        var sp = BPFinance.lerPagamentosSplit();
-        var tot = typeof BPFinance.totalCarrinho === 'function' ? BPFinance.totalCarrinho() : 0;
-        if (!sp || !sp.list || !sp.list.length) {
-          toast('Indique os valores do pagamento dividido', 'error');
-          return;
-        }
-        if (tot > 0 && Math.abs(sp.sum - tot) > 0.5) {
-          toast('A soma dos pagamentos (' + sp.sum + ') deve igualar o total (' + tot + ')', 'error');
-          return;
-        }
+
+    var pagamentosSplit = null;
+    var metodoFinal = metodoPagamento;
+    if (metodoPagamento === '__split__' && typeof window.BPFinance !== 'undefined' && BPFinance.lerPagamentosSplit) {
+      var sp = BPFinance.lerPagamentosSplit();
+      if (sp && sp.list && sp.list.length) {
         pagamentosSplit = sp.list;
         metodoFinal = 'Split';
       }
-      const idVenda = await registarVenda({
-        cliente,
-        cliente_id: clienteId,
-        profissional: profissionalNome,
-        profissional_id: profissionalId || null,
-        itens: [...cartItems],
-        metodoPagamento: metodoFinal,
-        pagamentos: pagamentosSplit
-      });
+    }
+
+    var payload = {
+      cliente: cliente,
+      profissional: profissionalNome,
+      profissional_id: profissionalId || null,
+      itens: (typeof cartItems !== 'undefined' && cartItems) ? cartItems.slice() : [],
+      metodoPagamento: metodoFinal,
+      pagamentos: pagamentosSplit
+    };
+
+    // Validação central ANTES de processar (R19–R21)
+    var pre = typeof bpValidarOperacaoVenda === 'function' ? bpValidarOperacaoVenda(payload) : { ok: true };
+    if (!pre || !pre.ok) {
+      if (typeof bpNotificarValidacaoVenda === 'function') bpNotificarValidacaoVenda(pre);
+      else if (typeof toast === 'function') toast((pre && pre.message) || 'Complete os dados da venda.', 'warning');
+      return;
+    }
+
+    // R24 — confirmação: ainda NÃO persiste
+    var itensTxt = (pre.itens || []).map(function (i) {
+      return (i.nome || '') + ' ×' + i.quantidade;
+    }).join(', ');
+    var totalTxt = (typeof fmtKz === 'function') ? fmtKz(pre.total) : (pre.total + ' Kz');
+    var resumo =
+      'Cliente: ' + (pre.clienteNome || '—') + '\n' +
+      'Profissional: ' + (pre.profissionalNome || '—') + '\n' +
+      'Itens: ' + (itensTxt || '—') + '\n' +
+      'Total: ' + totalTxt + '\n' +
+      'Pagamento: ' + (pre.metodoPagamento || '—') + '\n\n' +
+      'Confirme para registar a venda. Até confirmar, nada é gravado.';
+    var confirmou = false;
+    if (typeof showConfirmModal === 'function') {
+      confirmou = await showConfirmModal(
+        'Confirmar venda?',
+        resumo,
+        false,
+        { confirmLabel: 'Confirmar venda', cancelLabel: 'Voltar', variant: 'default', summaryLayout: true }
+      );
+    } else {
+      confirmou = window.confirm(resumo);
+    }
+    if (!confirmou) return;
+
+    setButtonLoading(this, true);
+    try {
+      const idVenda = await registarVenda(payload);
       if (idVenda) {
         closeModal('modal-venda');
         if (typeof window.clearCart === 'function') {
@@ -10168,11 +11094,9 @@ if (vendaSaveBtn) {
         }
         mostrarConfirmacaoVenda(idVenda);
       }
-      // se idVenda for null, registarVenda já mostrou o toast de validação
     } catch (err) {
       console.error('[modal-venda-save]', err);
-      // Não bloquear a UX com modal de erro genérico se a venda local já foi tentada
-      toast('Ocorreu um problema ao registar a venda. Verifique os dados e tente novamente.', 'error');
+      toast('A venda não foi concluída. Verifique se todos os campos estão preenchidos corretamente e tente novamente.', 'error');
     } finally {
       setButtonLoading(this, false);
     }
@@ -10241,35 +11165,69 @@ document.getElementById('modal-finalizar-save').addEventListener('click', async 
   if (!ag) return;
   if (ag.status !== 'agendado') {
     toast('Este atendimento já não está disponível para finalizar (foi cancelado, expirou ou já foi realizado).', 'warning');
-    closeModal('modal-finalizar');
     return;
   }
-  const metodo = document.getElementById('finalizar-pagamento').value;
-  
-  // Atualizar status do agendamento para realizado
-  await updateAgendamento(id, { status: 'realizado' });
-  
-  // Registar a venda com profissional_id
-  const itens = [{ nome: ag.servico, quantidade: 1, precoUnit: ag.preco, subtotal: ag.preco }];
+
+  const metodo = (document.getElementById('finalizar-pagamento') || {}).value || '';
+  const itens = [{
+    nome: ag.servico,
+    quantidade: 1,
+    precoUnit: Number(ag.preco) || 0,
+    subtotal: Number(ag.preco) || 0
+  }];
   let cliId = ag.cliente_id || null;
   if (!cliId && typeof resolverClienteIdPorNome === 'function') {
     cliId = resolverClienteIdPorNome(ag.cliente);
   }
-  await registarVenda({
-    cliente: ag.cliente || 'Avulso',
+  const payload = {
+    cliente: ag.cliente || '',
     cliente_id: cliId,
-    profissional: ag.profissional,
+    profissional: ag.profissional || '',
     profissional_id: ag.profissional_id || null,
-    itens,
+    itens: itens,
     metodoPagamento: metodo
-  });
-  
+  };
+
+  // Validar ANTES de marcar agendamento como realizado (R44 / R51)
+  var pre = typeof bpValidarOperacaoVenda === 'function' ? bpValidarOperacaoVenda(payload) : { ok: true };
+  if (!pre || !pre.ok) {
+    if (typeof bpNotificarValidacaoVenda === 'function') bpNotificarValidacaoVenda(pre);
+    else if (typeof toast === 'function') toast((pre && pre.message) || 'Não é possível registar a venda.', 'warning');
+    return;
+  }
+
+  // R24 — confirmar antes de persistir (mesmo fluxo que Cobrar)
+  var totalTxt = (typeof fmtKz === 'function') ? fmtKz(pre.total) : ((pre.total || 0) + ' Kz');
+  var resumoFin =
+    'Cliente: ' + (pre.clienteNome || payload.cliente || '—') + '\n' +
+    'Profissional: ' + (pre.profissionalNome || payload.profissional || '—') + '\n' +
+    'Serviço: ' + ((pre.itens && pre.itens[0] && pre.itens[0].nome) || (payload.itens[0] && payload.itens[0].nome) || '—') + '\n' +
+    'Total: ' + totalTxt + '\n' +
+    'Pagamento: ' + (pre.metodoPagamento || payload.metodoPagamento || '—') + '\n\n' +
+    'Confirme para registar a venda. Até confirmar, o atendimento permanece pendente.';
+  var confirmouFin = false;
+  if (typeof showConfirmModal === 'function') {
+    confirmouFin = await showConfirmModal(
+      'Confirmar venda?',
+      resumoFin,
+      false,
+      { confirmLabel: 'Confirmar venda', cancelLabel: 'Voltar', variant: 'default', summaryLayout: true }
+    );
+  } else {
+    confirmouFin = window.confirm(resumoFin);
+  }
+  if (!confirmouFin) return;
+
+  const idVenda = await registarVenda(payload);
+  if (!idVenda) {
+    return;
+  }
+
+  await updateAgendamento(id, { status: 'realizado' });
   closeModal('modal-finalizar');
   toast('Venda registada.', 'success');
-  
-  // Atualizar UI e badge
-  updateUI();
-  renderBadges(); // <- CORREÇÃO
+  if (typeof updateUI === 'function') updateUI();
+  if (typeof renderBadges === 'function') renderBadges();
 });
 
 document.getElementById('modal-finalizar-cancel').addEventListener('click', () => closeModal('modal-finalizar'));
@@ -10525,6 +11483,44 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
 
 document.getElementById('modal-cliente-nao-encontrado-ok')?.addEventListener('click', () => {
   closeModal('modal-cliente-nao-encontrado');
+});
+
+
+// R50 — Cancelar venda (confirmação + motivo)
+document.getElementById('btn-cancelar-venda')?.addEventListener('click', async function () {
+  if (!vendaAtual || !vendaAtual.id) {
+    if (typeof toast === 'function') toast('Nenhuma venda seleccionada.', 'warning');
+    return;
+  }
+  if (String(vendaAtual.status || '').toLowerCase() === 'cancelado') {
+    if (typeof toast === 'function') toast('Esta venda já está cancelada.', 'warning');
+    return;
+  }
+  var ok = true;
+  if (typeof showConfirmModal === 'function') {
+    ok = await showConfirmModal(
+      'Cancelar esta venda?',
+      'A venda deixa de contar no caixa e a comissão é estornada. O registo permanece no histórico. Indique o motivo a seguir.',
+      true,
+      { confirmLabel: 'Continuar', cancelLabel: 'Voltar', variant: 'destructive' }
+    );
+  }
+  if (!ok) return;
+  var motivo = '';
+  try {
+    motivo = window.prompt('Motivo do cancelamento (obrigatório):', '') || '';
+  } catch (_) {}
+  motivo = String(motivo).trim();
+  if (!motivo) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique o motivo do cancelamento para continuar.');
+    else if (typeof toast === 'function') toast('Indique o motivo do cancelamento para continuar.', 'warning');
+    return;
+  }
+  var done = typeof cancelarVenda === 'function' ? await cancelarVenda(vendaAtual.id, motivo) : false;
+  if (done) {
+    closeModal('modal-detalhe-venda');
+    if (typeof updateUI === 'function') updateUI();
+  }
 });
 
 /* ===== FILE: eventos-globais.js ===== */
@@ -13666,11 +14662,11 @@ window.renderBarraMeta = renderBarraMeta;
     box.style.marginTop = '8px';
     box.innerHTML =
       '<div class="split-row" style="display:flex;gap:8px;margin-bottom:6px;">' +
-        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência Bancária</option><option>Cartão</option></select>' +
+        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência</option><option>Cartão</option></select>' +
         '<input type="number" class="input-field split-valor" placeholder="Valor" min="0" step="100" style="width:110px;">' +
       '</div>' +
       '<div class="split-row" style="display:flex;gap:8px;margin-bottom:6px;">' +
-        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência Bancária</option><option>Cartão</option></select>' +
+        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência</option><option>Cartão</option></select>' +
         '<input type="number" class="input-field split-valor" placeholder="Valor" min="0" step="100" style="width:110px;">' +
       '</div>' +
       '<p id="split-hint" style="font-size:.75rem;color:var(--text-muted);margin:0;">A soma deve igualar o total da venda.</p>';

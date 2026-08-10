@@ -232,15 +232,10 @@
                 <div id="dash-meta-fill" class="dash-meta-fill" style="width:0%"></div>
               </div>
             </div>
-            <div class="dash-caixa-row" data-role="admin,gerente">
-              <span class="dash-caixa-label">Saldo em caixa (hoje)</span>
-              <span id="dash-caixa-saldo" class="dash-caixa-value">0 Kz</span>
-            </div>
-
-<!-- Próximos Atendimentos -->
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <span class="section-title">Próximos Atendimentos</span>
-              <span style="font-size:.7rem;color:var(--text-muted);" id="agenda-count">0 pendentes</span>
+<!-- Próximos atendimentos -->
+            <div class="dash-section-head">
+              <h2 class="dash-section-title">Próximos atendimentos</h2>
+              <span class="dash-section-meta" id="agenda-count">0 pendentes</span>
             </div>
             <div id="agenda-today-list"></div>
 
@@ -403,9 +398,9 @@
               <input type="text" id="search-cliente" class="input-field" placeholder="Nome ou telefone...">
             </div>
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-              <button class="btn btn-sm btn-secondary filtro-frequencia active" data-filtro="todos" style="padding:4px 12px;min-height:30px;font-size:.7rem;">Todos</button>
-              <button class="btn btn-sm btn-secondary filtro-frequencia" data-filtro="mais" style="padding:4px 12px;min-height:30px;font-size:.7rem;">Mais frequentes</button>
-              <button class="btn btn-sm btn-secondary filtro-frequencia" data-filtro="menos" style="padding:4px 12px;min-height:30px;font-size:.7rem;">Menos frequentes</button>
+              <button class="btn btn-sm btn-secondary filtro-frequencia active" data-filtro="todos" style="padding:0 10px;min-height:30px;height:30px;font-size:.6875rem;">Todos</button>
+              <button class="btn btn-sm btn-secondary filtro-frequencia" data-filtro="mais" style="padding:0 10px;min-height:30px;height:30px;font-size:.6875rem;">Mais frequentes</button>
+              <button class="btn btn-sm btn-secondary filtro-frequencia" data-filtro="menos" style="padding:0 10px;min-height:30px;height:30px;font-size:.6875rem;">Menos frequentes</button>
             </div>
             <div id="clientes-list"></div>
           </div>
@@ -851,14 +846,14 @@
       <div class="handle"></div>
       <header class="venda-modal-head">
         <div id="venda-title" class="modal-title">Registar venda</div>
-        <p class="venda-modal-sub" id="venda-modal-sub">Quem comprou, o quê, quanto — e como pagou.</p>
+        <p class="venda-modal-sub" id="venda-modal-sub">Registe a venda e mantenha as suas operações organizadas.</p>
       </header>
 
       <section class="venda-section" aria-label="Cliente">
         <div class="venda-section-label">Cliente</div>
         <div class="input-group venda-field-tight">
           <select id="venda-cliente" class="input-field" aria-label="Cliente da venda">
-            <option value="">+ cliente novo</option>
+            <option value="">Seleccionar cliente</option>
           </select>
         </div>
         <button type="button" class="btn btn-sm btn-secondary btn-block" id="venda-add-cliente-rapido">+ Novo cliente</button>
@@ -883,7 +878,7 @@
           <div class="input-group venda-field-tight venda-add-grid-full">
             <label class="input-label" for="venda-profissional">Profissional</label>
             <select id="venda-profissional" class="input-field">
-              <option value="">Opcional</option>
+              <option value="">Seleccionar profissional</option>
             </select>
           </div>
         </div>
@@ -900,11 +895,12 @@
         <div class="venda-section-label">Pagamento</div>
         <div class="input-group venda-field-tight">
           <select id="venda-pagamento" class="input-field" aria-label="Forma de pagamento">
+            <option value="">Seleccionar método</option>
             <option value="Numerário">Numerário</option>
             <option value="Multicaixa Express">Multicaixa Express</option>
-            <option value="Transferência Bancária">Transferência</option>
+            <option value="Transferência">Transferência</option>
             <option value="Cartão">Cartão</option>
-            <option value="Outro">Outro</option>
+            <option value="__split__">Split</option>
           </select>
         </div>
       </section>
@@ -940,9 +936,10 @@
       <div class="bp-view-kicker">Venda registada</div>
       <div id="detalhe-venda-titulo" class="modal-title bp-view-title">Detalhe da venda</div>
       <div id="detalhe-venda-conteudo" class="bp-view-body"></div>
-      <div class="modal-actions modal-actions--primary-emphasis">
+      <div class="modal-actions modal-actions--primary-emphasis" style="flex-wrap:wrap;gap:8px;">
         <button type="button" class="btn btn-secondary" id="modal-detalhe-fechar">Fechar</button>
         <button type="button" class="btn btn-primary" id="btn-imprimir-recibo">Imprimir recibo</button>
+        <button type="button" class="btn btn-danger" id="btn-cancelar-venda" style="display:none;">Cancelar venda</button>
       </div>
     </div>
   </div>
@@ -1052,11 +1049,12 @@
       <div class="input-group">
         <label class="input-label">Forma de Pagamento</label>
         <select id="finalizar-pagamento" class="input-field">
+          <option value="">Seleccionar método</option>
           <option value="Numerário">Numerário</option>
           <option value="Multicaixa Express">Multicaixa Express</option>
-          <option value="Transferência Bancária">Transferência Bancária</option>
+          <option value="Transferência">Transferência</option>
           <option value="Cartão">Cartão</option>
-          <option value="Outro">Outro</option>
+          <option value="__split__">Split</option>
         </select>
       </div>
       <input type="hidden" id="finalizar-ag-id">

@@ -236,17 +236,53 @@ async function creditarPontosCliente(clienteId, pontos) {
   return next;
 }
 
+
+/** R46 — telefone obrigatório: exactamente 9 dígitos e começa por 9. */
+function bpValidarTelefoneCliente(tel) {
+  var digits = String(tel == null ? '' : tel).replace(/\D/g, '');
+  if (!digits || digits.length !== 9 || digits.charAt(0) !== '9') {
+    return {
+      ok: false,
+      message: 'O contacto deve ter 9 dígitos e começar por 9 (ex.: 923456789). Corrija o número para continuar.'
+    };
+  }
+  return { ok: true, telefone: digits };
+}
+if (typeof window !== 'undefined') {
+  window.bpValidarTelefoneCliente = bpValidarTelefoneCliente;
+}
+
+/** R48 — clientes utilizáveis em novas operações. */
+function bpClientesActivos() {
+  return (typeof state !== 'undefined' && state.clientes ? state.clientes : []).filter(function (c) {
+    if (!c || !c.nome) return false;
+    if (c.ativo === false || c.ativo === 0 || c.ativo === 'false') return false;
+    return true;
+  });
+}
+if (typeof window !== 'undefined') window.bpClientesActivos = bpClientesActivos;
+
 async function addCliente(c) {
   if (!verificarLimite('clientes')) return null;
   const nome = (c.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  if (existeNomeDuplicado('clientes', nome)) {
-    toast('Já existe um cliente com este nome.', 'error');
+  // R46 — telefone obrigatório (camada de negócio)
+  var telCheck = typeof bpValidarTelefoneCliente === 'function'
+    ? bpValidarTelefoneCliente(c && c.telefone)
+    : { ok: false, message: 'O contacto deve ter 9 dígitos e começar por 9 (ex.: 923456789). Corrija o número para continuar.' };
+  if (!telCheck.ok) {
+    toast(telCheck.message || 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.', 'warning');
     return null;
   }
 
-  const n = { ...c, id: uuid(), nome, pontos: Number(c.pontos) || 0 };
+  // R47
+  if (existeNomeDuplicado('clientes', nome)) {
+    toast('Já existe um cliente com este nome. Adicione o sobrenome ou outros dados para identificar corretamente o cliente.', 'error');
+    return null;
+  }
+
+  const n = { ...c, id: uuid(), nome, telefone: telCheck.telefone, pontos: Number(c.pontos) || 0 };
   try {
     await dbPut('clientes', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -270,11 +306,22 @@ async function updateCliente(id, data) {
   const actual = (state.clientes || []).find(c => c.id === id);
   if (!actual) return null;
 
+  if (data && Object.prototype.hasOwnProperty.call(data, 'telefone')) {
+    var telU = typeof bpValidarTelefoneCliente === 'function'
+      ? bpValidarTelefoneCliente(data.telefone)
+      : { ok: false };
+    if (!telU.ok) {
+      toast((telU && telU.message) || 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.', 'warning');
+      return null;
+    }
+    data = Object.assign({}, data, { telefone: telU.telefone });
+  }
+
   if (data.nome) {
     const nome = data.nome.trim();
     data = { ...data, nome };
     if (existeNomeDuplicado('clientes', nome, id)) {
-      toast('Já existe um cliente com este nome.', 'error');
+      toast('Já existe um cliente com este nome. Adicione o sobrenome ou outros dados para identificar corretamente o cliente.', 'error');
       return null;
     }
   }
@@ -575,11 +622,15 @@ async function addProfissional(p) {
   const nome = (p.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  // ET4.5: profissional sem serviço (especialidade) não é permitido
-  const espCheck = bpValidarEspecialidadeProfissional(p.especialidade);
-  if (!espCheck.ok) {
-    toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
-    return null;
+  // R29: pode existir na equipa sem serviço; R28 se especialidade preenchida deve ser válida
+  var espRaw = String(p.especialidade || '').trim();
+  if (espRaw) {
+    const espCheck = bpValidarEspecialidadeProfissional(espRaw);
+    if (!espCheck.ok) {
+      toast(espCheck.msg || 'Especialidade inválida: escolha um serviço activo existente.', 'error');
+      return null;
+    }
+    espRaw = String((espCheck.servico && espCheck.servico.nome) || espRaw);
   }
 
   if (existeNomeDuplicado('profissionais', nome)) {
@@ -587,7 +638,7 @@ async function addProfissional(p) {
     return null;
   }
 
-  const n = { ...p, id: uuid(), nome, especialidade: String(p.especialidade || '').trim(), ativo: p.ativo !== false };
+  const n = { ...p, id: uuid(), nome, especialidade: espRaw, ativo: p.ativo !== false };
   try {
     await dbPut('profissionais', n);
     if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -596,8 +647,10 @@ async function addProfissional(p) {
       state.profissionais.push(n);
       updateUI();
     }
-    try { await bpLigarProfissionalAoServico(n, n.especialidade); } catch (_) {}
-    toast('Profissional adicionado.', 'success');
+    if (espRaw) {
+      try { await bpLigarProfissionalAoServico(n, espRaw); } catch (_) {}
+    }
+    toast(espRaw ? 'Profissional adicionado.' : 'Profissional adicionado. Associe um serviço para o utilizar em vendas e agenda.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -828,12 +881,19 @@ async function addServico(s, opts) {
   const nome = (s.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  // ET4.5: serviço sem profissionais — proibido (não existe "toda a equipa")
+  // R33 — preço obrigatório > 0
+  var precoBase = Number(s.precoBase);
+  if (!Number.isFinite(precoBase) || precoBase <= 0) {
+    toast('Informe um preço válido superior a zero.', 'warning');
+    return null;
+  }
+
+  // R34 — serviço sem profissionais — proibido
   const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
     ? bpValidarProfissionaisDoServico(s.profissionais, opts)
     : { ok: Array.isArray(s.profissionais) && s.profissionais.length > 0, msg: 'Seleccione profissionais', profissionais: s.profissionais };
   if (!profCheck.ok) {
-    toast(profCheck.msg || 'Seleccione pelo menos um profissional.', 'error');
+    toast(profCheck.msg || 'Associa pelo menos um profissional a este serviço.', 'error');
     return null;
   }
 
@@ -842,7 +902,7 @@ async function addServico(s, opts) {
     return null;
   }
 
-  const n = { ...s, id: uuid(), nome, profissionais: profCheck.profissionais || s.profissionais };
+  const n = { ...s, id: uuid(), nome, precoBase: precoBase, profissionais: profCheck.profissionais || s.profissionais };
   await dbPut('servicos', n);
   if (window.BeautyStore && window.BeautyStore.pushToList) {
     window.BeautyStore.pushToList('servicos', n);
@@ -856,6 +916,14 @@ async function addServico(s, opts) {
 
 async function updateServico(id, data) {
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem editar serviços.')) return null;
+  if (data && Object.prototype.hasOwnProperty.call(data, 'precoBase')) {
+    var pb = Number(data.precoBase);
+    if (!Number.isFinite(pb) || pb <= 0) {
+      toast('Informe um preço válido superior a zero.', 'warning');
+      return null;
+    }
+    data = Object.assign({}, data, { precoBase: pb });
+  }
   if (data && Object.prototype.hasOwnProperty.call(data, 'profissionais')) {
     const profCheck = typeof bpValidarProfissionaisDoServico === 'function'
       ? bpValidarProfissionaisDoServico(data.profissionais)
@@ -966,38 +1034,366 @@ function getProfissionaisPorServico(nomeServico) {
 // ====================================================================
 //  VENDA / MOVIMENTO
 // ====================================================================
+
+/**
+ * ETAPA1 — Motor central de validação de venda (R01–R06, R08–R15, R17, R54–R58).
+ * Retorna { ok, code, field, title, message, total, itens, clienteNome, ... }
+ * Não persiste. Não depende só da UI.
+ */
+function bpValidarOperacaoVenda(dados) {
+  dados = dados || {};
+  var itensIn = Array.isArray(dados.itens) ? dados.itens : [];
+  if (!itensIn.length) {
+    return {
+      ok: false,
+      code: 'R05',
+      field: 'ci-servico-sel',
+      title: 'Itens da venda',
+      message: 'Adicione pelo menos um serviço ou produto antes de continuar.'
+    };
+  }
+
+  var itensNorm = [];
+  for (var i = 0; i < itensIn.length; i++) {
+    var it = itensIn[i] || {};
+    var nome = String(it.nome || '').trim();
+    if (!nome || nome === '__custom' || nome === 'Outro') {
+      return {
+        ok: false,
+        code: 'R17',
+        field: 'ci-servico-sel',
+        title: 'Serviço',
+        message: 'Seleccione um serviço do catálogo. Serviços personalizados não são permitidos na venda.'
+      };
+    }
+    var qty = Number(it.quantidade);
+    if (!Number.isFinite(qty) || qty < 1 || Math.floor(qty) !== qty) {
+      return {
+        ok: false,
+        code: 'R08',
+        field: 'cart-items-list',
+        title: 'Quantidade',
+        message: 'A quantidade deve ser um número inteiro igual ou superior a 1.'
+      };
+    }
+    var precoUnit = Number(it.precoUnit != null ? it.precoUnit : (Number(it.subtotal) / qty));
+    if (!Number.isFinite(precoUnit) || precoUnit <= 0) {
+      return {
+        ok: false,
+        code: 'R09',
+        field: 'ci-valor',
+        title: 'Preço',
+        message: 'Informe um preço válido superior a zero.'
+      };
+    }
+    var subtotal = Math.round(precoUnit * qty * 100) / 100;
+    var serv = null;
+    try {
+      if (typeof getServicoByNome === 'function') serv = getServicoByNome(nome);
+      if (!serv && typeof state !== 'undefined') {
+        serv = (state.servicos || []).find(function (s) {
+          return s && (String(s.nome) === nome || String(s.id) === nome);
+        });
+      }
+    } catch (_) {}
+    if (!serv) {
+      return {
+        ok: false,
+        code: 'R17',
+        field: 'ci-servico-sel',
+        title: 'Serviço',
+        message: 'Seleccione um serviço do catálogo. Serviços personalizados não são permitidos na venda.'
+      };
+    }
+    var servAtivo = typeof isServicoAtivo === 'function' ? isServicoAtivo(serv) : (serv.ativo !== false);
+    if (!servAtivo) {
+      return {
+        ok: false,
+        code: 'R06',
+        field: 'ci-servico-sel',
+        title: 'Serviço',
+        message: 'Este serviço não está disponível para novas vendas.'
+      };
+    }
+    itensNorm.push({
+      nome: String(serv.nome || nome),
+      quantidade: qty,
+      precoUnit: precoUnit,
+      subtotal: subtotal,
+      servico_id: serv.id || null
+    });
+  }
+
+  var clienteNome = String(dados.cliente || '').trim();
+  if (!clienteNome || clienteNome === 'Avulso' || clienteNome === 'Anónimo') {
+    return {
+      ok: false,
+      code: 'R01',
+      field: 'venda-cliente',
+      title: 'Cliente',
+      message: 'Selecione um cliente para continuar.'
+    };
+  }
+  var clienteHit = null;
+  try {
+    if (typeof state !== 'undefined') {
+      clienteHit = (state.clientes || []).find(function (c) {
+        return c && (String(c.nome) === clienteNome || String(c.id) === clienteNome);
+      });
+    }
+  } catch (_) {}
+  if (!clienteHit) {
+    return {
+      ok: false,
+      code: 'R01',
+      field: 'venda-cliente',
+      title: 'Cliente',
+      message: 'Selecione um cliente para continuar.'
+    };
+  }
+  if (clienteHit.ativo === false || clienteHit.ativo === 0 || clienteHit.ativo === 'false') {
+    return {
+      ok: false,
+      code: 'R48',
+      field: 'venda-cliente',
+      title: 'Cliente',
+      message: 'Este cliente não está activo. Escolha outro cliente para continuar.'
+    };
+  }
+
+  var profId = dados.profissional_id != null ? String(dados.profissional_id).trim() : '';
+  if (!profId) {
+    return {
+      ok: false,
+      code: 'R02',
+      field: 'venda-profissional',
+      title: 'Profissional',
+      message: 'Selecione o profissional responsável pela venda para continuar.'
+    };
+  }
+  var prof = null;
+  try {
+    if (typeof state !== 'undefined') {
+      prof = (state.profissionais || []).find(function (p) {
+        return p && String(p.id) === profId;
+      });
+    }
+  } catch (_) {}
+  if (!prof) {
+    return {
+      ok: false,
+      code: 'R02',
+      field: 'venda-profissional',
+      title: 'Profissional',
+      message: 'Selecione o profissional responsável pela venda para continuar.'
+    };
+  }
+  var profAtivo = typeof isProfissionalAtivo === 'function' ? isProfissionalAtivo(prof) : (prof.ativo !== false);
+  if (!profAtivo) {
+    return {
+      ok: false,
+      code: 'R04',
+      field: 'venda-profissional',
+      title: 'Profissional',
+      message: 'Este profissional não está activo. Escolha um profissional disponível.'
+    };
+  }
+
+  for (var j = 0; j < itensNorm.length; j++) {
+    var nomeS = itensNorm[j].nome;
+    var serv2 = null;
+    try {
+      if (typeof getServicoByNome === 'function') serv2 = getServicoByNome(nomeS);
+      if (!serv2 && typeof state !== 'undefined') {
+        serv2 = (state.servicos || []).find(function (s) {
+          return s && String(s.nome) === nomeS;
+        });
+      }
+    } catch (_) {}
+    var lista = (serv2 && Array.isArray(serv2.profissionais)) ? serv2.profissionais : [];
+    if (!lista.length) {
+      return {
+        ok: false,
+        code: 'R35',
+        field: 'venda-profissional',
+        title: 'Profissional',
+        message: 'Este serviço não possui um profissional disponível. Associe um profissional ao serviço antes de continuar.'
+      };
+    }
+    var habilitado = lista.some(function (ref) {
+      var r = String(ref || '');
+      return r === String(prof.id) || r === String(prof.nome || '');
+    });
+    if (!habilitado) {
+      return {
+        ok: false,
+        code: 'R03',
+        field: 'venda-profissional',
+        title: 'Profissional',
+        message: 'Este profissional não está habilitado para o serviço selecionado. Escolha um profissional disponível para este serviço.'
+      };
+    }
+  }
+
+  var total = 0;
+  for (var k = 0; k < itensNorm.length; k++) {
+    total += Number(itensNorm[k].subtotal) || 0;
+  }
+  total = Math.round(total * 100) / 100;
+  if (!Number.isFinite(total) || total <= 0) {
+    return {
+      ok: false,
+      code: 'R11',
+      field: 'cart-total-area',
+      title: 'Total',
+      message: 'O total da venda é inválido. Verifique os serviços, quantidades e valores antes de continuar.'
+    };
+  }
+
+  var metodo = String(dados.metodoPagamento != null ? dados.metodoPagamento : '').trim();
+  if (metodo === 'Transferência Bancária') metodo = 'Transferência';
+  if (metodo === 'Outro' || metodo === 'outro') metodo = '';
+  var metodosOk = {
+    'Numerário': true,
+    'Multicaixa Express': true,
+    'Transferência': true,
+    'Cartão': true,
+    'Split': true,
+    '__split__': true
+  };
+  if (!metodo || !metodosOk[metodo]) {
+    return {
+      ok: false,
+      code: 'R12',
+      field: 'venda-pagamento',
+      title: 'Pagamento',
+      message: 'Selecione o método de pagamento para continuar.'
+    };
+  }
+
+  var pagamentos = Array.isArray(dados.pagamentos) ? dados.pagamentos : null;
+  if (metodo === '__split__' || metodo === 'Split') {
+    if (!pagamentos || !pagamentos.length) {
+      return {
+        ok: false,
+        code: 'R14',
+        field: 'venda-pagamento',
+        title: 'Pagamento dividido',
+        message: 'Os valores dos pagamentos divididos devem corresponder exatamente ao total da venda.'
+      };
+    }
+    var soma = 0;
+    for (var p = 0; p < pagamentos.length; p++) {
+      var v = Number(pagamentos[p] && (pagamentos[p].valor != null ? pagamentos[p].valor : pagamentos[p]));
+      if (!Number.isFinite(v) || v <= 0) {
+        return {
+          ok: false,
+          code: 'R15',
+          field: 'venda-pagamento',
+          title: 'Pagamento',
+          message: 'Informe um valor de pagamento superior a zero.'
+        };
+      }
+      soma += v;
+    }
+    soma = Math.round(soma * 100) / 100;
+    if (Math.abs(soma - total) > 0.009) {
+      return {
+        ok: false,
+        code: 'R14',
+        field: 'venda-pagamento',
+        title: 'Pagamento dividido',
+        message: 'Os valores dos pagamentos divididos devem corresponder exatamente ao total da venda.'
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    code: 'OK',
+    total: total,
+    itens: itensNorm,
+    clienteNome: String(clienteHit.nome || clienteNome),
+    cliente_id: clienteHit.id || dados.cliente_id || null,
+    profissional_id: String(prof.id),
+    profissionalNome: String(prof.nome || ''),
+    metodoPagamento: metodo === '__split__' ? 'Split' : metodo,
+    pagamentos: pagamentos
+  };
+}
+
+function bpFocarCampoVenda(fieldId) {
+  if (!fieldId) return;
+  try {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    try { el.classList.add('bp-field-invalid'); } catch (_) {}
+    setTimeout(function () {
+      try { el.focus(); } catch (_) {}
+      try {
+        if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } catch (_) {}
+    }, 80);
+    setTimeout(function () {
+      try { el.classList.remove('bp-field-invalid'); } catch (_) {}
+    }, 4000);
+  } catch (_) {}
+}
+
+/** Feedback de validação da venda: modal → Entendi → foco no campo. */
+function bpNotificarValidacaoVenda(result) {
+  if (!result || result.ok) return;
+  var title = result.title || 'Quase lá';
+  var msg = result.message || 'Verifique os dados da venda e tente novamente.';
+  var field = result.field;
+  var after = function () {
+    if (typeof bpFocarCampoVenda === 'function') bpFocarCampoVenda(field);
+  };
+  try {
+    if (typeof mostrarErro === 'function') {
+      mostrarErro(msg, null, title, after, { okLabel: 'Entendi' });
+    } else if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError(msg, field);
+    } else if (typeof toast === 'function') {
+      toast(msg, 'warning');
+      after();
+    }
+  } catch (_) {
+    after();
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.bpValidarOperacaoVenda = bpValidarOperacaoVenda;
+  window.bpNotificarValidacaoVenda = bpNotificarValidacaoVenda;
+  window.bpFocarCampoVenda = bpFocarCampoVenda;
+}
+
+
 async function registarVenda(dados) {
   try {
-    const clienteNome = String(dados.cliente || '').trim() || 'Avulso';
-    let clienteId = dados.cliente_id || null;
-    if (!clienteId && typeof resolverClienteIdPorNome === 'function') {
-      clienteId = resolverClienteIdPorNome(clienteNome);
-    } else if (!clienteId && clienteNome && clienteNome !== 'Avulso' && clienteNome !== 'Anónimo') {
-      const hit = (state.clientes || []).find(c =>
-        String(c.nome || '').trim().toLowerCase() === clienteNome.toLowerCase()
-      );
-      if (hit) clienteId = hit.id;
-    }
-
-    if (!dados.itens || !Array.isArray(dados.itens) || dados.itens.length === 0) {
-      toast('Adiciona pelo menos um serviço à venda.', 'warning');
+    // Camada de negócio: mesmas regras da UI (R60/R65)
+    var vcheck = typeof bpValidarOperacaoVenda === 'function'
+      ? bpValidarOperacaoVenda(dados)
+      : { ok: false, message: 'Validação indisponível.' };
+    if (!vcheck || !vcheck.ok) {
+      if (typeof bpNotificarValidacaoVenda === 'function') bpNotificarValidacaoVenda(vcheck);
+      else if (typeof toast === 'function' && vcheck) toast(vcheck.message || 'Dados da venda incompletos.', 'warning');
       return null;
     }
 
-    const total = dados.itens.reduce((acc, i) => acc + (Number(i.subtotal) || 0), 0);
-    if (total <= 0) {
-      toast('O valor total da venda tem de ser superior a zero.', 'error');
-      return null;
-    }
-
-    const descricao = dados.itens.map(i => i.nome).join(', ');
+    const clienteNome = vcheck.clienteNome;
+    let clienteId = vcheck.cliente_id || null;
+    const total = vcheck.total;
+    const itensOk = vcheck.itens;
+    const descricao = itensOk.map(function (i) { return i.nome; }).join(', ');
     const id = uuid();
     // Comissão sobre valor líquido (total da venda); taxa do profissional
     let comissao = 0;
-    if (dados.profissional_id) {
+    if (vcheck.profissional_id) {
       try {
         var _taxa = (typeof getTaxaComissao === 'function')
-          ? Number(getTaxaComissao(dados.profissional_id)) || 0
+          ? Number(getTaxaComissao(vcheck.profissional_id)) || 0
           : 0;
         if (typeof calcularComissao === 'function') {
           comissao = Number(calcularComissao(total, _taxa)) || 0;
@@ -1014,17 +1410,19 @@ async function registarVenda(dados) {
       valor: total,
       cliente: clienteNome,
       cliente_id: clienteId || null,
-      profissional_id: dados.profissional_id || null,
-      profissional: dados.profissional || 'Não atribuído',
+      profissional_id: vcheck.profissional_id,
+      profissional: vcheck.profissionalNome,
       comissao_gerada: comissao,
-      itens: dados.itens.map(i => ({
-        nome: i.nome,
-        quantidade: Number(i.quantidade) || 1,
-        precoUnit: Number(i.precoUnit) || Number(i.subtotal) || 0,
-        subtotal: Number(i.subtotal) || 0
-      })),
-      metodoPagamento: dados.metodoPagamento || 'Numerário',
-      pagamentos: Array.isArray(dados.pagamentos) ? dados.pagamentos : null,
+      itens: itensOk.map(function (i) {
+        return {
+          nome: i.nome,
+          quantidade: i.quantidade,
+          precoUnit: i.precoUnit,
+          subtotal: i.subtotal
+        };
+      }),
+      metodoPagamento: vcheck.metodoPagamento,
+      pagamentos: vcheck.pagamentos,
       data: hoje(),
       hora: horaAgora(),
       reciboNum: (typeof nextReciboNum === 'function' ? nextReciboNum() : '0001'),
@@ -1106,6 +1504,13 @@ async function cancelarVenda(movimentoId, motivo) {
   }
 }
 if (typeof window !== 'undefined') window.cancelarVenda = cancelarVenda;
+
+/** True se o movimento é venda e não está cancelada (R50 / KPIs). */
+function bpVendaActiva(m) {
+  if (!m || m.tipo !== 'venda') return false;
+  return String(m.status || 'activo').toLowerCase() !== 'cancelado';
+}
+if (typeof window !== 'undefined') window.bpVendaActiva = bpVendaActiva;
 
 async function addMovimento(mov) {
   const n = { ...mov, id: uuid(), data: hoje(), hora: horaAgora() };

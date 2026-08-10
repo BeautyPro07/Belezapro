@@ -259,7 +259,7 @@ function renderCaixa() {
   const hojeStr = hoje();
   const _num = (v) => Number(v) || 0;
   const entradas = state.movimentos
-    .filter(m => m.data === hojeStr && m.tipo === 'venda')
+    .filter(m => m.data === hojeStr && m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado')
     .reduce((s, m) => s + _num(m.valor), 0);
   const despesas = state.movimentos
     .filter(m => m.data === hojeStr && m.tipo === 'despesa')
@@ -276,7 +276,7 @@ function renderCaixa() {
     ? formatarDataISO(dOntem)
     : dOntem.getFullYear() + '-' + String(dOntem.getMonth() + 1).padStart(2, '0') + '-' + String(dOntem.getDate()).padStart(2, '0');
   const totalOntem = state.movimentos
-    .filter(m => m.data === ontemStr && m.tipo === 'venda')
+    .filter(m => m.data === ontemStr && m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado')
     .reduce((s, m) => s + _num(m.valor), 0);
   const variacaoEl = document.getElementById('caixa-variacao');
   if (variacaoEl) {
@@ -561,9 +561,9 @@ function populateAgendaSelects() {
     : (state.servicos || []).filter(function (s) {
         return typeof isServicoAtivo === 'function' ? isServicoAtivo(s) : (s && s.ativo !== false);
       });
-  servSel.innerHTML = servicosParaSelect.map(s =>
+  servSel.innerHTML = '<option value="">Seleccionar serviço</option>' + servicosParaSelect.map(s =>
     `<option value="${escHtml(s.nome)}">${escHtml(s.nome)}</option>`
-  ).join('') + '<option value="Outro">Outro / Personalizado</option>';
+  ).join('');
   if (prevServico) servSel.value = prevServico;
 
   const filtrarProfsAgenda = (servicoNome) => {
@@ -577,12 +577,11 @@ function populateAgendaSelects() {
     }
 
     let profs;
-    if (!servicoNome || servicoNome === 'Outro') {
-      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
+    if (!servicoNome) {
+      profs = [];
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
-      // ET4.5: sem profissionais no serviço → nenhum (não toda a equipa)
       if (!nomes.length) {
         profs = [];
       } else {
@@ -592,7 +591,7 @@ function populateAgendaSelects() {
       }
     }
     const prevProfId = profSel.value;
-    profSel.innerHTML = profs.map(p =>
+    profSel.innerHTML = '<option value="">Seleccionar profissional</option>' + profs.map(p =>
       `<option value="${p.id}">${escHtml(p.nome)}</option>`
     ).join('');
     if (profs.some(p => p.id === prevProfId)) profSel.value = prevProfId;
@@ -624,8 +623,7 @@ function populateVendaSelects() {
   catSel.innerHTML = `<option value="">Selecionar serviço</option>` +
     servicosActivos.map(s =>
       `<option value="${escHtml(s.nome)}" data-preco="${s.precoBase}">${escHtml(s.nome)}</option>`
-    ).join('') +
-    '<option value="__custom" data-preco="">Outro (personalizado)</option>';
+    ).join('');
 
   const filtrarProfsVenda = (servicoNome) => {
     // Se não houver profissionais, mostrar opção vazia
@@ -638,8 +636,9 @@ function populateVendaSelects() {
     }
 
     let profs;
-    if (!servicoNome || servicoNome === '__custom') {
-      profs = activos.map(p => ({ id: p.id, nome: p.nome }));
+    if (!servicoNome) {
+      // R03: sem serviço seleccionado, não listar profissionais genéricos
+      profs = [];
     } else {
       const serv = state.servicos.find(s => s.nome === servicoNome);
       const nomes = (serv && Array.isArray(serv.profissionais)) ? serv.profissionais : [];
@@ -651,7 +650,7 @@ function populateVendaSelects() {
           .map(p => ({ id: p.id, nome: p.nome }));
       }
     }
-    profSel.innerHTML = `<option value="">Selecionar profissional</option>` +
+    profSel.innerHTML = `<option value="">Seleccionar profissional</option>` +
       profs.map(p =>
         `<option value="${p.id}">${escHtml(p.nome)}</option>`
       ).join('');
@@ -662,9 +661,7 @@ function populateVendaSelects() {
     filtrarProfsVenda(this.value);
     const opt = this.options[this.selectedIndex];
     const ciValor = document.getElementById('ci-valor');
-    if (this.value === '__custom') {
-      if (ciValor) { ciValor.value = ''; ciValor.disabled = false; ciValor.style.opacity = '1'; }
-    } else if (opt && opt.dataset.preco) {
+    if (opt && opt.dataset.preco) {
       if (ciValor) { ciValor.value = opt.dataset.preco; ciValor.disabled = true; ciValor.style.opacity = '0.7'; }
     } else {
       if (ciValor) { ciValor.value = ''; ciValor.disabled = false; ciValor.style.opacity = '1'; }

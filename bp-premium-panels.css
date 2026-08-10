@@ -495,10 +495,12 @@
   color: var(--text-primary);
 }
 
-.bp-sheet .input-field:focus {
-  outline: none;
+.bp-sheet .input-field:focus,
+.bp-sheet .input-field:focus-visible {
+  outline: none !important;
   border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15);
+  border-width: 1px;
+  box-shadow: none;
 }
 
 /* --- Action row button --- */

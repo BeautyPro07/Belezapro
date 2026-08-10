@@ -479,11 +479,11 @@
     box.style.marginTop = '8px';
     box.innerHTML =
       '<div class="split-row" style="display:flex;gap:8px;margin-bottom:6px;">' +
-        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência Bancária</option><option>Cartão</option></select>' +
+        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência</option><option>Cartão</option></select>' +
         '<input type="number" class="input-field split-valor" placeholder="Valor" min="0" step="100" style="width:110px;">' +
       '</div>' +
       '<div class="split-row" style="display:flex;gap:8px;margin-bottom:6px;">' +
-        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência Bancária</option><option>Cartão</option></select>' +
+        '<select class="input-field split-metodo" style="flex:1;"><option>Numerário</option><option>Multicaixa Express</option><option>Transferência</option><option>Cartão</option></select>' +
         '<input type="number" class="input-field split-valor" placeholder="Valor" min="0" step="100" style="width:110px;">' +
       '</div>' +
       '<p id="split-hint" style="font-size:.75rem;color:var(--text-muted);margin:0;">A soma deve igualar o total da venda.</p>';

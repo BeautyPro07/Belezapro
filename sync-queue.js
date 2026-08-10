@@ -441,54 +441,84 @@ dbDelete = async function(store, id) {
   }
 };
 
-/** Contingência: reabrir ops failed (ex. destituir) e tentar de novo. */
+/** Contingência: reabrir ops failed e limpar backoff (nextRetry). */
 async function bpRetryFailedSync() {
   const q = getSyncQueue();
   let changed = false;
   for (const op of q) {
-    if (op.failed) {
+    if (!op) continue;
+    if (op.failed || op.nextRetry || (op.attempts && op.attempts > 0)) {
       op.failed = false;
       op.attempts = 0;
       op.nextRetry = 0;
       changed = true;
     }
   }
-  if (changed) {
-    saveSyncQueue(q);
-    if (typeof flushSyncQueue === 'function') await flushSyncQueue();
-  }
+  if (changed) saveSyncQueue(q);
+  if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 if (typeof window !== 'undefined') {
   window.bpRetryFailedSync = bpRetryFailedSync;
-  // ET4.2-P1-sync-retry: toque no indicador tenta reenviar falhas + flush
+  // Toque no indicador: reabre tudo e faz flush
   (function bindSyncRetryClick() {
-    var el = document.getElementById('sync-status-container');
-    if (!el || el.dataset.bpSyncRetryBound) return;
-    el.dataset.bpSyncRetryBound = '1';
-    el.style.cursor = 'pointer';
-    el.title = el.title || 'Toque para tentar sincronizar novamente';
-    el.addEventListener('click', function () {
-      if (!navigator.onLine) {
-        if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
-        return;
-      }
-      if (typeof toast === 'function') toast('A sincronizar alterações…', 'info');
-      Promise.resolve()
-        .then(function () { return typeof bpRetryFailedSync === 'function' ? bpRetryFailedSync() : null; })
-        .then(function () { return typeof flushSyncQueue === 'function' ? flushSyncQueue() : null; })
-        .then(function () {
-          if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-        })
-        .catch(function (e) {
-          if (typeof logErroSilencioso === 'function') logErroSilencioso('syncRetryClick', e);
-        });
-    });
+    function bind() {
+      var el = document.getElementById('sync-status-container');
+      if (!el || el.dataset.bpSyncRetryBound) return;
+      el.dataset.bpSyncRetryBound = '1';
+      el.style.cursor = 'pointer';
+      el.setAttribute('role', 'button');
+      el.title = 'Toque para sincronizar agora';
+      el.addEventListener('click', function () {
+        if (!navigator.onLine) {
+          if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
+          return;
+        }
+        if (typeof toast === 'function') toast('A sincronizar alterações…', 'info');
+        Promise.resolve()
+          .then(function () { return bpRetryFailedSync(); })
+          .then(function () {
+            var rest = (typeof getSyncQueue === 'function') ? getSyncQueue().length : 0;
+            if (typeof toast === 'function') {
+              if (rest === 0) toast('Tudo sincronizado.', 'success');
+              else toast('Ainda restam ' + rest + ' operação(ões). Toque de novo ou verifique a ligação.', 'warning');
+            }
+          })
+          .catch(function (e) {
+            if (typeof logErroSilencioso === 'function') logErroSilencioso('syncRetryClick', e);
+          });
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+    else bind();
+    setTimeout(bind, 800);
   })();
 
+  // Rede recuperada → limpar backoff e flush imediato
   window.addEventListener('online', function () {
     try { sessionStorage.removeItem('bp_offline_info_ack'); } catch (_) {}
     setTimeout(function () {
       if (typeof bpRetryFailedSync === 'function') bpRetryFailedSync();
-    }, 1500);
+    }, 600);
   });
+
+  // App volta ao primeiro plano com rede → flush
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) return;
+    if (!navigator.onLine) return;
+    setTimeout(function () {
+      if (typeof getSyncQueue === 'function' && getSyncQueue().length && typeof flushSyncQueue === 'function') {
+        flushSyncQueue();
+      }
+    }, 400);
+  });
+
+  // Enquanto houver pendentes e rede, tentar de 25 em 25s (não só no evento online)
+  setInterval(function () {
+    if (!navigator.onLine) return;
+    if (typeof getSyncQueue !== 'function') return;
+    var q = getSyncQueue();
+    if (!q || !q.length) return;
+    if (typeof flushSyncQueue === 'function') flushSyncQueue();
+  }, 25000);
 }

@@ -1887,3 +1887,45 @@
 /* 3 pedidos: ocultar KPIs residual; export só ícone */
 .dash-chart-exec-metrics { display: none !important; }
 #chart-export-toggle > :not(svg) { display: none !important; }
+
+
+/* Dashboard — secção próximos atendimentos (tipografia profissional) */
+#tab-dashboard .dash-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 8px 0 14px;
+  padding: 0 2px;
+}
+#tab-dashboard h2.dash-section-title,
+#tab-dashboard .dash-section-title {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-family: var(--font-serif, "Playfair Display", Georgia, serif);
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  color: var(--text-primary);
+  text-transform: none;
+}
+#tab-dashboard .dash-section-meta {
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+  text-transform: none;
+}
+/* Saldo em caixa no resumo — removido (HTML + CSS) */
+#tab-dashboard .dash-caixa-row,
+.dash-caixa-row {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}

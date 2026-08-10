@@ -1,5 +1,5 @@
 // BeautyPro Service Worker — alinhado ao index.html (só app.bundle.js)
-const CACHE_NAME = 'belezapro-shell-v20260809-et4p11';
+const CACHE_NAME = 'belezapro-shell-v20260811-sync1';
 
 const APP_SHELL = [
   './',

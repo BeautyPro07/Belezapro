@@ -51,6 +51,48 @@ function _bpIsFotoUrlSchemaError(msg) {
   return false;
 }
 
+
+// ====================================================================
+//  TOLERÂNCIA: colunas ausentes no schema (PGRST204) — strip + retry
+// ====================================================================
+function _bpExtractMissingColumn(msg) {
+  var s = String(msg || '');
+  var m = s.match(/Could not find the '([^']+)' column/i);
+  if (m) return m[1];
+  m = s.match(/column\s+"([^"]+)"\s+of\s+relation/i);
+  if (m) return m[1];
+  return null;
+}
+
+function _bpGetMissingCols(tabela) {
+  try {
+    var raw = localStorage.getItem('bp_schema_missing_' + tabela);
+    if (!raw) return [];
+    var arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) { return []; }
+}
+
+function _bpRememberMissingCol(tabela, col) {
+  if (!tabela || !col) return;
+  try {
+    var arr = _bpGetMissingCols(tabela);
+    if (arr.indexOf(col) < 0) {
+      arr.push(col);
+      localStorage.setItem('bp_schema_missing_' + tabela, JSON.stringify(arr));
+    }
+  } catch (_) {}
+}
+
+function _bpStripKnownMissing(tabela, payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  var cols = _bpGetMissingCols(tabela);
+  if (!cols.length) return payload;
+  var out = Object.assign({}, payload);
+  cols.forEach(function (c) { delete out[c]; });
+  return out;
+}
+
 function _bpStripFotoUrl(payload) {
   if (!payload || typeof payload !== 'object') return payload;
   const out = Object.assign({}, payload);
@@ -121,6 +163,7 @@ async function supabaseUpsert(tabela, item) {
     }
 
     let payload = toSupabaseFormat(tabela, item);
+    payload = _bpStripKnownMissing(tabela, payload);
     // Se já sabemos que a coluna não existe, nunca enviar foto_url
     if (_bpSchemaFotoUrl === false && payload && Object.prototype.hasOwnProperty.call(payload, 'foto_url')) {
       payload = _bpStripFotoUrl(payload);
@@ -204,6 +247,49 @@ async function supabaseUpsert(tabela, item) {
         if (resp2.ok) return;
       } catch (e2) {
         if (e2.message === 'SESSION_EXPIRED') throw e2;
+      }
+    }
+    // PGRST204: coluna ausente — recordar, remover e reintentar uma vez
+    var missingCol = _bpExtractMissingColumn(errorMsg);
+    if (missingCol && item) {
+      try {
+        _bpRememberMissingCol(tabela, missingCol);
+        console.warn('[sync-rest] Coluna ausente no schema: ' + tabela + '.' + missingCol + ' — a sincronizar sem ela.');
+        var authHeaders3 = await getAuthHeaders();
+        var payload3 = _bpStripKnownMissing(tabela, toSupabaseFormat(tabela, item));
+        delete payload3[missingCol];
+        var resp3 = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders3,
+            'Prefer': 'resolution=merge-duplicates',
+          },
+          body: JSON.stringify(payload3),
+        });
+        if (resp3.status === 401) throw new Error('SESSION_EXPIRED');
+        if (resp3.ok) return;
+        // Pode faltar outra coluna — extrair e tentar mais uma vez
+        var body3 = '';
+        try { body3 = await resp3.text(); } catch (_) {}
+        var missing2 = _bpExtractMissingColumn(body3);
+        if (missing2) {
+          _bpRememberMissingCol(tabela, missing2);
+          delete payload3[missing2];
+          var resp4 = await _bpRestFetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...authHeaders3,
+              'Prefer': 'resolution=merge-duplicates',
+            },
+            body: JSON.stringify(payload3),
+          });
+          if (resp4.status === 401) throw new Error('SESSION_EXPIRED');
+          if (resp4.ok) return;
+        }
+      } catch (e3) {
+        if (e3 && e3.message === 'SESSION_EXPIRED') throw e3;
       }
     }
     console.error(`[sync-rest] Falha ao fazer upsert em ${tabela} (id: ${item?.id || 'desconhecido'}):`, errorMsg);
@@ -305,8 +391,9 @@ function toSupabaseFormat(tabela, item) {
   }
 
   switch (tabela) {
-    case 'movimentos':
-      return {
+    case 'movimentos': {
+      // Nunca enviar cliente_id (PGRST204 histórico). R50 só se schema permitir.
+      var mov = {
         id: item.id,
         salao_id: salaoId,
         tipo: item.tipo,
@@ -316,14 +403,21 @@ function toSupabaseFormat(tabela, item) {
         profissional_id: isValidUUID(item.profissional_id) ? item.profissional_id : null,
         profissional: item.profissional || '',
         itens: item.itens || [],
-        metodo_pagamento: item.metodoPagamento || 'Numerário',
+        metodo_pagamento: item.metodoPagamento || item.metodo_pagamento || null,
         recibo_num: item.reciboNum || item.recibo_num || null,
         comissao_gerada: item.comissao_gerada != null ? Number(item.comissao_gerada) : null,
-        // cliente_id não existe no schema remoto actual (PGRST204) — nome em `cliente`
         data: item.data,
         hora: item.hora,
         updated_at: item.updated_at,
       };
+      var missMov = _bpGetMissingCols('movimentos');
+      function _okCol(c) { return missMov.indexOf(c) < 0; }
+      if (_okCol('status')) mov.status = item.status || 'activo';
+      if (_okCol('comissao_estornada') && item.comissao_estornada != null) mov.comissao_estornada = Number(item.comissao_estornada);
+      if (_okCol('cancelado_em') && item.cancelado_em) mov.cancelado_em = item.cancelado_em;
+      if (_okCol('cancelado_motivo') && item.cancelado_motivo) mov.cancelado_motivo = item.cancelado_motivo;
+      return mov;
+    }
     case 'agendamentos':
       return {
         id: item.id,

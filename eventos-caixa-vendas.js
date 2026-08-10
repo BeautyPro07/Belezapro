@@ -70,10 +70,9 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
   const catSel = document.getElementById('ci-servico-sel');
   const ciValor = document.getElementById('ci-valor');
   let nome = catSel.value;
-  if (nome === '__custom') { 
-    nome = prompt('Nome do serviço / produto:'); 
-    if (!nome || !nome.trim()) return;
-    nome = nome.trim(); 
+  if (nome === '__custom' || nome === 'Outro') {
+    if (typeof toast === 'function') toast('Seleccione um serviço do catálogo.', 'warning');
+    return;
   }
   const wasDisabled = ciValor.disabled;
   ciValor.disabled = false;
@@ -108,52 +107,69 @@ document.getElementById('btn-add-item').addEventListener('click', () => {
 const vendaSaveBtn = document.getElementById('modal-venda-save');
 if (vendaSaveBtn) {
   vendaSaveBtn.onclick = async function(e) {
-    if (!cartItems.length) { toast('Adiciona pelo menos um serviço à venda.', 'warning'); return; }
-    const cliente = document.getElementById('venda-cliente').value || 'Avulso';
-    const profissionalId = document.getElementById('venda-profissional').value;
-    const metodoPagamento = document.getElementById('venda-pagamento').value;
-    
-    // Buscar o nome do profissional
-    const profObj = state.profissionais.find(p => p.id === profissionalId);
+    if (this.disabled || this.getAttribute('aria-busy') === 'true') return;
+    const cliente = (document.getElementById('venda-cliente') || {}).value || '';
+    const profissionalId = (document.getElementById('venda-profissional') || {}).value || '';
+    const metodoPagamento = (document.getElementById('venda-pagamento') || {}).value || '';
+
+    const profObj = (state.profissionais || []).find(function (p) { return p && p.id === profissionalId; });
     const profissionalNome = profObj ? profObj.nome : '';
-    
-    // Profissional opcional (comissões); venda walk-in não bloqueia
-    setButtonLoading(this, true);
-    try {
-      let clienteId = null;
-      try {
-        if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
-        else {
-          const hit = (state.clientes || []).find(c => c.nome === cliente);
-          if (hit) clienteId = hit.id;
-        }
-      } catch (e) {}
-      // F13 — pagamento dividido (se activo)
-      var pagamentosSplit = null;
-      var metodoFinal = metodoPagamento;
-      if (metodoPagamento === '__split__' && typeof window.BPFinance !== 'undefined' && BPFinance.lerPagamentosSplit) {
-        var sp = BPFinance.lerPagamentosSplit();
-        var tot = typeof BPFinance.totalCarrinho === 'function' ? BPFinance.totalCarrinho() : 0;
-        if (!sp || !sp.list || !sp.list.length) {
-          toast('Indique os valores do pagamento dividido', 'error');
-          return;
-        }
-        if (tot > 0 && Math.abs(sp.sum - tot) > 0.5) {
-          toast('A soma dos pagamentos (' + sp.sum + ') deve igualar o total (' + tot + ')', 'error');
-          return;
-        }
+
+    var pagamentosSplit = null;
+    var metodoFinal = metodoPagamento;
+    if (metodoPagamento === '__split__' && typeof window.BPFinance !== 'undefined' && BPFinance.lerPagamentosSplit) {
+      var sp = BPFinance.lerPagamentosSplit();
+      if (sp && sp.list && sp.list.length) {
         pagamentosSplit = sp.list;
         metodoFinal = 'Split';
       }
-      const idVenda = await registarVenda({
-        cliente,
-        cliente_id: clienteId,
-        profissional: profissionalNome,
-        profissional_id: profissionalId || null,
-        itens: [...cartItems],
-        metodoPagamento: metodoFinal,
-        pagamentos: pagamentosSplit
-      });
+    }
+
+    var payload = {
+      cliente: cliente,
+      profissional: profissionalNome,
+      profissional_id: profissionalId || null,
+      itens: (typeof cartItems !== 'undefined' && cartItems) ? cartItems.slice() : [],
+      metodoPagamento: metodoFinal,
+      pagamentos: pagamentosSplit
+    };
+
+    // Validação central ANTES de processar (R19–R21)
+    var pre = typeof bpValidarOperacaoVenda === 'function' ? bpValidarOperacaoVenda(payload) : { ok: true };
+    if (!pre || !pre.ok) {
+      if (typeof bpNotificarValidacaoVenda === 'function') bpNotificarValidacaoVenda(pre);
+      else if (typeof toast === 'function') toast((pre && pre.message) || 'Complete os dados da venda.', 'warning');
+      return;
+    }
+
+    // R24 — confirmação: ainda NÃO persiste
+    var itensTxt = (pre.itens || []).map(function (i) {
+      return (i.nome || '') + ' ×' + i.quantidade;
+    }).join(', ');
+    var totalTxt = (typeof fmtKz === 'function') ? fmtKz(pre.total) : (pre.total + ' Kz');
+    var resumo =
+      'Cliente: ' + (pre.clienteNome || '—') + '\n' +
+      'Profissional: ' + (pre.profissionalNome || '—') + '\n' +
+      'Itens: ' + (itensTxt || '—') + '\n' +
+      'Total: ' + totalTxt + '\n' +
+      'Pagamento: ' + (pre.metodoPagamento || '—') + '\n\n' +
+      'Confirme para registar a venda. Até confirmar, nada é gravado.';
+    var confirmou = false;
+    if (typeof showConfirmModal === 'function') {
+      confirmou = await showConfirmModal(
+        'Confirmar venda?',
+        resumo,
+        false,
+        { confirmLabel: 'Confirmar venda', cancelLabel: 'Voltar', variant: 'default', summaryLayout: true }
+      );
+    } else {
+      confirmou = window.confirm(resumo);
+    }
+    if (!confirmou) return;
+
+    setButtonLoading(this, true);
+    try {
+      const idVenda = await registarVenda(payload);
       if (idVenda) {
         closeModal('modal-venda');
         if (typeof window.clearCart === 'function') {
@@ -164,11 +180,9 @@ if (vendaSaveBtn) {
         }
         mostrarConfirmacaoVenda(idVenda);
       }
-      // se idVenda for null, registarVenda já mostrou o toast de validação
     } catch (err) {
       console.error('[modal-venda-save]', err);
-      // Não bloquear a UX com modal de erro genérico se a venda local já foi tentada
-      toast('Ocorreu um problema ao registar a venda. Verifique os dados e tente novamente.', 'error');
+      toast('A venda não foi concluída. Verifique se todos os campos estão preenchidos corretamente e tente novamente.', 'error');
     } finally {
       setButtonLoading(this, false);
     }
@@ -237,35 +251,69 @@ document.getElementById('modal-finalizar-save').addEventListener('click', async 
   if (!ag) return;
   if (ag.status !== 'agendado') {
     toast('Este atendimento já não está disponível para finalizar (foi cancelado, expirou ou já foi realizado).', 'warning');
-    closeModal('modal-finalizar');
     return;
   }
-  const metodo = document.getElementById('finalizar-pagamento').value;
-  
-  // Atualizar status do agendamento para realizado
-  await updateAgendamento(id, { status: 'realizado' });
-  
-  // Registar a venda com profissional_id
-  const itens = [{ nome: ag.servico, quantidade: 1, precoUnit: ag.preco, subtotal: ag.preco }];
+
+  const metodo = (document.getElementById('finalizar-pagamento') || {}).value || '';
+  const itens = [{
+    nome: ag.servico,
+    quantidade: 1,
+    precoUnit: Number(ag.preco) || 0,
+    subtotal: Number(ag.preco) || 0
+  }];
   let cliId = ag.cliente_id || null;
   if (!cliId && typeof resolverClienteIdPorNome === 'function') {
     cliId = resolverClienteIdPorNome(ag.cliente);
   }
-  await registarVenda({
-    cliente: ag.cliente || 'Avulso',
+  const payload = {
+    cliente: ag.cliente || '',
     cliente_id: cliId,
-    profissional: ag.profissional,
+    profissional: ag.profissional || '',
     profissional_id: ag.profissional_id || null,
-    itens,
+    itens: itens,
     metodoPagamento: metodo
-  });
-  
+  };
+
+  // Validar ANTES de marcar agendamento como realizado (R44 / R51)
+  var pre = typeof bpValidarOperacaoVenda === 'function' ? bpValidarOperacaoVenda(payload) : { ok: true };
+  if (!pre || !pre.ok) {
+    if (typeof bpNotificarValidacaoVenda === 'function') bpNotificarValidacaoVenda(pre);
+    else if (typeof toast === 'function') toast((pre && pre.message) || 'Não é possível registar a venda.', 'warning');
+    return;
+  }
+
+  // R24 — confirmar antes de persistir (mesmo fluxo que Cobrar)
+  var totalTxt = (typeof fmtKz === 'function') ? fmtKz(pre.total) : ((pre.total || 0) + ' Kz');
+  var resumoFin =
+    'Cliente: ' + (pre.clienteNome || payload.cliente || '—') + '\n' +
+    'Profissional: ' + (pre.profissionalNome || payload.profissional || '—') + '\n' +
+    'Serviço: ' + ((pre.itens && pre.itens[0] && pre.itens[0].nome) || (payload.itens[0] && payload.itens[0].nome) || '—') + '\n' +
+    'Total: ' + totalTxt + '\n' +
+    'Pagamento: ' + (pre.metodoPagamento || payload.metodoPagamento || '—') + '\n\n' +
+    'Confirme para registar a venda. Até confirmar, o atendimento permanece pendente.';
+  var confirmouFin = false;
+  if (typeof showConfirmModal === 'function') {
+    confirmouFin = await showConfirmModal(
+      'Confirmar venda?',
+      resumoFin,
+      false,
+      { confirmLabel: 'Confirmar venda', cancelLabel: 'Voltar', variant: 'default', summaryLayout: true }
+    );
+  } else {
+    confirmouFin = window.confirm(resumoFin);
+  }
+  if (!confirmouFin) return;
+
+  const idVenda = await registarVenda(payload);
+  if (!idVenda) {
+    return;
+  }
+
+  await updateAgendamento(id, { status: 'realizado' });
   closeModal('modal-finalizar');
   toast('Venda registada.', 'success');
-  
-  // Atualizar UI e badge
-  updateUI();
-  renderBadges(); // <- CORREÇÃO
+  if (typeof updateUI === 'function') updateUI();
+  if (typeof renderBadges === 'function') renderBadges();
 });
 
 document.getElementById('modal-finalizar-cancel').addEventListener('click', () => closeModal('modal-finalizar'));
@@ -521,4 +569,42 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
 
 document.getElementById('modal-cliente-nao-encontrado-ok')?.addEventListener('click', () => {
   closeModal('modal-cliente-nao-encontrado');
+});
+
+
+// R50 — Cancelar venda (confirmação + motivo)
+document.getElementById('btn-cancelar-venda')?.addEventListener('click', async function () {
+  if (!vendaAtual || !vendaAtual.id) {
+    if (typeof toast === 'function') toast('Nenhuma venda seleccionada.', 'warning');
+    return;
+  }
+  if (String(vendaAtual.status || '').toLowerCase() === 'cancelado') {
+    if (typeof toast === 'function') toast('Esta venda já está cancelada.', 'warning');
+    return;
+  }
+  var ok = true;
+  if (typeof showConfirmModal === 'function') {
+    ok = await showConfirmModal(
+      'Cancelar esta venda?',
+      'A venda deixa de contar no caixa e a comissão é estornada. O registo permanece no histórico. Indique o motivo a seguir.',
+      true,
+      { confirmLabel: 'Continuar', cancelLabel: 'Voltar', variant: 'destructive' }
+    );
+  }
+  if (!ok) return;
+  var motivo = '';
+  try {
+    motivo = window.prompt('Motivo do cancelamento (obrigatório):', '') || '';
+  } catch (_) {}
+  motivo = String(motivo).trim();
+  if (!motivo) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique o motivo do cancelamento para continuar.');
+    else if (typeof toast === 'function') toast('Indique o motivo do cancelamento para continuar.', 'warning');
+    return;
+  }
+  var done = typeof cancelarVenda === 'function' ? await cancelarVenda(vendaAtual.id, motivo) : false;
+  if (done) {
+    closeModal('modal-detalhe-venda');
+    if (typeof updateUI === 'function') updateUI();
+  }
 });

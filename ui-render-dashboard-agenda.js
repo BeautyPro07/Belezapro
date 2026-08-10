@@ -243,7 +243,7 @@ function renderDashboard() {
   const ags = state.agendamentos || [];
 
   const vendasPeriodo = movs.filter(m =>
-    m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim
+    m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado' && m.data >= intervalo.inicio && m.data <= intervalo.fim
   );
   const totalRev = _somaVendas(vendasPeriodo);
   const totalVendas = vendasPeriodo.length;
@@ -390,7 +390,7 @@ function renderDashboard() {
   const caixaEl = document.getElementById('dash-caixa-saldo');
   if (caixaEl) {
     const hojeStr = hoje();
-    const entradas = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === hojeStr));
+    const entradas = _somaVendas(movs.filter(m => m.tipo === 'venda' && m.data === hojeStr && String(m.status || '').toLowerCase() !== 'cancelado'));
     const saidas = movs.filter(m => m.tipo === 'despesa' && m.data === hojeStr)
       .reduce((s, m) => s + (Number(m.valor) || 0), 0);
     const saldo = (Number(state.config && state.config.fundo) || 0) + entradas - saidas;
@@ -420,7 +420,7 @@ function renderDashboard() {
         const st = _statusAg(a);
         return st === 'nao_realizado' || st === 'nao-realizado';
       });
-      let mensagemVazio = 'Nenhum atendimento pendente hoje';
+      let mensagemVazio = 'Sem atendimentos pendentes';
       if (temRealizados && !temExpirados) mensagemVazio = 'Todos os atendimentos de hoje foram realizados';
       else if (temExpirados && !temRealizados) mensagemVazio = 'Sem atendimentos pendentes';
       cont.innerHTML = `<div class="empty-state"><p>${mensagemVazio}</p></div>`;
@@ -1128,7 +1128,7 @@ function abrirKpiTemporalSheet() {
 function _refreshKpiTemporalPreview(periodo) {
   const intervalo = calcularIntervaloPeriodo(periodo, 0);
   const movs = (state.movimentos || []).filter(function (m) {
-    return m.tipo === 'venda' && m.data >= intervalo.inicio && m.data <= intervalo.fim;
+    return m.tipo === 'venda' && String(m.status || '').toLowerCase() !== 'cancelado' && m.data >= intervalo.inicio && m.data <= intervalo.fim;
   });
   const rev = _somaVendas(movs);
   const rangeEl = document.getElementById('kpi-temporal-range');

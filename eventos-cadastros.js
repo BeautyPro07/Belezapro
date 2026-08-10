@@ -51,8 +51,12 @@ document.getElementById('nova-venda-hero-btn').addEventListener('click', openVen
 
 document.getElementById('fab-agendar').addEventListener('click', () => {
   const sel = document.getElementById('agenda-cliente');
-  sel.innerHTML = '<option value="">Selecionar cliente</option>' + state.clientes.map(c =>
-    `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`).join('');
+  var _cliAct = typeof bpClientesActivos === 'function' ? bpClientesActivos() : (state.clientes || []).filter(function (c) {
+    return c && c.nome && c.ativo !== false && c.ativo !== 0 && c.ativo !== 'false';
+  });
+  sel.innerHTML = '<option value="">Seleccionar cliente</option>' + _cliAct.map(function (c) {
+    return '<option value="' + escHtml(c.nome) + '">' + escHtml(c.nome) + '</option>';
+  }).join('');
   populateAgendaSelects();
   const now = new Date();
   const isoNow = now.toISOString().slice(0, 16);
@@ -71,19 +75,70 @@ document.getElementById('fab-agendar').addEventListener('click', () => {
 // CORREÇÃO: modal-agenda-save separa ID e nome do profissional
 document.getElementById('modal-agenda-save').addEventListener('click', async () => {
   const editId = (document.getElementById('agenda-edit-id') || {}).value || '';
-  const cliente = document.getElementById('agenda-cliente').value;
-  const servico = document.getElementById('agenda-servico').value;
-  const profissionalId = document.getElementById('agenda-profissional').value;
-  const datetime = document.getElementById('agenda-datetime').value;
-  const preco = parseFloat(document.getElementById('agenda-preco').value);
-  if (!cliente || !servico || !datetime) { toast('Preenche os campos obrigatórios.', 'warning'); return; }
-  if (!profissionalId) { toast('Selecciona um profissional.', 'warning'); return; }
-  if (isNaN(preco) || preco <= 0) { toast('Insira um preço válido', 'error'); return; }
-  if (!datetime.includes('T')) { toast('Data e hora inválidas', 'error'); return; }
+  const cliente = (document.getElementById('agenda-cliente') || {}).value || '';
+  const servico = (document.getElementById('agenda-servico') || {}).value || '';
+  const profissionalId = (document.getElementById('agenda-profissional') || {}).value || '';
+  const datetime = (document.getElementById('agenda-datetime') || {}).value || '';
+  const preco = parseFloat((document.getElementById('agenda-preco') || {}).value);
+  // R37–R40 — uma pendência de cada vez
+  if (!cliente) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Selecione um cliente para continuar.', 'agenda-cliente');
+    else toast('Selecione um cliente para continuar.', 'warning');
+    return;
+  }
+  var cliObj = (state.clientes || []).find(function (c) { return c && c.nome === cliente; });
+  if (!cliObj || cliObj.ativo === false || cliObj.ativo === 0 || cliObj.ativo === 'false') {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Este cliente não está activo. Escolha outro cliente para continuar.', 'agenda-cliente');
+    else toast('Este cliente não está activo. Escolha outro cliente para continuar.', 'warning');
+    return;
+  }
+  if (!servico || servico === 'Outro') {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Seleccione um serviço do catálogo.', 'agenda-servico');
+    else toast('Seleccione um serviço do catálogo.', 'warning');
+    return;
+  }
+  if (!datetime || !datetime.includes('T')) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique a data e a hora do atendimento.', 'agenda-datetime');
+    else toast('Indique a data e a hora do atendimento.', 'warning');
+    return;
+  }
+  if (!profissionalId) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Seleccione um profissional.', 'agenda-profissional');
+    else toast('Seleccione um profissional.', 'warning');
+    return;
+  }
+  if (isNaN(preco) || preco <= 0) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Informe um preço válido superior a zero.', 'agenda-preco');
+    else toast('Informe um preço válido superior a zero.', 'warning');
+    return;
+  }
   const data = datetime.split('T')[0];
   const hora = datetime.split('T')[1].slice(0, 5);
-  const profObj = state.profissionais.find(p => p.id === profissionalId);
-  const profissionalNome = profObj ? profObj.nome : '';
+  const profObj = (state.profissionais || []).find(p => p.id === profissionalId);
+  if (!profObj || (typeof isProfissionalAtivo === 'function' ? !isProfissionalAtivo(profObj) : profObj.ativo === false)) {
+    toast('Seleccione um profissional activo.', 'warning');
+    return;
+  }
+  // R41 — compatibilidade serviço/profissional
+  const servObj = (state.servicos || []).find(s => s && s.nome === servico);
+  if (!servObj || (typeof isServicoAtivo === 'function' ? !isServicoAtivo(servObj) : servObj.ativo === false)) {
+    toast('Seleccione um serviço disponível.', 'warning');
+    return;
+  }
+  const listaP = Array.isArray(servObj.profissionais) ? servObj.profissionais : [];
+  if (!listaP.length) {
+    toast('Este serviço não possui um profissional disponível. Associe um profissional ao serviço antes de continuar.', 'warning');
+    return;
+  }
+  const hab = listaP.some(function (ref) {
+    var r = String(ref || '');
+    return r === String(profObj.id) || r === String(profObj.nome || '');
+  });
+  if (!hab) {
+    toast('Este profissional não está habilitado para o serviço selecionado. Escolha um profissional disponível para este serviço.', 'warning');
+    return;
+  }
+  const profissionalNome = profObj.nome || '';
   let clienteId = null;
   if (typeof resolverClienteIdPorNome === 'function') clienteId = resolverClienteIdPorNome(cliente);
   else {
@@ -163,8 +218,20 @@ document.getElementById('agenda-add-cliente-rapido').addEventListener('click', (
 document.getElementById('modal-cliente-rapido-save').addEventListener('click', async () => {
   const nome = document.getElementById('cliente-rapido-nome').value.trim();
   const telefone = document.getElementById('cliente-rapido-telefone').value.trim();
-  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
-  const result = await addCliente({ nome, telefone, notas: '' });
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Introduza o nome do cliente para continuar.', 'cliente-rapido-nome');
+    else toast('Introduza o nome do cliente para continuar.', 'warning');
+    return;
+  }
+  var telR = typeof bpValidarTelefoneCliente === 'function'
+    ? bpValidarTelefoneCliente(telefone)
+    : { ok: false, message: 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.' };
+  if (!telR.ok) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError(telR.message, 'cliente-rapido-telefone');
+    else toast(telR.message, 'warning');
+    return;
+  }
+  const result = await addCliente({ nome, telefone: telR.telefone, notas: '' });
   if (result) {
     try {
       if (window.BPMedia && BPMedia.takePendingClienteFoto) {
@@ -200,9 +267,14 @@ function setClienteModalMode(mode) {
   if (sheet) {
     sheet.classList.toggle('modal-sheet--view', mode === 'view');
   }
-  if (view) view.hidden = mode !== 'view';
-  if (form) form.hidden = mode !== 'edit';
-  // Campos sempre editáveis no form (nunca "fantasma")
+  if (view) {
+    view.hidden = mode !== 'view';
+    try { view.style.display = mode === 'view' ? '' : 'none'; } catch (_) {}
+  }
+  if (form) {
+    form.hidden = mode !== 'edit';
+    try { form.style.display = mode === 'edit' ? '' : 'none'; } catch (_) {}
+  }
   ['cliente-nome', 'cliente-telefone', 'cliente-notas'].forEach(function (fid) {
     const el = document.getElementById(fid);
     if (el) {
@@ -234,6 +306,9 @@ document.getElementById('add-cliente-btn').addEventListener('click', () => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  try {
+    if (window.BPMedia && typeof BPMedia.clearPendingClienteFoto === 'function') BPMedia.clearPendingClienteFoto();
+  } catch (_) {}
   openModal('modal-cliente');
 });
 
@@ -242,13 +317,20 @@ document.getElementById('modal-cliente-save').addEventListener('click', async ()
   let telefone = document.getElementById('cliente-telefone').value.trim();
   const notas = document.getElementById('cliente-notas').value.trim();
   const id = document.getElementById('cliente-id').value;
-  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
-  const telDigits = telefone.replace(/\D/g, '');
-  if (telDigits && telDigits.length !== 9) {
-    toast('Contacto deve ter exactamente 9 dígitos, ou deixe em branco.', 'error');
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Introduza o nome do cliente para continuar.', 'cliente-nome');
+    else toast('Introduza o nome do cliente para continuar.', 'warning');
     return;
   }
-  telefone = telDigits;
+  var telChk = typeof bpValidarTelefoneCliente === 'function'
+    ? bpValidarTelefoneCliente(telefone)
+    : { ok: false, message: 'Informe um número de telefone válido com 9 dígitos e iniciado por 9.' };
+  if (!telChk.ok) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError(telChk.message, 'cliente-telefone');
+    else toast(telChk.message, 'warning');
+    return;
+  }
+  telefone = telChk.telefone;
   if (id) {
     // ET4.3: só toast/fecha se a actualização efectivamente ocorreu
     const upd = await updateCliente(id, { nome, telefone, notas });
@@ -391,8 +473,14 @@ function setProfModalMode(mode) {
   const form = document.getElementById('prof-form-panel');
   if (modal) modal.setAttribute('data-mode', mode);
   if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
-  if (view) view.hidden = mode !== 'view';
-  if (form) form.hidden = mode !== 'edit';
+  if (view) {
+    view.hidden = mode !== 'view';
+    try { view.style.display = mode === 'view' ? '' : 'none'; } catch (_) {}
+  }
+  if (form) {
+    form.hidden = mode !== 'edit';
+    try { form.style.display = mode === 'edit' ? '' : 'none'; } catch (_) {}
+  }
   ['prof-nome','prof-idade','prof-data-contratual','prof-bi','prof-morada','prof-contacto','prof-esp','prof-taxa','prof-meta'].forEach(function (fid) {
     const el = document.getElementById(fid);
     if (el) {
@@ -528,6 +616,15 @@ document.getElementById('add-prof-btn')?.addEventListener('click', () => {
     if (el) el.value = fid === 'prof-taxa' ? '0' : '';
   });
   popularEspecialidadesProf('');
+  try {
+    var esp = document.getElementById('prof-esp');
+    if (esp) esp.value = '';
+    var box = document.getElementById('prof-criar-servico-box');
+    if (box) box.style.display = 'none';
+  } catch (_) {}
+  try {
+    if (window.BPMedia && typeof BPMedia.clearPendingProfFoto === 'function') BPMedia.clearPendingProfFoto();
+  } catch (_) {}
   openModal('modal-prof');
 });
 
@@ -544,16 +641,29 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
   const taxa = parseFloat(document.getElementById('prof-taxa')?.value);
   const meta = parseFloat(document.getElementById('prof-meta')?.value);
 
-  if (!nome) { toast('Introduz o nome.', 'warning'); return; }
-  if (!idade || isNaN(parseInt(idade, 10))) { toast('Idade é obrigatória', 'error'); return; }
-  if (!dataContratual) { toast('Data contratual é obrigatória', 'error'); return; }
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Introduza o nome do profissional para continuar.', 'prof-nome');
+    else toast('Introduza o nome do profissional para continuar.', 'warning');
+    return;
+  }
+  if (!idade || isNaN(parseInt(idade, 10))) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('A idade é obrigatória. Indique a idade do profissional para continuar.', 'prof-idade', 'warning');
+    else toast('A idade é obrigatória. Indique a idade do profissional para continuar.', 'warning');
+    return;
+  }
+  if (!dataContratual) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('A data contratual é obrigatória. Seleccione a data para continuar.', 'prof-data-contratual', 'warning');
+    else toast('A data contratual é obrigatória. Seleccione a data para continuar.', 'warning');
+    return;
+  }
   // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
   if (espSelect === '__criar') {
     const criado = await bpCriarServicoDesdeProfModal();
     if (!criado) return;
     especialidade = criado;
   }
-  if (!especialidade) { toast('Selecciona uma especialidade ou cria uma nova.', 'warning'); return; }
+  // R29: especialidade opcional no cadastro; sem ela o profissional não entra em vendas/agenda filtradas
+  if (!especialidade) { especialidade = ''; }
   if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
     toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
@@ -635,13 +745,23 @@ document.getElementById('modal-servico-save').addEventListener('click', async ()
   const duracao = (!isNaN(durRaw) && durRaw >= 5) ? durRaw : 60;
   const id = document.getElementById('servico-id').value;
   const profissionais = typeof getSelectedProfissionais === 'function' ? getSelectedProfissionais() : [];
-  if (!nome || isNaN(precoBase) || precoBase <= 0) {
-    toast('Indica nome e preço válidos.', 'warning');
+  if (!nome) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique o nome do serviço para continuar.', 'servico-nome');
+    else toast('Indique o nome do serviço para continuar.', 'warning');
+    return;
+  }
+  if (isNaN(precoBase) || precoBase <= 0) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Informe um preço válido superior a zero.', 'servico-preco');
+    else toast('Informe um preço válido superior a zero.', 'warning');
     return;
   }
   // ET4.5: profissionais obrigatórios — proibido vazio / "toda a equipa"
   if (!profissionais || !profissionais.length) {
-    toast('Associa pelo menos um profissional a este serviço.', 'warning');
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('Associe pelo menos um profissional a este serviço para continuar.', 'servico-profissionais-container');
+    } else {
+      toast('Associe pelo menos um profissional a este serviço para continuar.', 'warning');
+    }
     return;
   }
   const payload = { nome, precoBase, profissionais: profissionais, duracao };

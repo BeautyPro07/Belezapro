@@ -152,11 +152,14 @@
   transition: var(--transition);
   outline: none;
 }
-/* CORREÇÃO: removido outline duplicado para evitar dois anéis de foco */
-.input-field:focus {
-  background: var(--card-white);
+/* Foco: uma linha fina (1px). Sem outline/box-shadow extra. */
+.input-field:focus,
+.input-field:focus-visible {
+  outline: none !important;
   border-color: var(--gold);
-  /* outline removido – a regra global *:focus-visible já cuida do foco acessível */
+  border-width: 1px;
+  background: var(--card-white);
+  box-shadow: none !important;
 }
 /* ADICIONADO (relatório §4.3/§6.3): estado de erro não existia no ficheiro */
 .input-field.error,

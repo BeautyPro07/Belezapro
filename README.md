@@ -516,3 +516,286 @@ SW: `belezapro-shell-v20260809-et4p9b`
 - focus null-safe em `core-utils.js` e `detalhes-acessibilidade.js`
 - `bpSwitchTabPane` + CSS `bp-tab-in/out-left/right`
 - SW: `belezapro-shell-v20260809-et4p11`
+
+
+---
+
+## Etapa 4.12 — Transição de abas Opção A (crossfade)
+
+### Modelo
+- Crossfade **~150 ms** (out 120 ms / in 150 ms), estilo tab bar WhatsApp/Material.
+- **Sem** slide horizontal → elimina faísca da aba anterior.
+- `.main-content` com fundo opaco `var(--bg-soft)`.
+- `prefers-reduced-motion`: troca instantânea.
+- Limpeza de classes legadas `bp-tab-in/out-*`.
+
+### Ficheiros tocados (cirúrgico)
+- `layout-nav-tabs.css` — só bloco TABS
+- `detalhes-acessibilidade.js` — só `bpSwitchTabPane`
+- bundle + SW `belezapro-shell-v20260810-et4p12`
+
+### Não alterado
+Handlers de role, render por aba, tooltip, offline modal, sync, confirm, etc.
+
+
+---
+
+## Etapa 4.13 — Transição abas foto-a-foto (~160ms)
+
+- Slide horizontal sincronizado (páginas adjacentes).
+- Avançar: antiga ← esquerda, nova da direita; recuar: inverso.
+- Duração **0.16s**; stacking absoluto; fundo opaco; sem crossfade.
+- `main-content.bp-tab-animating` trava scroll durante a animação.
+- SW: `belezapro-shell-v20260810-et4p13`
+
+
+---
+
+## Etapa 4.14 — Resumo + modal venda (UI)
+
+- Removido card **Saldo em caixa (hoje)** do dashboard (HTML + CSS hide).
+- **Próximos atendimentos**: título `h2.dash-section-title` (serif 1.125rem), meta alinhada.
+- Modal venda: subtítulo → «Realiza a venda em poucos passos — serviço e pagamento abaixo.»
+- Select cliente: «Cliente cadastrado» (em vez de «Cliente avulso (sem ficha)»).
+- Transição de abas: mantida a versão foto-a-foto (v13).
+- SW: `belezapro-shell-v20260810-et4p14`
+
+
+---
+
+## Etapa 4.14b — Auditoria da v14 + correcções
+
+### Falhas factuais encontradas
+1. Tipografia «Próximos atendimentos»: seletor fraco (h2 podia herdar estilos globais).
+2. Slide de abas: 1.º frame podia flashar (altura 0 / transform sem rAF).
+3. Mensagem vazia da lista de atendimentos inconsistente.
+
+### Corrigido
+- CSS `#tab-dashboard h2.dash-section-title` com especificidade alta.
+- `bpSwitchTabPane`: double rAF + transform inicial + minHeight estável.
+- Empty state: «Sem atendimentos pendentes».
+- Saldo caixa: continua ausente no resumo (HTML + CSS).
+- Textos venda (Cliente cadastrado / subtítulo): mantidos como pedido.
+
+
+---
+
+## Etapa 5.1 — Motor de validação de venda (regras R01–R06, R08–R15, R17–R21)
+
+### Implementado
+- `bpValidarOperacaoVenda` em `crud-operations.js` (camada de negócio).
+- `registarVenda` rejeita payload inválido (não grava Avulso/Não atribuído/default Numerário).
+- **Cobrar** valida antes de processar; foco no campo; dados preservados.
+- Modal de validação via `mostrarErro` (título + corpo); destaque `.bp-field-invalid`.
+- Removido serviço personalizado (`__custom`) do fluxo de venda.
+- Pagamento: opção vazia obrigatória + lista R13 (incl. Split); sem default silencioso.
+- Profissionais filtrados só após serviço; só habilitados ao serviço.
+- Anti reentrada no botão Cobrar (`disabled` / `aria-busy`).
+
+### Fora desta etapa (etapa 2+)
+- R24 modal de confirmação pré-persistência
+- Agenda alinhada / clientes telefone R46 / etc.
+
+
+## Etapa 5.1b — Blindagem após varredura
+
+### Falhas encontradas e corrigidas
+1. **addToCart** sufixava o nome com preço → validação R17 falhava em itens legítimos → nome de catálogo preservado.
+2. **Finalizar atendimento** marcava realizado + toast de sucesso mesmo se `registarVenda` falhasse → valida antes; só atualiza agenda se idVenda OK.
+3. **Clientes inactivos** no select de venda → filtrados.
+4. **Finalizar pagamento** com Outro / default Numerário → alinhado a R12/R13.
+5. **Transferência Bancária** normalizada para Transferência no motor.
+6. **setButtonLoading** + `aria-busy` para anti-duplo clique.
+7. Quantidade no carrinho forçada a inteiro ≥ 1.
+
+
+---
+
+## Etapa 5.2 — R24 confirmação + Agenda alinhada + subtítulo
+
+- Subtítulo modal venda: «Registe a venda e mantenha as suas operações organizadas.»
+- **R24:** após validação OK, modal «Confirmar venda?» com resumo; só depois `registarVenda`.
+- Agenda: sem serviço personalizado; profissionais filtrados por serviço; validação R37–R41 no save; conflito já bloqueava (R42).
+- Finalizar atendimento continua a usar `bpValidarOperacaoVenda` (etapa 1).
+
+
+## Etapa 5.2b — Varredura e blindagem
+
+### Problemas encontrados e corrigidos
+1. Escape podia fechar o modal de venda por baixo do confirm (querySelector .open).
+2. Confirm sem handler Escape próprio (ficava preso).
+3. z-index do confirm igual ao da venda → risco de empilhamento.
+4. R24 ausente no **Finalizar atendimento**.
+5. `confirmou = true` se showConfirmModal falhasse → bypass de R24.
+6. Split no finance ainda com «Transferência Bancária» / fora da lista R13.
+7. Constante central `BP_METODOS_PAGAMENTO` (R13).
+
+### Confirmado OK
+- Subtítulo pedido
+- R24 Cobrar com resumo e sem persistir até confirmar
+- Agenda R37–R41 + filtro profissionais + sem Outro
+- Conflito R42 já em add/updateAgendamento
+
+
+---
+
+## Etapa 5.3 — Clientes, Equip a/Serviços, integridade
+
+### Clientes (R45–R47)
+- `bpValidarTelefoneCliente`: 9 dígitos, começa por 9, obrigatório
+- UI modal cliente + cliente rápido
+- Camada `addCliente` / `updateCliente`
+- Duplicado: mensagem R47 (sobrenome)
+
+### Equipa (R29)
+- Profissional pode ser criado sem especialidade
+- Sem especialidade não é ligado a serviço (não aparece em filtros de venda/agenda)
+- Se especialidade indicada, deve ser serviço activo válido
+
+### Serviços (R33–R34)
+- `addServico` / `updateServico`: preço > 0 na camada de negócio
+- Profissionais associados já obrigatórios
+
+### Offline / integridade (R51–R58)
+- Já coberto na etapa 1: `registarVenda` valida antes de `dbPut` (não enfileira inválido)
+
+
+## Etapa 5.3b — Varredura e blindagem
+
+### Falha crítica corrigida
+- `bpValidarTelefoneCliente` **não existia** no ficheiro (insert falhou na 5.3).
+- A UI chamava a função e, no fallback, devolvia sempre `ok: false` → **impossível criar cliente**.
+- `addCliente` não aplicava R46/R47 na camada de negócio.
+
+### Corrigido agora
+1. Função `bpValidarTelefoneCliente` + export window
+2. `addCliente` com telefone obrigatório e mensagem R47
+3. `bpClientesActivos` + filtros na agenda (R48)
+4. Bloqueio de cliente inactivo no save da agenda
+
+### Confirmado
+- R29 especialidade opcional na UI
+- R33/R34 preço e profissionais no serviço
+
+---
+
+## Entrega final — feedback de formulários + R50 + Supabase
+
+### Causa estrutural (notificações “atrasadas”)
+Toast com z-index 1900 atrás dos modais (2000+). Corrigido para 2500.
+`bpNotifyFormError` padroniza toast + foco + aria-invalid em Cliente, Equipa, Serviços, Agenda.
+
+### R50
+UI cancelar venda; sync de status/estorno; KPIs ignoram canceladas; SQL em SUPABASE_R50_CANCEL_CLIENTES.sql.
+Ver `passo a passo.md`.
+
+## Correção final — view/form + notificações orientadoras
+
+### Causa estrutural
+`.bp-view-panel { display: block }` anulava o atributo HTML `[hidden]`, deixando **ficha + formulário** visíveis ao mesmo tempo (Cliente/Equipa/Serviços).
+
+### Correcções
+1. CSS: `[hidden] { display: none !important }` em view e form panels
+2. `setClienteModalMode` / `setProfModalMode` / `setServicoModalMode` forçam `style.display`
+3. Novo cliente/profissional limpa campos e estado pendente de foto
+4. `bpNotifyFormError` + `mostrarErro(..., onClose, { okLabel: 'Entendi' })` — mensagem primeiro; foco no campo **depois** de Entendi
+5. Venda: `bpNotificarValidacaoVenda` segue o mesmo padrão
+6. SQL `SUPABASE_R50_E_CLIENTES.sql` + sync de status/cancelamento
+7. `passo-a-passo.md` com instalação e testes
+
+## Varredura final UI (finalb)
+
+### Problemas encontrados nesta passagem
+1. Escape com `modal-erro` aberto: o handler antigo **ignorava** o erro e podia fechar o modal de baixo (cliente/venda) ou não fazer nada.
+2. `mostrarErro` sem `#modal-erro` no DOM: `onClose` (foco no campo) **nunca** corria.
+3. CTA de validação sem destaque visual consistente.
+
+### Corrigido
+- Escape fecha `modal-erro` via `_bpFinish` → dispara «Entendi»/onClose → foco no campo
+- `mostrarErro` chama `onClose` se o modal não existir
+- CTA «Entendi» como botão primário + foco no CTA ao abrir
+- Confirmação: CSS view/form `[hidden]`, modos set*ModalMode, bpNotifyFormError em cascata
+
+### Segunda varredura
+- node -c OK em core-utils, eventos-cadastros, vendas-modais, crud-operations
+- Bundle regenerado
+
+## UI cirúrgica — foco, botões, Confirmar venda, detalhe Caixa
+
+### Sem alterações a notificações/SMS
+O sistema `bpNotifyFormError` / `mostrarErro` / toasts **não** foi modificado.
+
+### 1. Foco do campo
+- Causa: `border` dourado + `outline` global + `box-shadow` 3px → duas linhas grossas
+- Agora: **1 linha** de 1px dourada; outline/box-shadow removidos em `.input-field`
+
+### 2. Botões
+- Default: 48→40px; sm: 40→32px; fonte ligeiramente menor
+- Filtros Clientes e acções de modal alinhados
+
+### 3. Confirmar venda
+- Textos preservados
+- `summaryLayout`: linhas Cliente/Profissional/Itens/Total/Pagamento em bloco tipo ficha
+- Nota final abaixo do bloco
+
+### 4. Detalhe Caixa
+- Grelha de itens: colunas mais largas; Qtd / Unit. / Total com `nowrap`
+- Hierarquia tipográfica (qty/unit secundários, total forte)
+
+### 5. Cancelar venda
+- Largura 100% na fila abaixo de Fechar / Imprimir
+
+## Varredura UI compact (ui1b)
+
+### Problemas encontrados
+1. `componentes-base.css` ainda tinha foco sem `outline: none !important` (risco residual de anel duplo).
+2. `showConfirmModal` summary: possível conflito `white-space: pre-line` no `#confirm-message`.
+3. Escape HTML incompleto no resumo (`<` apenas).
+4. SyntaxError: `}` extra após o bloco summary (introduzido na correcção).
+5. Grelha de itens podia ser sobrescrita por regras de cor posteriores — reforço `.bp-view-dl--itens`.
+
+### Corrigido
+- Foco unificado em componentes-base + design-system + premium
+- Summary: classe `confirm-message--summary`, white-space normal, escape completo
+- `}` extra removido; `node -c` OK
+- Notificações (`bpNotifyFormError` / `mostrarErro`) **intactas**
+
+## Varredura UI (ui1c) — causa residual do foco duplo
+
+### Causa estrutural ainda activa
+`impressao-acessibilidade.css` (carregado em todos os ecrãs) forçava:
+- `outline: 2px solid gold !important`
+- `border-color: gold !important` em `*:focus-visible`
+
+Isto somava-se à borda dourada do `.input-field:focus` → **duas linhas grossas**.
+
+### Correção
+- Formulários: sem outline; só borda 1px
+- Botões/links: outline 1px fino
+- Removido `border-color !important` no foco global
+- Confirmar venda: `white-space: normal !important` no modo summary
+- CTAs do confirm a 36px
+
+### Notificações
+Sem alterações a `bpNotifyFormError` / `mostrarErro`.
+
+## Sync pendentes com rede + polish Caixa/Confirmar (2026-08-11)
+
+### Causa dos «N pendentes» com internet
+1. Upserts a falhar com **PGRST204** (colunas ausentes no Supabase, ex. R50 / historicamente `cliente_id`).
+2. Ops ficavam em **backoff** (`nextRetry`) ou `failed` — o evento `online` só reabria `failed`, não o backoff.
+3. Sem flush periódico enquanto a fila não estava vazia.
+
+### Correções
+- `sync-rest.js`: detecção PGRST204 → recordar coluna → strip → retry (até 2 colunas).
+- `movimentos`: nunca `cliente_id`; R50 só se a coluna não estiver na lista de ausentes.
+- `bpRetryFailedSync`: limpa `failed` + `attempts` + `nextRetry` e faz flush.
+- Evento `online` + `visibilitychange` + intervalo 25s com rede e fila não vazia.
+- Toque no indicador: feedback se ficou vazio ou ainda há restantes.
+
+### UI
+- Detalhe Caixa: hierarquia tipográfica, badge pagamento, grelha itens, botões 40px.
+- Confirmar venda: mesmo idioma visual do detalhe (resumo em ficha), sem Cancelar venda.
+
+### SQL (se ainda não aplicado)
+Executar `SUPABASE_R50_E_CLIENTES.sql` no Supabase para colunas de cancelamento.

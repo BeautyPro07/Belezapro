@@ -154,16 +154,19 @@ function abrirDetalheVenda(id) {
   if (venda.itens && venda.itens.length > 0) {
     itensHtml =
       '<div class="bp-view-section-title">Itens</div>' +
-      '<div class="bp-view-dl">' +
-      '<div class="detalhe-itens-header" style="padding:10px 14px;border-bottom:1px solid var(--border-soft);">' +
+      '<div class="bp-view-dl bp-view-dl--itens">' +
+      '<div class="detalhe-itens-header">' +
       '<span>Descrição</span><span style="text-align:right">Qtd</span><span style="text-align:right">Unit.</span><span style="text-align:right">Total</span></div>' +
       venda.itens.map(function (item) {
+        var q = item.quantidade || 1;
+        var unit = (item.precoUnit != null ? item.precoUnit : item.subtotal);
+        var sub = item.subtotal;
         return (
-          '<div class="detalhe-item-row" style="padding-left:14px;padding-right:14px;">' +
+          '<div class="detalhe-item-row">' +
           '<span class="desc">' + escHtml(item.nome) + '</span>' +
-          '<span class="qty">' + (item.quantidade || 1) + '</span>' +
-          '<span class="pu">' + fmtKz(item.precoUnit != null ? item.precoUnit : item.subtotal) + '</span>' +
-          '<span class="sub">' + fmtKz(item.subtotal) + '</span></div>'
+          '<span class="qty">' + q + '</span>' +
+          '<span class="pu">' + fmtKz(unit) + '</span>' +
+          '<span class="sub">' + fmtKz(sub) + '</span></div>'
         );
       }).join('') +
       '</div>';
@@ -179,12 +182,20 @@ function abrirDetalheVenda(id) {
       '<div class="bp-view-row"><span class="bp-view-label">Profissional</span><span class="bp-view-value">' + escHtml(nomeProf || '—') + '</span></div>' +
       '<div class="bp-view-row"><span class="bp-view-label">Quando</span><span class="bp-view-value">' + escHtml(String(venda.data || '')) + ' · ' + escHtml(String(venda.hora || '').slice(0, 5)) + '</span></div>' +
       '<div class="bp-view-row"><span class="bp-view-label">Pagamento</span><span class="bp-view-value"><span class="pagamento-badge">' + escHtml(mp) + '</span></span></div>' +
+      (String(venda.status || '').toLowerCase() === 'cancelado' ? '<div class="bp-view-row"><span class="bp-view-label">Estado</span><span class="bp-view-value">Cancelada' + (venda.cancelado_motivo ? (' · ' + escHtml(venda.cancelado_motivo)) : '') + '</span></div>' : '') +
       '</div>' +
       itensHtml +
       '<div class="bp-view-total"><span class="bp-view-label">Total</span><span class="bp-view-value">' + fmtKz(Number(venda.valor) || 0) + '</span></div>';
   }
   const tit = document.getElementById('detalhe-venda-titulo');
   if (tit) tit.textContent = ref ? ('Ref. ' + ref) : 'Detalhe da venda';
+  var btnCanc = document.getElementById('btn-cancelar-venda');
+  if (btnCanc) {
+    var jaCanc = String(venda.status || '').toLowerCase() === 'cancelado';
+    var pode = typeof bpPode === 'function' ? bpPode(['admin', 'gerente']) : true;
+    btnCanc.style.display = (!jaCanc && pode) ? '' : 'none';
+    btnCanc.disabled = jaCanc;
+  }
   openModal('modal-detalhe-venda');
 }
 
@@ -411,10 +422,12 @@ function adjustQuantity(idx, delta) {
     removeItemFromCart(idx, true);
     return;
   }
-  item.quantidade = newQty;
+  item.quantidade = Math.floor(Number(newQty)) || 1;
+  if (item.quantidade < 1) item.quantidade = 1;
   item.subtotal = item.quantidade * item.precoUnit;
   _cartAnim = { type: 'qty', idx: idx, nome: item.nome };
   renderCart();
+  if (typeof updateVendaSaveButton === 'function') updateVendaSaveButton();
 }
 
 // --- Remover item (com confirmação) ---
@@ -466,15 +479,34 @@ async function removeItemFromCart(idx, skipConfirm) {
 
 // --- Função central de adição ao carrinho (sem profissional) ---
 async function addToCart(nome, valor) {
-  const existingIndex = cartItems.findIndex(item => item.nome === nome);
+  // R17: manter o nome exacto do catálogo (nunca sufixar preço — quebrava a validação)
+  nome = String(nome || '').trim();
+  valor = Number(valor);
+  if (!nome || !Number.isFinite(valor) || valor <= 0) {
+    if (typeof toast === 'function') toast('Informe um preço válido superior a zero.', 'warning');
+    return;
+  }
+  const existingIndex = cartItems.findIndex(function (item) {
+    return item && item.nome === nome && Number(item.precoUnit) === valor;
+  });
   if (existingIndex !== -1) {
     const existing = cartItems[existingIndex];
-    if (existing.precoUnit !== valor) {
+    existing.quantidade += 1;
+    existing.subtotal = existing.quantidade * existing.precoUnit;
+    _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
+    renderCart();
+    return;
+  }
+  // Mesmo serviço, preço diferente → linha separada, nome de catálogo intacto
+  const sameNameIdx = cartItems.findIndex(function (item) { return item && item.nome === nome; });
+  if (sameNameIdx !== -1) {
+    const existing = cartItems[sameNameIdx];
+    if (Number(existing.precoUnit) !== valor) {
       let choice = false;
       if (typeof showConfirmModal === 'function') {
         choice = await showConfirmModal(
           'Atualizar preço?',
-          '"' + (nome || 'Serviço') + '" já está no carrinho a ' + (typeof fmtKz === 'function' ? fmtKz(existing.precoUnit) : existing.precoUnit) + '. Queres atualizar para ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + '? Se cancelares, os dois preços ficam como linhas separadas.',
+          '"' + nome + '" já está no carrinho a ' + (typeof fmtKz === 'function' ? fmtKz(existing.precoUnit) : existing.precoUnit) + '. Queres atualizar para ' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + '? Se cancelares, os dois preços ficam como linhas separadas.',
           false,
           { confirmLabel: 'Atualizar', cancelLabel: 'Manter separados', variant: 'default' }
         );
@@ -482,30 +514,14 @@ async function addToCart(nome, valor) {
       if (choice) {
         existing.precoUnit = valor;
         existing.subtotal = existing.quantidade * valor;
-        _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
-        renderCart();
-        return;
-      } else {
-        cartItems.push({
-          nome: nome + ' (' + (typeof fmtKz === 'function' ? fmtKz(valor) : valor) + ')',
-          quantidade: 1,
-          precoUnit: valor,
-          subtotal: valor
-        });
-        _cartAnim = { type: 'add', idx: cartItems.length - 1, nome: cartItems[cartItems.length - 1].nome };
+        _cartAnim = { type: 'qty', idx: sameNameIdx, nome: existing.nome };
         renderCart();
         return;
       }
     }
-    existing.quantidade += 1;
-    existing.subtotal = existing.quantidade * existing.precoUnit;
-    _cartAnim = { type: 'qty', idx: existingIndex, nome: existing.nome };
-    renderCart();
-    return;
   }
-
   cartItems.push({
-    nome,
+    nome: nome,
     quantidade: 1,
     precoUnit: valor,
     subtotal: valor
@@ -541,15 +557,19 @@ function openVendaModal() {
     loadCartFromStorage();
     const clientSel = document.getElementById('venda-cliente');
     if (clientSel) {
-      const opts = ['<option value="">Cliente avulso (sem ficha)</option>']
-        .concat((state.clientes || []).map(c =>
-          `<option value="${escHtml(c.nome)}">${escHtml(c.nome)}</option>`
-        ));
+      const opts = ['<option value="">Seleccionar cliente</option>']
+        .concat((state.clientes || []).filter(function (c) {
+          if (!c || !c.nome) return false;
+          if (c.ativo === false || c.ativo === 0 || c.ativo === 'false') return false;
+          return true;
+        }).map(function (c) {
+          return '<option value="' + escHtml(c.nome) + '">' + escHtml(c.nome) + '</option>';
+        }));
       clientSel.innerHTML = opts.join('');
     }
     if (typeof populateVendaSelects === 'function') populateVendaSelects();
     const pag = document.getElementById('venda-pagamento');
-    if (pag && !pag.value) pag.value = 'Numerário';
+    if (pag) pag.value = '';
     renderCart();
     updateVendaSaveButton();
     if (typeof openModal === 'function') openModal('modal-venda');
@@ -629,8 +649,14 @@ function setServicoModalMode(mode) {
   const form = document.getElementById('servico-form-panel');
   if (modal) modal.setAttribute('data-mode', mode);
   if (sheet) sheet.classList.toggle('modal-sheet--view', mode === 'view');
-  if (view) view.hidden = mode !== 'view';
-  if (form) form.hidden = mode !== 'edit';
+  if (view) {
+    view.hidden = mode !== 'view';
+    try { view.style.display = mode === 'view' ? '' : 'none'; } catch (_) {}
+  }
+  if (form) {
+    form.hidden = mode !== 'edit';
+    try { form.style.display = mode === 'edit' ? '' : 'none'; } catch (_) {}
+  }
 }
 
 function _labelProfsServico(arr) {

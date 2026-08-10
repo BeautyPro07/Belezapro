@@ -196,29 +196,98 @@ function bpTabIndex(id) {
   var i = BP_TAB_ORDER.indexOf(id);
   return i < 0 ? 0 : i;
 }
+/** Slide foto-a-foto ~160ms: páginas adjacentes, stacking absoluto, sem faísca. */
 function bpSwitchTabPane(fromId, toId) {
   var from = fromId ? document.getElementById('tab-' + fromId) : null;
   var to = document.getElementById('tab-' + toId);
   if (!to) return;
+
   var reduce = false;
-  try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
-  var forward = bpTabIndex(toId) >= bpTabIndex(fromId || toId);
+  try {
+    reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_) {}
+
+  var ALL_ANIM = [
+    'bp-tab-slide-from', 'bp-tab-slide-to',
+    'bp-tab-from-left', 'bp-tab-from-right',
+    'bp-tab-to-from-right', 'bp-tab-to-from-left',
+    'bp-tab-fade-in', 'bp-tab-fade-out',
+    'bp-tab-in-right', 'bp-tab-in-left', 'bp-tab-out-left', 'bp-tab-out-right'
+  ];
+
+  function clearAnim(p) {
+    if (!p) return;
+    ALL_ANIM.forEach(function (c) { p.classList.remove(c); });
+  }
+
   document.querySelectorAll('.tab-pane').forEach(function (p) {
-    p.classList.remove('active', 'bp-tab-in-right', 'bp-tab-in-left', 'bp-tab-out-left', 'bp-tab-out-right');
+    clearAnim(p);
+    if (p !== to && p !== from) p.classList.remove('active');
   });
+
   if (reduce || !from || from === to) {
+    if (from && from !== to) from.classList.remove('active');
+    clearAnim(to);
     to.classList.add('active');
     return;
   }
-  from.classList.add(forward ? 'bp-tab-out-left' : 'bp-tab-out-right');
-  to.classList.add('active', forward ? 'bp-tab-in-right' : 'bp-tab-in-left');
+
+  // Evitar estados a meio de animação anterior
+  clearAnim(from);
+  clearAnim(to);
+
+  var forward = bpTabIndex(toId) >= bpTabIndex(fromId);
+  var main = document.querySelector('.main-content');
+  if (main) main.classList.add('bp-tab-animating');
+
+  // Medir altura com a aba actual (visível); evita minHeight 0 e colapso
+  var h = 0;
+  try {
+    h = Math.max(
+      (from && from.offsetHeight) || 0,
+      (main && main.clientHeight) || 0,
+      240
+    );
+    if (main) main.style.minHeight = h + 'px';
+  } catch (_) {}
+
+  var cleaned = false;
   var clean = function () {
-    from.classList.remove('bp-tab-out-left', 'bp-tab-out-right');
-    to.classList.remove('bp-tab-in-right', 'bp-tab-in-left');
-    from.removeEventListener('animationend', clean);
+    if (cleaned) return;
+    cleaned = true;
+    clearAnim(from);
+    clearAnim(to);
+    from.classList.remove('active');
+    to.classList.add('active');
+    if (main) {
+      main.classList.remove('bp-tab-animating');
+      try { main.style.minHeight = ''; } catch (_) {}
+    }
+    try { to.removeEventListener('animationend', onEnd); } catch (_) {}
   };
-  from.addEventListener('animationend', clean);
-  setTimeout(clean, 320);
+  var onEnd = function (e) {
+    if (e && e.target !== to) return;
+    clean();
+  };
+
+  // Preparar estados iniciais ANTES do paint da animação (evita faísca no 1.º frame)
+  from.classList.add('bp-tab-slide-from');
+  from.classList.remove('active');
+  to.classList.add('active', 'bp-tab-slide-to');
+  // Posição inicial sem animação
+  to.style.transform = forward ? 'translate3d(100%,0,0)' : 'translate3d(-100%,0,0)';
+  from.style.transform = 'translate3d(0,0,0)';
+
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      to.style.transform = '';
+      from.style.transform = '';
+      from.classList.add(forward ? 'bp-tab-from-left' : 'bp-tab-from-right');
+      to.classList.add(forward ? 'bp-tab-to-from-right' : 'bp-tab-to-from-left');
+      to.addEventListener('animationend', onEnd);
+      setTimeout(clean, 220);
+    });
+  });
 }
 
 document.querySelectorAll('.nav-item').forEach(btn => {

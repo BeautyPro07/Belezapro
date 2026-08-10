@@ -271,27 +271,44 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
 .detalhe-meta-row .val { font-weight: 600; text-align: right; max-width: 60%; }
 .detalhe-itens-header {
   display: grid;
-  grid-template-columns: 1fr 36px 52px 60px;
-  gap: 4px;
-  padding: 6px 0;
-  border-bottom: 2px solid var(--border-soft);
+  grid-template-columns: minmax(0, 1fr) 40px 76px 80px;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
   font-size: .62rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .04em;
   color: var(--text-muted);
+  align-items: center;
 }
 .detalhe-item-row {
   display: grid;
-  grid-template-columns: 1fr 36px 52px 60px;
-  gap: 4px;
-  padding: 7px 0;
+  grid-template-columns: minmax(0, 1fr) 40px 76px 80px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border-soft);
-  font-size: .82rem;
+  font-size: .8125rem;
   align-items: center;
 }
-.detalhe-item-row .desc { font-weight: 500; }
-.detalhe-item-row .qty, .detalhe-item-row .pu, .detalhe-item-row .sub { text-align: right; }
+.detalhe-item-row .desc {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detalhe-item-row .qty,
+.detalhe-item-row .pu,
+.detalhe-item-row .sub {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.detalhe-item-row .qty { color: var(--text-secondary); font-weight: 500; }
+.detalhe-item-row .pu { color: var(--text-secondary); font-weight: 500; font-size: 0.75rem; }
+.detalhe-item-row .sub { color: var(--text-primary); font-weight: 600; }
 .detalhe-total {
   display: flex;
   justify-content: space-between;
@@ -487,6 +504,14 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
   font-weight: 700;
 }
 .bp-view-panel { display: block; }
+/* BUG: display:block anulava o atributo HTML [hidden] → formulário + ficha visíveis ao mesmo tempo */
+.bp-view-panel[hidden],
+.bp-form-panel[hidden] {
+  display: none !important;
+}
+.bp-form-panel:not([hidden]) {
+  display: block;
+}
 .bp-view-body {
   margin-bottom: 8px;
 }
@@ -726,4 +751,236 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
 @keyframes bpPoint {
   0%, 100% { transform: translateY(-50%) translateX(0); opacity: 0.85; }
   50% { transform: translateY(-50%) translateX(-4px); opacity: 1; }
+}
+
+
+/* Validação venda — destaque de campo (sem toast de risco) */
+.input-field.bp-field-invalid,
+select.bp-field-invalid {
+  border-color: var(--text-secondary, #6b6560) !important;
+  box-shadow: 0 0 0 2px rgba(28, 26, 24, 0.08);
+}
+
+
+/* Detalhe venda — Cancelar ocupa a largura disponível */
+#modal-detalhe-venda .modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#modal-detalhe-venda .modal-actions #modal-detalhe-fechar,
+#modal-detalhe-venda .modal-actions #btn-imprimir-recibo {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+}
+#modal-detalhe-venda .modal-actions #btn-cancelar-venda {
+  flex: 1 1 100%;
+  width: 100%;
+  min-height: 40px;
+  height: 40px;
+}
+
+/* Confirmar venda — resumo estruturado */
+.bp-confirm-summary {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card-white);
+}
+.bp-confirm-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+.bp-confirm-summary-row:last-of-type { border-bottom: none; }
+.bp-confirm-summary-label {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.bp-confirm-summary-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+.bp-confirm-summary-note {
+  margin: 10px 2px 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  font-weight: 400;
+}
+#modal-confirm .confirm-title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+}
+#modal-confirm .confirm-actions .btn {
+  min-height: 36px;
+  height: 36px;
+  font-size: 0.8125rem;
+}
+
+
+#confirm-message.confirm-message--summary {
+  white-space: normal !important;
+  margin-bottom: 16px;
+}
+
+
+/* UI-audit: reforço grelha itens (evita overrides antigos) */
+.bp-view-dl--itens .detalhe-itens-header,
+.bp-view-dl--itens .detalhe-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px 76px 80px;
+  gap: 8px;
+  align-items: center;
+}
+
+
+/* ==================================================================
+   UI polish — Detalhe venda (Caixa) + Confirmar venda
+   Organização, hierarquia tipográfica, botões alinhados (SaaS)
+   ================================================================== */
+#modal-detalhe-venda .modal-sheet {
+  padding-top: 12px;
+}
+#modal-detalhe-venda .bp-view-kicker {
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  margin-bottom: 2px;
+}
+#modal-detalhe-venda .bp-view-title {
+  font-size: 1.05rem !important;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px !important;
+}
+#modal-detalhe-venda .bp-view-dl {
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+#modal-detalhe-venda .bp-view-row {
+  padding: 10px 12px;
+  align-items: center;
+}
+#modal-detalhe-venda .bp-view-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+#modal-detalhe-venda .bp-view-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+#modal-detalhe-venda .pagamento-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--bg-soft, #f5f2eb);
+  border: 1px solid var(--border-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+#modal-detalhe-venda .bp-view-section-title {
+  margin: 4px 0 6px;
+  padding: 0 2px;
+}
+#modal-detalhe-venda .bp-view-dl--itens {
+  margin-bottom: 12px;
+}
+#modal-detalhe-venda .detalhe-itens-header {
+  background: var(--bg-soft, #f7f4ed);
+}
+#modal-detalhe-venda .bp-view-total {
+  padding: 12px 14px;
+  margin-top: 0;
+  margin-bottom: 4px;
+  border-radius: 10px;
+}
+#modal-detalhe-venda .bp-view-total .bp-view-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+#modal-detalhe-venda .bp-view-total .bp-view-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+#modal-detalhe-venda .modal-actions {
+  margin-top: 12px;
+  gap: 8px;
+}
+#modal-detalhe-venda .modal-actions .btn {
+  height: 40px;
+  min-height: 40px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: 10px;
+}
+#modal-detalhe-venda .modal-actions #btn-cancelar-venda {
+  margin-top: 0;
+  background: #a33b3b;
+  border-color: #a33b3b;
+}
+
+/* Confirmar venda — mesmo idioma visual do detalhe (sem Cancelar venda) */
+#modal-confirm .modal-confirm-sheet {
+  padding: 20px 18px 16px;
+  border-radius: 14px;
+}
+#modal-confirm .confirm-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+#modal-confirm .bp-confirm-summary {
+  margin: 0 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+#modal-confirm .bp-confirm-summary-row {
+  padding: 9px 12px;
+  align-items: center;
+}
+#modal-confirm .bp-confirm-summary-label {
+  font-size: 0.6875rem;
+}
+#modal-confirm .bp-confirm-summary-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+#modal-confirm .bp-confirm-summary-note {
+  margin: 0 0 14px;
+  padding: 0 2px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+#modal-confirm .confirm-actions {
+  gap: 8px;
+}
+#modal-confirm .confirm-actions .btn {
+  height: 40px;
+  min-height: 40px;
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  font-weight: 600;
 }

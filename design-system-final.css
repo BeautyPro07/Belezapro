@@ -18,12 +18,12 @@ body {
   align-items: center;
   justify-content: center;
   gap: var(--s1);
-  height: 48px;
-  min-height: 48px;
-  padding: 0 var(--s2);
+  height: 40px;
+  min-height: 40px;
+  padding: 0 12px;
   border-radius: var(--radius-md);
   font-family: var(--font-sans);
-  font-size: var(--fs-md);
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   border: 1px solid transparent;
@@ -33,8 +33,8 @@ body {
   position: relative;
 }
 .btn:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
+  outline: 1px solid var(--gold);
+  outline-offset: 1px;
 }
 .btn:disabled,
 .btn.is-disabled {
@@ -96,10 +96,10 @@ body {
 .btn-danger:hover { background: var(--red); }
 
 .btn-sm {
-  height: 40px;
-  min-height: 40px;
-  padding: 0 14px;
-  font-size: var(--fs-sm);
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.75rem;
 }
 /* Escala oficial: default 48px · sm 40px. Variantes xs/lg/xl removidas (zero uso no produto). */
 .btn-block {
@@ -142,15 +142,19 @@ body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);
   background: var(--card-white);
-  border: 1.5px solid var(--border-soft);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   color: var(--text-primary);
   transition: border-color var(--transition), background var(--transition);
   outline: none;
 }
-.input-field:focus {
+.input-field:focus,
+.input-field:focus-visible {
+  outline: none !important;
   border-color: var(--gold);
+  border-width: 1px;
   background: var(--card-white);
+  box-shadow: none;
 }
 .input-field::placeholder { color: var(--text-muted); }
 .input-field:disabled {
@@ -357,7 +361,7 @@ select.input-field {
   font-weight: 500;
   box-shadow: 0 4px 20px rgba(28, 26, 24, 0.12);
   bottom: 88px;
-  z-index: 1900;
+  z-index: 2500; /* acima dos modais (2000+) — feedback visível com modal aberto */
 }
 .toast.success { background: var(--card-white, #fff); }
 .toast.error { background: var(--card-white, #fff); }
@@ -454,6 +458,13 @@ select.input-field {
 
 /* Focus global */
 *:focus-visible {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px !important;
+  outline: 1px solid var(--gold);
+  outline-offset: 1px;
+}
+input.input-field:focus-visible,
+select.input-field:focus-visible,
+textarea.input-field:focus-visible,
+.input-field:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }

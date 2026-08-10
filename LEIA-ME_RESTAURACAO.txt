@@ -1,0 +1,25 @@
+BeautyPro — ficheiros restaurados (2026-08-11)
+
+O teu ZIP «Belezapro 2 (2).zip» está alinhado com a base actual em runtime
+(app.bundle.js, sync, CSS, index, sw = belezapro-shell-v20260811-sync1).
+
+Faltavam apenas 4 ficheiros-fonte (necessários para rebuild com build-bundle.js).
+Estes módulos JÁ estão compilados dentro de app.bundle.js, por isso a app
+continua a funcionar; sem eles, um «node build-bundle.js» futuro falha ou
+gera um bundle incompleto.
+
+Copiar para a raiz do projecto (junto a index.html):
+
+  1. core-state.js          — estado global (state)
+  2. eventos-cadastros.js   — clientes, equipa, serviços, modais de cadastro
+  3. menu-accordion.js      — menu lateral / accordion
+  4. desktop-enterprise.js  — shell desktop ≥1024px
+
+Ordem no build-bundle.js (já referenciados):
+  core-state.js → … → eventos-cadastros.js → menu-accordion.js → desktop-enterprise.js
+
+Após copiar, opcional:
+  node build-bundle.js
+  (só se quiseres regenerar o bundle a partir dos .js)
+
+Não é necessário alterar index.html (carrega só app.bundle.js).
