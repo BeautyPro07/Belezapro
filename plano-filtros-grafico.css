@@ -102,21 +102,22 @@
 }
 
 #modal-periodo-dashboard .modal-sheet {
-  position: absolute;
-  top: 64px; /* alinhado abaixo do ícone de filtro */
+  position: fixed; /* ancorado ao ícone via JS (top/left) */
+  top: 64px;
   left: 12px;
   width: 260px;
   max-width: 90vw;
-  max-height: 340px;
+  max-height: min(340px, 70vh);
   margin: 0;
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0,0,0,.15);
   background: var(--card-white);
-  padding: 16px 16px 12px;
+  padding: 12px 12px 10px;
   pointer-events: auto;
   animation: none !important;
   transform: none !important;
   overflow-y: auto;
+  z-index: 1200;
 }
 
 #modal-periodo-dashboard .modal-sheet .handle {
@@ -176,17 +177,24 @@
   margin-bottom: 0;
 }
 .dash-periodo-custom .input-field {
-  padding: 4px 6px;
-  font-size: 0.7rem;
-  min-height: 40px;
+  padding: 2px 6px;
+  font-size: 0.65rem;
+  min-height: 28px;
+  height: 28px;
+  box-sizing: border-box;
+}
+.dash-periodo-custom .input-label {
+  font-size: 0.62rem;
+  margin-bottom: 2px;
 }
 
-/* Botão "Aplicar" – redondo e ainda menor */
+/* Botão "Aplicar" – compacto */
 #dash-custom-aplicar {
-  padding: 2px 12px;
-  font-size: 0.55rem;
-  min-height: 40px;
-  height: auto;
+  padding: 4px 14px;
+  font-size: 0.68rem;
+  min-height: 28px;
+  height: 28px;
+  line-height: 1;
   border-radius: var(--radius-full) !important;
   width: auto;
   align-self: flex-end;

@@ -1036,3 +1036,59 @@ Sem alterações a `bpNotifyFormError` / `mostrarErro`.
 
 ### SQL (se ainda não aplicado)
 Executar `SUPABASE_R50_E_CLIENTES.sql` no Supabase para colunas de cancelamento.
+
+## Regra obrigatória — Fila de sincronização (dados)
+
+**Nunca descartar operações de sync por teto de tentativas de rede.**  
+Cada `upsert`/`delete` enfileirado permanece na fila até sucesso remoto (ou rejeição lógica explícita: duplicado, limite de plano).  
+Backoff (máx. 60 s) só protege a rede; **não** implica perda de dados.  
+Flush automático: evento `online`, regresso ao foreground, intervalo 25 s.  
+
+Implementação: `sync-queue.js` → `flushSyncQueue` (sem `MAX_ATTEMPTS` a marcar falha de rede).
+
+## Etapa 1 Resumo — 13 / 14 / 16
+
+| Ponto | Correção | Ficheiros |
+|-------|----------|-----------|
+| 13 | De/Até/Aplicar mais compactos (28px) | `plano-filtros-grafico.css` |
+| 14 | Histórico do modal faturamento usa `getIntervaloDashAtual()`; fotos cliente; valor sem empilhar | `detalhes-acessibilidade.js`, `kpis-caixa-listas.css` |
+| 16 | “Próximos atendimentos” tipografia mais discreta | `kpis-caixa-listas.css` |
+
+Lógica do filtro de período do dashboard **não** alterada.
+
+### Varredura Etapa 1 (pós-implementação)
+- Modal faturamento: excluídos movimentos `cancelado` (alinhado aos KPIs).
+- Fila: `LIMITE_PLANO_ATINGIDO` deixa de remover a op da fila (backoff + retenção).
+- Total do modal: barra flex `nowrap` + `tabular-nums` anti-quebra.
+
+## Etapa 2 Resumo — gráfico (18)
+- Dia (intervalo 1 dia): série **por hora** (evita 1 barra única).
+- `state.chartPeriodo` alinhado a `dashPeriodo` ao mudar o filtro do topo.
+- Popover de período `position:fixed` ancorado ao ícone (`_bpPlacePeriodoSheetNear`).
+- Ficheiros: `chart-module.js`, `ui-render-dashboard-agenda.js`, `plano-filtros-grafico.css`.
+
+### Varredura Etapa 2
+- Popover: `chart-filter-toggle` usa `_bpPlacePeriodoSheetNear` (sem posição divergente).
+- Clique fora: ignora ícone KPI e toggle do gráfico.
+- Insights já ocultos sem dados (sem alteração extra).
+
+## Etapa 3 — Cabeçalho / boot / sync UX
+- Overlay bloqueante com spinner (15s) → mensagem + Tentar novamente / Continuar offline.
+- Nome do salão: sem texto «Carregando...»; header alinhado.
+- Modal agendamentos (KPI): filtra pelo **mesmo intervalo** dos KPIs (`getIntervaloDashAtual`).
+- Popover de período: `position:fixed` e **acompanha scroll** do âncora (ícone/filtro).
+
+### Varredura completa etapas 1–3
+- Auth pull: falha rápida → `bpBootShowFail` (não só aos 15s).
+- Offline durante boot → fecha overlay.
+- Tombstone na fila: upsert de id eliminado sai da fila de forma explícita.
+- Intervalos inicio>fim corrigidos nos modais KPI.
+
+### Fix overlay boot (visível)
+Causa: o spinner só era chamado no ramo `carregarDoSupabase`, mas o arranque usa **`bpSilentPull`**.  
+Correcção: overlay envolve `bpSilentPull` / `carregarDoSupabase` nos dois caminhos de boot online.
+
+### Fix timing overlay boot
+- Abre no `DOMContentLoaded` (se online + salão em cache) e no início de `checkSession`.
+- Removido `setTimeout(300/400)` antes do pull.
+- Fecha só após `bpSilentPull` / falha / Continuar offline / ir para login.

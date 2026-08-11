@@ -423,12 +423,14 @@ function renderizarGrafico() {
   const intervalo = (typeof getIntervaloDashAtual === 'function')
     ? getIntervaloDashAtual()
     : { inicio: (typeof hoje === 'function' ? hoje() : ''), fim: (typeof hoje === 'function' ? hoje() : ''), label: 'Hoje' };
-  const modoHora = (state.chartPeriodo === 'hora');
+  /* Dia único: série por hora (evita 1 barra). chartPeriodo==='hora' força o mesmo. */
+  var _singleDay = !!(intervalo && intervalo.inicio && intervalo.fim && intervalo.inicio === intervalo.fim);
+  const modoHora = (state.chartPeriodo === 'hora') || _singleDay;
   const mostrarValores = state.chartMostrarValores || false;
   const movs = state.movimentos || [];
   const dashOff = state.dashOffset || 0;
 
-  // Modelo único (Fase 1) — série + totais + comparação
+  // Modelo único — série + totais + comparação (alinhado ao intervalo dos KPIs)
   let analise = null;
   if (typeof buildAnaliseTemporal === 'function') {
     var diaRefHora = null;
@@ -1131,23 +1133,30 @@ function _bpInitChartChrome() {
         });
       }
       function placeSheetNearFilter() {
+        var btn = document.getElementById('chart-filter-toggle');
+        if (typeof _bpPlacePeriodoSheetNear === 'function') {
+          _bpPlacePeriodoSheetNear(btn);
+          return;
+        }
         try {
           var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
-          var btn = document.getElementById('chart-filter-toggle');
           if (!sheet || !btn) return;
           var r = btn.getBoundingClientRect();
-          var w = Math.min(220, window.innerWidth * 0.78);
+          var w = Math.min(260, window.innerWidth * 0.88);
           var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
-          var top = Math.min(r.bottom + 6, window.innerHeight - 120);
+          var top = Math.min(r.bottom + 6, window.innerHeight - 140);
+          sheet.style.position = 'fixed';
           sheet.style.top = Math.round(top) + 'px';
           sheet.style.left = Math.round(left) + 'px';
           sheet.style.width = Math.round(w) + 'px';
+          sheet.style.right = 'auto';
         } catch (_) {}
       }
       markActive();
       try { _bpHaptic('open'); } catch (_) {}
       if (typeof openModal === 'function') {
         openModal('modal-periodo-dashboard');
+        try { window.__bpPeriodoAnchor = document.getElementById('chart-filter-toggle'); } catch (_) {}
         placeSheetNearFilter();
         setTimeout(placeSheetNearFilter, 30);
       } else {

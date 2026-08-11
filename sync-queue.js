@@ -264,7 +264,7 @@ async function flushSyncQueue() {
 
   // ET4.6: filas grandes (600+) em lotes — progresso gravado, sem conflitos por "tudo ou nada"
   const BATCH_SIZE = 25;
-  const MAX_ATTEMPTS = 8;
+  /* Sem teto de tentativas de rede: dados na fila até sucesso (regra de produto). */
   const YIELD_MS = 30;
 
   try {
@@ -315,6 +315,8 @@ async function flushSyncQueue() {
             }
           } else {
             if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload && op.payload.id, op.tabela)) {
+              /* Tombstone: upsert obsoleto — remove da fila (dado local já eliminado). */
+              processed++;
               continue;
             }
             const payload = op.payload || {};
@@ -331,28 +333,29 @@ async function flushSyncQueue() {
           processed++;
         } catch (err) {
           if (err && err.message === 'LIMITE_PLANO_ATINGIDO') {
-            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido.', 'error');
+            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido. Fica na fila até o plano permitir.', 'error');
+            /* Não descartar: permanece na fila com backoff (regra: zero perda). */
+            op.failed = false;
+            op.attempts = (op.attempts || 0) + 1;
+            op.nextRetry = Date.now() + Math.min(300000, 60000 + (op.attempts * 15000));
+            restantesBatch.push(op);
             continue;
           }
           if (err && (err.message === 'DUPLICADO_BLOQUEADO' || String(err.message || '').indexOf('DUPLICADO') >= 0)) {
             if (typeof logErroSilencioso === 'function') logErroSilencioso('flushSyncQueue.duplicado', err);
             // não retentar em loop
-            op.failed = true;
-            op.attempts = MAX_ATTEMPTS;
+            op.failed = true; /* rejeição lógica (duplicado) — não é perda de dado local */
             itensFalhos.push(op.id || 'item');
             restantesBatch.push(op);
             continue;
           }
+          /* REGRA OBRIGATÓRIA: nunca descartar nem marcar failed por teto de tentativas.
+             A op permanece na fila e volta a tentar (backoff só para não martelar a rede). */
           op.attempts = (op.attempts || 0) + 1;
-          if (op.attempts >= MAX_ATTEMPTS) {
-            op.failed = true;
-            itensFalhos.push(op.id || 'item');
-            restantesBatch.push(op);
-          } else {
-            const delay = Math.min(Math.pow(2, op.attempts) * 1000, 60000) + Math.random() * 1000;
-            op.nextRetry = Date.now() + delay;
-            restantesBatch.push(op);
-          }
+          op.failed = false;
+          const delay = Math.min(Math.pow(2, Math.min(op.attempts, 6)) * 1000, 60000) + Math.random() * 1000;
+          op.nextRetry = Date.now() + delay;
+          restantesBatch.push(op);
         }
       }
 
@@ -366,7 +369,8 @@ async function flushSyncQueue() {
     }
 
     if (itensFalhos.length > 0 && typeof toast === 'function') {
-      toast('Falha ao sincronizar ' + itensFalhos.length + ' operação(ões) após várias tentativas. Toque no indicador de sync para reintentar.', 'error');
+      /* Duplicados / rejeições lógicas — não são perdas de fila de rede */
+      toast('Algumas operações foram rejeitadas pelo servidor (' + itensFalhos.length + '). Os restantes dados permanecem na fila.', 'warning');
     }
     if (processed > 0 && typeof logErroSilencioso === 'function') {
       try { console.info('[sync] flush processou', processed, 'ops; restam', getSyncQueue().length); } catch (_) {}

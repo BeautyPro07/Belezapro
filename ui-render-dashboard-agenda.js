@@ -481,16 +481,45 @@ const greetEl = document.getElementById('greeting');
 //  ficavam sempre presos no valor por defeito. Não foi preciso mudar o
 //  motor de cálculo nem o CSS — só faltava este bloco.
 // ====================================================================
-document.getElementById('dash-filter-icon')?.addEventListener('click', function(e) {
-  e.stopPropagation();
+function _bpPlacePeriodoSheetNear(anchorEl) {
   try {
     var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
-    if (sheet) {
+    if (!sheet) return;
+    var btn = anchorEl || window.__bpPeriodoAnchor || document.getElementById('dash-filter-icon') || document.getElementById('chart-filter-toggle');
+    if (!btn || !btn.getBoundingClientRect) {
       sheet.style.top = '64px';
       sheet.style.left = '12px';
-      sheet.style.width = '';
+      return;
     }
+    window.__bpPeriodoAnchor = btn;
+    var r = btn.getBoundingClientRect();
+    var w = Math.min(260, window.innerWidth * 0.88);
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    var top = Math.min(Math.max(8, r.bottom + 6), window.innerHeight - 140);
+    sheet.style.position = 'fixed';
+    sheet.style.top = Math.round(top) + 'px';
+    sheet.style.left = Math.round(left) + 'px';
+    sheet.style.width = Math.round(w) + 'px';
+    sheet.style.right = 'auto';
+    sheet.style.zIndex = '1200';
   } catch (_) {}
+}
+if (typeof window !== 'undefined') window._bpPlacePeriodoSheetNear = _bpPlacePeriodoSheetNear;
+(function bpBindPeriodoSheetFollow() {
+  function reposition() {
+    var overlay = document.getElementById('modal-periodo-dashboard');
+    if (!overlay || !overlay.classList.contains('open')) return;
+    if (typeof _bpPlacePeriodoSheetNear === 'function') _bpPlacePeriodoSheetNear(window.__bpPeriodoAnchor);
+  }
+  window.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
+  var main = document.querySelector('.main-content');
+  if (main) main.addEventListener('scroll', reposition, { passive: true });
+})();
+
+
+document.getElementById('dash-filter-icon')?.addEventListener('click', function(e) {
+  e.stopPropagation();
   document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     const ativa = btn.dataset.periodo === state.dashPeriodo &&
       (btn.dataset.periodo !== 'dia' || Number(btn.dataset.offset || 0) === state.dashOffset);
@@ -508,7 +537,13 @@ document.getElementById('dash-filter-icon')?.addEventListener('click', function(
   }
   const overlay = document.getElementById('modal-periodo-dashboard');
   if (overlay.classList.contains('open')) closeModal('modal-periodo-dashboard');
-  else openModal('modal-periodo-dashboard');
+  else {
+    openModal('modal-periodo-dashboard');
+    window.__bpPeriodoAnchor = document.getElementById('dash-filter-icon');
+    _bpPlacePeriodoSheetNear(window.__bpPeriodoAnchor);
+    setTimeout(function () { window.__bpPeriodoAnchor = document.getElementById('dash-filter-icon');
+    _bpPlacePeriodoSheetNear(window.__bpPeriodoAnchor); }, 30);
+  }
 });
 
 document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
@@ -530,11 +565,13 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     state.dashOffset = Number(this.dataset.offset) || 0;
     localStorage.setItem('bp_dash_periodo', state.dashPeriodo);
     localStorage.setItem('bp_dash_offset', String(state.dashOffset));
+    /* Gráfico no mesmo período dos KPIs (dia → série horária no render) */
+    state.chartPeriodo = tipo;
+    try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
     closeModal('modal-periodo-dashboard');
-    // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
-    if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
     try { _bpSyncPeriodLabels((this.textContent || '').trim()); } catch (_) {}
     try { if (typeof _bpHaptic === 'function') _bpHaptic('select'); } catch (_) {}
+    try { if (typeof _bpSetChartFilterActive === 'function') _bpSetChartFilterActive(tipo); } catch (_) {}
     renderDashboard();
     if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
@@ -560,7 +597,8 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
       : null;
     _bpSyncPeriodLabels(_civ && _civ.label ? _civ.label : (ini + ' — ' + fim));
   } catch (_) {}
-  state.chartPeriodo = 'semana';
+  state.chartPeriodo = (ini === fim) ? 'dia' : 'semana';
+  try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
   renderDashboard();
   if (typeof renderizarGrafico === 'function') renderizarGrafico();
 });
@@ -569,9 +607,12 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
 document.addEventListener('click', function(e) {
   const overlay = document.getElementById('modal-periodo-dashboard');
   const icon = document.getElementById('dash-filter-icon');
-  if (overlay && overlay.classList.contains('open') && !overlay.contains(e.target) && e.target !== icon && !icon?.contains(e.target)) {
-    closeModal('modal-periodo-dashboard');
-  }
+  const chartToggle = document.getElementById('chart-filter-toggle');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  if (overlay.contains(e.target)) return;
+  if (icon && (e.target === icon || icon.contains(e.target))) return;
+  if (chartToggle && (e.target === chartToggle || chartToggle.contains(e.target))) return;
+  closeModal('modal-periodo-dashboard');
 });
 
 // ====================================================================

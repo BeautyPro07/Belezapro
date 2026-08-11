@@ -142,10 +142,17 @@ async function checkSession() {
       var role = localStorage.getItem('bp_user_role');
       if (role) state.config.userRole = role;
     } catch (_) {}
+
+    /* Overlay ANTES da UI: utilizador nunca vê a app "já sincronizada" sem o modal */
+    var bootOnline = (typeof navigator !== 'undefined' && navigator.onLine);
+    if (bootOnline) {
+      try { if (typeof bpShowBootOverlay === 'function') bpShowBootOverlay(); } catch (_) {}
+    }
+
     bpShowAppShell();
     bpMarkSessionLocal(cachedSalao);
 
-    // Dados locais — não bloquear splash (já escondido)
+    // Dados locais sob o overlay (se online)
     try {
       await loadState(false);
     } catch (e) {
@@ -158,49 +165,56 @@ async function checkSession() {
       if (typeof updateUI === 'function') updateUI();
     } catch (_) {}
 
-    // Rede só em background, timeout curto, sem segundo getSession eterno
-    if (navigator.onLine) {
-      setTimeout(function () {
-        bpWithTimeout(supabaseClient.auth.getSession(), 1500, 'getSession_bg')
-          .then(function (res) {
-            var session = res && res.data ? res.data.session : null;
-            if (!session) return null;
-            return bpWithTimeout(
-              supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
-              2000,
-              'profile_bg'
-            );
-          })
-          .then(function (pr) {
-            if (!pr || !pr.data) return;
-            var profile = pr.data;
-            if (profile.salao_id) {
-              state.config.salaoId = profile.salao_id;
-              bpMarkSessionLocal(profile.salao_id);
-            }
-            if (profile.role) {
-              state.config.userRole = profile.role;
-              try { localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
-            }
-            if (profile.nome) state.config.storeName = profile.nome || state.config.storeName;
-            if (typeof saveConfig === 'function') return saveConfig();
-          })
-          .then(function () {
-            if (typeof sincronizarConfigDoServidor === 'function') return sincronizarConfigDoServidor();
-          })
-          .then(function () {
-            if (typeof bpSilentPull === 'function') return bpSilentPull(true);
-            if (typeof carregarDoSupabase === 'function') return carregarDoSupabase();
-          })
-          .then(function () {
-            if (typeof updateUI === 'function') updateUI();
-            if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-          })
-          .catch(function (err) {
-            console.warn('[boot] background (ignorado offline/lento)', err && err.message);
-          });
-      }, 300);
+    // Rede imediata — overlay já está aberto; sem setTimeout artificial
+    if (bootOnline) {
+      Promise.resolve()
+        .then(function () {
+          return bpWithTimeout(supabaseClient.auth.getSession(), 1500, 'getSession_bg');
+        })
+        .then(function (res) {
+          var session = res && res.data ? res.data.session : null;
+          if (!session) return null;
+          return bpWithTimeout(
+            supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
+            2000,
+            'profile_bg'
+          );
+        })
+        .then(function (pr) {
+          if (!pr || !pr.data) return;
+          var profile = pr.data;
+          if (profile.salao_id) {
+            state.config.salaoId = profile.salao_id;
+            bpMarkSessionLocal(profile.salao_id);
+          }
+          if (profile.role) {
+            state.config.userRole = profile.role;
+            try { localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
+          }
+          if (profile.nome) state.config.storeName = profile.nome || state.config.storeName;
+          if (typeof saveConfig === 'function') return saveConfig();
+        })
+        .then(function () {
+          if (typeof sincronizarConfigDoServidor === 'function') return sincronizarConfigDoServidor();
+        })
+        .then(function () {
+          var pullP = null;
+          if (typeof bpSilentPull === 'function') pullP = bpSilentPull(true);
+          else if (typeof carregarDoSupabase === 'function') pullP = carregarDoSupabase();
+          if (!pullP) return null;
+          return pullP;
+        })
+        .then(function () {
+          try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
+          if (typeof updateUI === 'function') updateUI();
+          if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+        })
+        .catch(function (err) {
+          console.warn('[boot] sync online', err && err.message);
+          try { if (typeof bpBootShowFail === 'function') bpBootShowFail(); } catch (_) {}
+        });
     }
+
     return;
   }
 
@@ -224,6 +238,9 @@ async function checkSession() {
     }
 
     bpShowAppShell();
+    if (navigator.onLine) {
+      try { if (typeof bpShowBootOverlay === 'function') bpShowBootOverlay(); } catch (_) {}
+    }
 
     var profile = null;
     try {
@@ -267,15 +284,24 @@ async function checkSession() {
     if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 
     if (navigator.onLine) {
-      setTimeout(function () {
-        Promise.resolve()
-          .then(function () { return typeof sincronizarConfigDoServidor === 'function' ? sincronizarConfigDoServidor() : null; })
-          .then(function () { return typeof bpSilentPull === 'function' ? bpSilentPull(true) : null; })
-          .then(function () {
-            if (typeof updateUI === 'function') updateUI();
-          })
-          .catch(function () {});
-      }, 400);
+      Promise.resolve()
+        .then(function () { return typeof sincronizarConfigDoServidor === 'function' ? sincronizarConfigDoServidor() : null; })
+        .then(function () {
+          var pullP = null;
+          if (typeof bpSilentPull === 'function') pullP = bpSilentPull(true);
+          else if (typeof carregarDoSupabase === 'function') pullP = carregarDoSupabase();
+          return pullP;
+        })
+        .then(function () {
+          try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
+          if (typeof updateUI === 'function') updateUI();
+        })
+        .catch(function (err) {
+          console.warn('[boot] pull inicial', err && err.message);
+          try { if (typeof bpBootShowFail === 'function') bpBootShowFail(); } catch (_) {}
+        });
+    } else {
+      try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
     }
   } catch (err) {
     console.error('[boot] checkSession', err);

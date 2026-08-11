@@ -9,34 +9,93 @@
 // KPIS DETALHE
 // ====================================================================
 function abrirDetalheFaturamento() {
- const list = document.getElementById('revenue-detail-list');
- const totalSpan = document.getElementById('revenue-detail-total');
- if (!state.movimentos || !Array.isArray(state.movimentos)) {
-  if (list) list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
-  if (totalSpan) totalSpan.textContent = '0 Kz';
-  openModal('modal-revenue-detail');
-  return;
- }
- const hojeStr = hoje();
- const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
- if (vendasHoje.length === 0) {
-  list.innerHTML = '<div class="empty-state"><p>Nenhuma venda hoje</p></div>';
-  totalSpan.textContent = '0 Kz';
- } else {
-  list.innerHTML = vendasHoje.map(v => `
-   <div class="list-item" style="cursor:default;">
-    <div class="avatar" style="background:#E6F4EC;color:var(--green);"></div>
-    <div class="info">
-     <div class="title">${escHtml(v.cliente || 'Anónimo')}</div>
-     <div class="sub">${escHtml(v.descricao)} · ${v.hora}</div>
-    </div>
-    <div class="action">${fmtKz(v.valor)}</div>
-   </div>
-  `).join('');
-  const total = vendasHoje.reduce((s, v) => s + v.valor, 0);
-  totalSpan.textContent = fmtKz(total);
- }
- openModal('modal-revenue-detail');
+  const list = document.getElementById('revenue-detail-list');
+  const totalSpan = document.getElementById('revenue-detail-total');
+  if (!list) {
+    if (typeof openModal === 'function') openModal('modal-revenue-detail');
+    return;
+  }
+  if (!state.movimentos || !Array.isArray(state.movimentos)) {
+    list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
+    if (totalSpan) totalSpan.textContent = '0 Kz';
+    if (typeof openModal === 'function') openModal('modal-revenue-detail');
+    return;
+  }
+
+  /* Mesmo intervalo dos KPIs do Resumo (não fixar só "hoje") */
+  var inicio;
+  var fim;
+  var labelPeriodo = 'Hoje';
+  try {
+    if (typeof getIntervaloDashAtual === 'function') {
+      var iv = getIntervaloDashAtual();
+      if (iv && iv.inicio && iv.fim) {
+        inicio = iv.inicio;
+        fim = iv.fim;
+        labelPeriodo = iv.label || labelPeriodo;
+      }
+    }
+  } catch (_) {}
+  if (!inicio || !fim) {
+    var hojeStr = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    inicio = fim = hojeStr;
+  }
+  if (inicio > fim) { var _swF = inicio; inicio = fim; fim = _swF; }
+
+  var titleEl = document.getElementById('revenue-title');
+  if (titleEl) {
+    titleEl.textContent = 'Faturamento · ' + labelPeriodo;
+  }
+
+  var vendas = state.movimentos.filter(function (m) {
+    if (!m || m.tipo !== 'venda' || !m.data) return false;
+    if (String(m.status || '').toLowerCase() === 'cancelado') return false;
+    return m.data >= inicio && m.data <= fim;
+  }).sort(function (a, b) {
+    var d = String(b.data || '').localeCompare(String(a.data || ''));
+    if (d !== 0) return d;
+    return String(b.hora || '').localeCompare(String(a.hora || ''));
+  });
+
+  if (vendas.length === 0) {
+    list.innerHTML = '<div class="empty-state"><p>Nenhuma venda neste período</p></div>';
+    if (totalSpan) totalSpan.textContent = '0 Kz';
+  } else {
+    list.innerHTML = vendas.map(function (v) {
+      var nome = v.cliente || 'Anónimo';
+      var av = '<div class="avatar">' + (typeof escHtml === 'function' ? escHtml(String(nome).charAt(0).toUpperCase()) : '?') + '</div>';
+      try {
+        var cli = (state.clientes || []).find(function (c) {
+          return (v.cliente_id && String(c.id) === String(v.cliente_id)) || c.nome === v.cliente;
+        });
+        var src = null;
+        if (cli && window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') {
+          src = BPMedia.resolveFotoSrc(cli);
+        } else if (cli && (cli.foto || cli.foto_url)) {
+          src = cli.foto || cli.foto_url;
+        }
+        if (src) {
+          av = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy" decoding="async"></div>';
+        }
+      } catch (_) {}
+      var dataLbl = (v.data === fim && inicio === fim)
+        ? (v.hora || '')
+        : ((v.data || '') + (v.hora ? ' · ' + v.hora : ''));
+      var sub = (typeof escHtml === 'function' ? escHtml(v.descricao || '') : (v.descricao || ''));
+      if (dataLbl) sub += (sub ? ' · ' : '') + (typeof escHtml === 'function' ? escHtml(String(dataLbl)) : dataLbl);
+      var valorStr = typeof fmtKz === 'function' ? fmtKz(v.valor) : (String(v.valor || 0) + ' Kz');
+      return (
+        '<div class="list-item bp-revenue-row" style="cursor:default;">' + av +
+        '<div class="info">' +
+        '<div class="title">' + (typeof escHtml === 'function' ? escHtml(nome) : nome) + '</div>' +
+        '<div class="sub">' + sub + '</div></div>' +
+        '<div class="action bp-revenue-val">' + valorStr + '</div></div>'
+      );
+    }).join('');
+    var total = vendas.reduce(function (s, v) { return s + (Number(v.valor) || 0); }, 0);
+    if (totalSpan) totalSpan.textContent = typeof fmtKz === 'function' ? fmtKz(total) : (total + ' Kz');
+  }
+  if (typeof openModal === 'function') openModal('modal-revenue-detail');
 }
 
 let agendaDetailFiltro = 'pendentes';
@@ -57,23 +116,43 @@ function abrirDetalheAgendamentos(filtro = 'pendentes') {
     if (typeof openModal === 'function') openModal('modal-agenda-detail');
     return;
   }
-  const hojeStr = hoje();
+  const hojeStr = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+  /* Mesmo intervalo dos KPIs do Resumo */
+  var inicio = hojeStr, fim = hojeStr, labelPeriodo = 'Hoje';
+  try {
+    if (typeof getIntervaloDashAtual === 'function') {
+      var iv = getIntervaloDashAtual();
+      if (iv && iv.inicio && iv.fim) {
+        inicio = iv.inicio;
+        fim = iv.fim;
+        labelPeriodo = iv.label || labelPeriodo;
+      }
+    }
+  } catch (_) {}
+  if (inicio > fim) { var _sw = inicio; inicio = fim; fim = _sw; }
+  var titleEl = document.getElementById('agenda-detail-title');
+  if (titleEl) titleEl.textContent = 'Agendamentos · ' + labelPeriodo;
+
   const all = state.agendamentos.slice();
-  // Histórico alinhado ao pedido: pendentes (hoje em diante) / realizados (últimos 90 dias)
   let filtrados;
   if (filtro === 'pendentes') {
-    filtrados = all.filter(a => {
+    filtrados = all.filter(function (a) {
+      if (!a || !a.data) return false;
+      if (a.data < inicio || a.data > fim) return false;
       const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
-      return st === 'agendado' && a.data >= hojeStr;
-    }).sort((a, b) => String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || '')));
+      return st === 'agendado';
+    }).sort(function (a, b) {
+      return String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || ''));
+    });
   } else {
-    const d90 = new Date(hojeStr + 'T00:00:00');
-    d90.setDate(d90.getDate() - 89);
-    const inicio90 = d90.toISOString().split('T')[0];
-    filtrados = all.filter(a => {
+    filtrados = all.filter(function (a) {
+      if (!a || !a.data) return false;
+      if (a.data < inicio || a.data > fim) return false;
       const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
-      return st === 'realizado' && a.data >= inicio90 && a.data <= hojeStr;
-    }).sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || '')));
+      return st === 'realizado';
+    }).sort(function (a, b) {
+      return String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || ''));
+    });
   }
   if (btnPend) btnPend.className = 'btn btn-sm ' + (filtro === 'pendentes' ? 'btn-primary' : 'btn-secondary');
   if (btnReal) btnReal.className = 'btn btn-sm ' + (filtro === 'realizados' ? 'btn-primary' : 'btn-secondary');
@@ -96,7 +175,7 @@ function abrirDetalheAgendamentos(filtro = 'pendentes') {
         else if (cli && (cli.foto || cli.foto_url)) src = cli.foto || cli.foto_url;
         if (src) av = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy"></div>';
       } catch (_) {}
-      const dataLbl = a.data === hojeStr ? a.hora : ((a.data || '') + ' · ' + (a.hora || ''));
+      const dataLbl = (a.data === fim && inicio === fim) ? (a.hora || '') : ((a.data || '') + (a.hora ? ' · ' + a.hora : ''));
       return (
         '<div class="list-item" style="cursor:default;">' + av +
         '<div class="info"><div class="title">' + escHtml(a.servico || '') + '</div>' +

@@ -112,6 +112,21 @@
   </div>
 
   <!-- ===== APP VIEW ===== -->
+  
+  <!-- Boot sync overlay (tipo Multicaixa) — bloqueia UI até dados/timeout 15s -->
+  <div id="bp-boot-overlay" class="bp-boot-overlay" hidden aria-hidden="true" role="alertdialog" aria-labelledby="bp-boot-title" aria-describedby="bp-boot-desc">
+    <div class="bp-boot-card">
+      <div class="bp-boot-spinner" aria-hidden="true"></div>
+      <p id="bp-boot-title" class="bp-boot-title">A sincronizar</p>
+      <p id="bp-boot-desc" class="bp-boot-desc">A actualizar os dados do salão…</p>
+      <div id="bp-boot-actions" class="bp-boot-actions" hidden>
+        <p class="bp-boot-fail-msg">Não foi possível actualizar os dados nem sincronizar. Verifique a ligação à internet. Pode usar a plataforma offline; quando a rede estiver estável a sincronização será automática.</p>
+        <button type="button" class="btn btn-primary" id="bp-boot-retry">Tentar novamente</button>
+        <button type="button" class="btn btn-secondary" id="bp-boot-offline">Continuar offline</button>
+      </div>
+    </div>
+  </div>
+
   <div id="app-view" class="view" style="display:none;">
     <div class="app-container">
 
@@ -124,7 +139,7 @@
                 <img src="logo.png" alt="BeautyPro" style="height:27px;width:auto;">
                 Beauty<span>Pro</span>
               </div>
-              <div class="store-name" id="store-name-display" title="Duplo clique para gerir profissionais" style="max-width:36vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.82rem;">Carregando...</div>
+              <div class="store-name" id="store-name-display" title="Duplo clique para gerir profissionais" style="max-width:42vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.82rem;line-height:1.2;">&nbsp;</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="plano-badge" id="plano-badge" style="flex-shrink:0;">TRIAL</span>
@@ -357,15 +372,14 @@
         </div>
 <!-- POPOVER do filtro (com Dia Exato integrado) -->
 <div id="agenda-filter-popover" class="agenda-filter-popover">
+  <!-- 2×2 períodos + Dia exacto (largura total). Todos NÃO fica aqui. -->
   <div class="agenda-periodo-grid">
-    <button class="agenda-periodo-filter active" data-periodo="hoje">Hoje</button>
-    <button class="agenda-periodo-filter" data-periodo="semana">Semana</button>
-    <button class="agenda-periodo-filter" data-periodo="mes">Mês</button>
-    <button class="agenda-periodo-filter" data-periodo="todos">Todos</button>
-    <button class="agenda-periodo-filter" data-periodo="90dias">90 dias</button>
-    <!-- Dia Exato -->
-    <button class="agenda-periodo-filter agenda-periodo-filter--dia" data-periodo="dia">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <button type="button" class="agenda-periodo-filter active" data-periodo="hoje">Hoje</button>
+    <button type="button" class="agenda-periodo-filter" data-periodo="semana">Semana</button>
+    <button type="button" class="agenda-periodo-filter" data-periodo="mes">Mês</button>
+    <button type="button" class="agenda-periodo-filter" data-periodo="90dias">90 dias</button>
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--dia" data-periodo="dia">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
         <rect x="2" y="3" width="12" height="11" rx="1"/>
         <line x1="2" y1="6" x2="14" y2="6"/>
         <line x1="5" y1="2" x2="5" y2="4"/>
@@ -380,11 +394,11 @@
       <span class="bp-ag-pulse-dot" aria-hidden="true"></span>
       Pendentes
     </button>
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="todos">Todos</button>
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="cancelados">Cancelados</button>
     <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="realizados">Realizados</button>
     <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="nao_realizado">Não realizados</button>
-    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="cancelados">Cancelados</button>
   </div>
-  <!-- Input de data – oculto mas clicável (opacity:0 + pointer-events:none) -->
   <input type="date" id="agenda-data-exata" class="input-field" style="display:none;width:100%;margin-top:8px;font-size:16px;" aria-label="Escolher dia exacto">
 </div>
       </div>
@@ -460,7 +474,7 @@
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="30dias">Últimos 30 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="90dias">Últimos 90 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="ano">Este ano</button>
-                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter agenda-periodo-filter--dia agenda-periodo-filter--full" data-periodo="dia">Dia exacto</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="dia">Dia exacto</button>
                 </div>
                 <input type="date" id="caixa-data-exata" style="display:none;" />
               </div>
@@ -482,7 +496,7 @@
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="90dias">Últimos 90 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="mes">Este mês</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="ano">Este ano</button>
-                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo agenda-periodo-filter--dia agenda-periodo-filter--full" data-periodo="dia">Dia exacto</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="dia">Dia exacto</button>
                 </div>
                 <input type="date" id="caixa-loc-data-exata" class="input-field" style="display:none;width:100%;margin-top:8px;font-size:16px;" aria-label="Dia exacto para localizar">
                 <div id="caixa-localizar-busca" style="display:none;margin-top:10px;">
@@ -1165,8 +1179,9 @@
       <div class="handle"></div>
       <div id="revenue-title" class="modal-title">Detalhe do Faturamento</div>
       <div id="revenue-detail-list" style="max-height:400px;overflow-y:auto;"></div>
-      <div style="margin-top:12px;text-align:right;font-weight:700;font-size:1.1rem;border-top:2px solid var(--gold);padding-top:8px;">
-        Total: <span id="revenue-detail-total" style="color:var(--gold-dark);font-family:var(--font-serif);">0 Kz</span>
+      <div class="bp-revenue-total-bar" style="margin-top:12px;display:flex;align-items:baseline;justify-content:flex-end;gap:8px;font-weight:700;font-size:1rem;border-top:2px solid var(--gold);padding-top:8px;flex-wrap:nowrap;">
+        <span style="flex-shrink:0;">Total:</span>
+        <span id="revenue-detail-total" class="bp-revenue-total-val" style="color:var(--gold-dark);font-family:var(--font-serif);white-space:nowrap;font-variant-numeric:tabular-nums;">0 Kz</span>
       </div>
       <button class="btn btn-secondary btn-block mt-3" id="modal-revenue-close">Fechar</button>
     </div>

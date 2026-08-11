@@ -20,6 +20,16 @@
 //  esta lista.
 // ====================================================================
 document.addEventListener('DOMContentLoaded', async function init() {
+  /* Overlay o mais cedo possível (<1s): antes de checkSession/UI */
+  try {
+    var loggedOut = false;
+    try { loggedOut = localStorage.getItem('bp_logged_out') === '1'; } catch (_) {}
+    var hasSalao = false;
+    try { hasSalao = !!localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
+    if (!loggedOut && hasSalao && navigator.onLine && typeof bpShowBootOverlay === 'function') {
+      bpShowBootOverlay();
+    }
+  } catch (_) {}
   // Garantir estado inicial da UI
   document.getElementById('login-view').style.display = 'flex';
   document.getElementById('app-view').style.display = 'none';
@@ -231,3 +241,139 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+
+/* ===== Etapa 3 — Boot overlay (15s) + continuar offline ===== */
+(function bpBootOverlayModule() {
+  var BOOT_MS = 15000;
+  var timer = null;
+  var active = false;
+
+  function el() { return document.getElementById('bp-boot-overlay'); }
+  function actions() { return document.getElementById('bp-boot-actions'); }
+  function spinner() { return document.querySelector('#bp-boot-overlay .bp-boot-spinner'); }
+  function title() { return document.getElementById('bp-boot-title'); }
+  function desc() { return document.getElementById('bp-boot-desc'); }
+
+  function showSpinnerState() {
+    var a = actions();
+    if (a) a.hidden = true;
+    var s = spinner();
+    if (s) s.style.display = '';
+    if (title()) title().textContent = 'A sincronizar';
+    if (desc()) desc().textContent = 'A actualizar os dados do salão…';
+  }
+
+  function showFailState() {
+    var a = actions();
+    if (a) a.hidden = false;
+    var s = spinner();
+    if (s) s.style.display = 'none';
+    if (title()) title().textContent = 'Sem ligação estável';
+    if (desc()) desc().textContent = '';
+  }
+
+  function openBoot() {
+    var o = el();
+    if (!o) return;
+    active = true;
+    o.hidden = false;
+    try { o.removeAttribute('hidden'); } catch (_) {}
+    o.classList.add('is-open');
+    o.style.display = 'flex';
+    o.setAttribute('aria-hidden', 'false');
+    showSpinnerState();
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!active) return;
+      showFailState();
+    }, BOOT_MS);
+  }
+
+  function closeBoot() {
+    active = false;
+    clearTimeout(timer);
+    timer = null;
+    var o = el();
+    if (!o) return;
+    o.hidden = true;
+    try { o.setAttribute('hidden', ''); } catch (_) {}
+    o.classList.remove('is-open');
+    o.style.display = 'none';
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function retry() {
+    showSpinnerState();
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!active) return;
+      showFailState();
+    }, BOOT_MS);
+    if (typeof carregarDoSupabase === 'function' && navigator.onLine) {
+      carregarDoSupabase().then(function () {
+        closeBoot();
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof flushSyncQueue === 'function') flushSyncQueue();
+      }).catch(function () {
+        showFailState();
+      });
+    } else {
+      showFailState();
+    }
+  }
+
+  function continueOffline() {
+    closeBoot();
+    if (typeof flushSyncQueue === 'function' && navigator.onLine) {
+      try { flushSyncQueue(); } catch (_) {}
+    }
+  }
+
+  function bind() {
+    var r = document.getElementById('bp-boot-retry');
+    var o = document.getElementById('bp-boot-offline');
+    if (r && !r.dataset.bound) {
+      r.dataset.bound = '1';
+      r.addEventListener('click', function (e) { e.preventDefault(); retry(); });
+    }
+    if (o && !o.dataset.bound) {
+      o.dataset.bound = '1';
+      o.addEventListener('click', function (e) { e.preventDefault(); continueOffline(); });
+    }
+  }
+
+  window.bpShowBootOverlay = openBoot;
+  // Se for para login, nunca deixar overlay preso
+  var _bpShowLoginOrig = typeof window.bpShowLoginShell === 'function' ? window.bpShowLoginShell : null;
+  // patch applied after functions exist — see end of IIFE
+
+  window.bpHideBootOverlay = closeBoot;
+  window.bpBootContinueOffline = continueOffline;
+  window.bpBootShowFail = function () {
+    if (!active) return;
+    showFailState();
+  };
+
+  window.addEventListener('offline', function () {
+    /* Offline-first: não prender o utilizador no overlay */
+    closeBoot();
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+  setTimeout(bind, 500);
+
+  // Login shell: fechar overlay se estiver aberto
+  try {
+    if (typeof bpShowLoginShell === 'function') {
+      var _origLogin = bpShowLoginShell;
+      window.bpShowLoginShell = function () {
+        try { closeBoot(); } catch (_) {}
+        return _origLogin.apply(this, arguments);
+      };
+    }
+  } catch (_) {}
+})();

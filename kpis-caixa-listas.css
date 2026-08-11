@@ -1903,12 +1903,12 @@
   margin: 0;
   padding: 0;
   border: none;
-  font-family: var(--font-serif, "Playfair Display", Georgia, serif);
-  font-size: 1.125rem;
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.3;
-  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  color: var(--text-secondary, #5c574e);
   text-transform: none;
 }
 #tab-dashboard .dash-section-meta {
@@ -1972,4 +1972,32 @@
   object-fit: cover;
   display: block;
   border-radius: inherit;
+}
+
+
+/* Modal faturamento — valor numa linha, sem empilhar */
+#modal-revenue-detail .bp-revenue-row {
+  align-items: center;
+  gap: 10px;
+}
+#modal-revenue-detail .bp-revenue-val,
+#modal-revenue-detail .list-item .action.bp-revenue-val {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--gold-dark, #a7872b);
+  max-width: 42%;
+  text-align: right;
+  line-height: 1.2;
+}
+#modal-revenue-detail .bp-revenue-row .info {
+  min-width: 0;
+  flex: 1;
+}
+#modal-revenue-detail #revenue-detail-total {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
 }

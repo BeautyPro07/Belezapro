@@ -1333,10 +1333,17 @@ async function checkSession() {
       var role = localStorage.getItem('bp_user_role');
       if (role) state.config.userRole = role;
     } catch (_) {}
+
+    /* Overlay ANTES da UI: utilizador nunca vê a app "já sincronizada" sem o modal */
+    var bootOnline = (typeof navigator !== 'undefined' && navigator.onLine);
+    if (bootOnline) {
+      try { if (typeof bpShowBootOverlay === 'function') bpShowBootOverlay(); } catch (_) {}
+    }
+
     bpShowAppShell();
     bpMarkSessionLocal(cachedSalao);
 
-    // Dados locais — não bloquear splash (já escondido)
+    // Dados locais sob o overlay (se online)
     try {
       await loadState(false);
     } catch (e) {
@@ -1349,49 +1356,56 @@ async function checkSession() {
       if (typeof updateUI === 'function') updateUI();
     } catch (_) {}
 
-    // Rede só em background, timeout curto, sem segundo getSession eterno
-    if (navigator.onLine) {
-      setTimeout(function () {
-        bpWithTimeout(supabaseClient.auth.getSession(), 1500, 'getSession_bg')
-          .then(function (res) {
-            var session = res && res.data ? res.data.session : null;
-            if (!session) return null;
-            return bpWithTimeout(
-              supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
-              2000,
-              'profile_bg'
-            );
-          })
-          .then(function (pr) {
-            if (!pr || !pr.data) return;
-            var profile = pr.data;
-            if (profile.salao_id) {
-              state.config.salaoId = profile.salao_id;
-              bpMarkSessionLocal(profile.salao_id);
-            }
-            if (profile.role) {
-              state.config.userRole = profile.role;
-              try { localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
-            }
-            if (profile.nome) state.config.storeName = profile.nome || state.config.storeName;
-            if (typeof saveConfig === 'function') return saveConfig();
-          })
-          .then(function () {
-            if (typeof sincronizarConfigDoServidor === 'function') return sincronizarConfigDoServidor();
-          })
-          .then(function () {
-            if (typeof bpSilentPull === 'function') return bpSilentPull(true);
-            if (typeof carregarDoSupabase === 'function') return carregarDoSupabase();
-          })
-          .then(function () {
-            if (typeof updateUI === 'function') updateUI();
-            if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-          })
-          .catch(function (err) {
-            console.warn('[boot] background (ignorado offline/lento)', err && err.message);
-          });
-      }, 300);
+    // Rede imediata — overlay já está aberto; sem setTimeout artificial
+    if (bootOnline) {
+      Promise.resolve()
+        .then(function () {
+          return bpWithTimeout(supabaseClient.auth.getSession(), 1500, 'getSession_bg');
+        })
+        .then(function (res) {
+          var session = res && res.data ? res.data.session : null;
+          if (!session) return null;
+          return bpWithTimeout(
+            supabaseClient.from('profiles').select('salao_id, role, nome').eq('user_id', session.user.id).single(),
+            2000,
+            'profile_bg'
+          );
+        })
+        .then(function (pr) {
+          if (!pr || !pr.data) return;
+          var profile = pr.data;
+          if (profile.salao_id) {
+            state.config.salaoId = profile.salao_id;
+            bpMarkSessionLocal(profile.salao_id);
+          }
+          if (profile.role) {
+            state.config.userRole = profile.role;
+            try { localStorage.setItem('bp_user_role', profile.role); } catch (_) {}
+          }
+          if (profile.nome) state.config.storeName = profile.nome || state.config.storeName;
+          if (typeof saveConfig === 'function') return saveConfig();
+        })
+        .then(function () {
+          if (typeof sincronizarConfigDoServidor === 'function') return sincronizarConfigDoServidor();
+        })
+        .then(function () {
+          var pullP = null;
+          if (typeof bpSilentPull === 'function') pullP = bpSilentPull(true);
+          else if (typeof carregarDoSupabase === 'function') pullP = carregarDoSupabase();
+          if (!pullP) return null;
+          return pullP;
+        })
+        .then(function () {
+          try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
+          if (typeof updateUI === 'function') updateUI();
+          if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+        })
+        .catch(function (err) {
+          console.warn('[boot] sync online', err && err.message);
+          try { if (typeof bpBootShowFail === 'function') bpBootShowFail(); } catch (_) {}
+        });
     }
+
     return;
   }
 
@@ -1415,6 +1429,9 @@ async function checkSession() {
     }
 
     bpShowAppShell();
+    if (navigator.onLine) {
+      try { if (typeof bpShowBootOverlay === 'function') bpShowBootOverlay(); } catch (_) {}
+    }
 
     var profile = null;
     try {
@@ -1458,15 +1475,24 @@ async function checkSession() {
     if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 
     if (navigator.onLine) {
-      setTimeout(function () {
-        Promise.resolve()
-          .then(function () { return typeof sincronizarConfigDoServidor === 'function' ? sincronizarConfigDoServidor() : null; })
-          .then(function () { return typeof bpSilentPull === 'function' ? bpSilentPull(true) : null; })
-          .then(function () {
-            if (typeof updateUI === 'function') updateUI();
-          })
-          .catch(function () {});
-      }, 400);
+      Promise.resolve()
+        .then(function () { return typeof sincronizarConfigDoServidor === 'function' ? sincronizarConfigDoServidor() : null; })
+        .then(function () {
+          var pullP = null;
+          if (typeof bpSilentPull === 'function') pullP = bpSilentPull(true);
+          else if (typeof carregarDoSupabase === 'function') pullP = carregarDoSupabase();
+          return pullP;
+        })
+        .then(function () {
+          try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
+          if (typeof updateUI === 'function') updateUI();
+        })
+        .catch(function (err) {
+          console.warn('[boot] pull inicial', err && err.message);
+          try { if (typeof bpBootShowFail === 'function') bpBootShowFail(); } catch (_) {}
+        });
+    } else {
+      try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
     }
   } catch (err) {
     console.error('[boot] checkSession', err);
@@ -2227,7 +2253,7 @@ async function flushSyncQueue() {
 
   // ET4.6: filas grandes (600+) em lotes — progresso gravado, sem conflitos por "tudo ou nada"
   const BATCH_SIZE = 25;
-  const MAX_ATTEMPTS = 8;
+  /* Sem teto de tentativas de rede: dados na fila até sucesso (regra de produto). */
   const YIELD_MS = 30;
 
   try {
@@ -2278,6 +2304,8 @@ async function flushSyncQueue() {
             }
           } else {
             if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload && op.payload.id, op.tabela)) {
+              /* Tombstone: upsert obsoleto — remove da fila (dado local já eliminado). */
+              processed++;
               continue;
             }
             const payload = op.payload || {};
@@ -2294,28 +2322,29 @@ async function flushSyncQueue() {
           processed++;
         } catch (err) {
           if (err && err.message === 'LIMITE_PLANO_ATINGIDO') {
-            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido.', 'error');
+            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido. Fica na fila até o plano permitir.', 'error');
+            /* Não descartar: permanece na fila com backoff (regra: zero perda). */
+            op.failed = false;
+            op.attempts = (op.attempts || 0) + 1;
+            op.nextRetry = Date.now() + Math.min(300000, 60000 + (op.attempts * 15000));
+            restantesBatch.push(op);
             continue;
           }
           if (err && (err.message === 'DUPLICADO_BLOQUEADO' || String(err.message || '').indexOf('DUPLICADO') >= 0)) {
             if (typeof logErroSilencioso === 'function') logErroSilencioso('flushSyncQueue.duplicado', err);
             // não retentar em loop
-            op.failed = true;
-            op.attempts = MAX_ATTEMPTS;
+            op.failed = true; /* rejeição lógica (duplicado) — não é perda de dado local */
             itensFalhos.push(op.id || 'item');
             restantesBatch.push(op);
             continue;
           }
+          /* REGRA OBRIGATÓRIA: nunca descartar nem marcar failed por teto de tentativas.
+             A op permanece na fila e volta a tentar (backoff só para não martelar a rede). */
           op.attempts = (op.attempts || 0) + 1;
-          if (op.attempts >= MAX_ATTEMPTS) {
-            op.failed = true;
-            itensFalhos.push(op.id || 'item');
-            restantesBatch.push(op);
-          } else {
-            const delay = Math.min(Math.pow(2, op.attempts) * 1000, 60000) + Math.random() * 1000;
-            op.nextRetry = Date.now() + delay;
-            restantesBatch.push(op);
-          }
+          op.failed = false;
+          const delay = Math.min(Math.pow(2, Math.min(op.attempts, 6)) * 1000, 60000) + Math.random() * 1000;
+          op.nextRetry = Date.now() + delay;
+          restantesBatch.push(op);
         }
       }
 
@@ -2329,7 +2358,8 @@ async function flushSyncQueue() {
     }
 
     if (itensFalhos.length > 0 && typeof toast === 'function') {
-      toast('Falha ao sincronizar ' + itensFalhos.length + ' operação(ões) após várias tentativas. Toque no indicador de sync para reintentar.', 'error');
+      /* Duplicados / rejeições lógicas — não são perdas de fila de rede */
+      toast('Algumas operações foram rejeitadas pelo servidor (' + itensFalhos.length + '). Os restantes dados permanecem na fila.', 'warning');
     }
     if (processed > 0 && typeof logErroSilencioso === 'function') {
       try { console.info('[sync] flush processou', processed, 'ops; restam', getSyncQueue().length); } catch (_) {}
@@ -5594,16 +5624,45 @@ const greetEl = document.getElementById('greeting');
 //  ficavam sempre presos no valor por defeito. Não foi preciso mudar o
 //  motor de cálculo nem o CSS — só faltava este bloco.
 // ====================================================================
-document.getElementById('dash-filter-icon')?.addEventListener('click', function(e) {
-  e.stopPropagation();
+function _bpPlacePeriodoSheetNear(anchorEl) {
   try {
     var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
-    if (sheet) {
+    if (!sheet) return;
+    var btn = anchorEl || window.__bpPeriodoAnchor || document.getElementById('dash-filter-icon') || document.getElementById('chart-filter-toggle');
+    if (!btn || !btn.getBoundingClientRect) {
       sheet.style.top = '64px';
       sheet.style.left = '12px';
-      sheet.style.width = '';
+      return;
     }
+    window.__bpPeriodoAnchor = btn;
+    var r = btn.getBoundingClientRect();
+    var w = Math.min(260, window.innerWidth * 0.88);
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    var top = Math.min(Math.max(8, r.bottom + 6), window.innerHeight - 140);
+    sheet.style.position = 'fixed';
+    sheet.style.top = Math.round(top) + 'px';
+    sheet.style.left = Math.round(left) + 'px';
+    sheet.style.width = Math.round(w) + 'px';
+    sheet.style.right = 'auto';
+    sheet.style.zIndex = '1200';
   } catch (_) {}
+}
+if (typeof window !== 'undefined') window._bpPlacePeriodoSheetNear = _bpPlacePeriodoSheetNear;
+(function bpBindPeriodoSheetFollow() {
+  function reposition() {
+    var overlay = document.getElementById('modal-periodo-dashboard');
+    if (!overlay || !overlay.classList.contains('open')) return;
+    if (typeof _bpPlacePeriodoSheetNear === 'function') _bpPlacePeriodoSheetNear(window.__bpPeriodoAnchor);
+  }
+  window.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
+  var main = document.querySelector('.main-content');
+  if (main) main.addEventListener('scroll', reposition, { passive: true });
+})();
+
+
+document.getElementById('dash-filter-icon')?.addEventListener('click', function(e) {
+  e.stopPropagation();
   document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     const ativa = btn.dataset.periodo === state.dashPeriodo &&
       (btn.dataset.periodo !== 'dia' || Number(btn.dataset.offset || 0) === state.dashOffset);
@@ -5621,7 +5680,13 @@ document.getElementById('dash-filter-icon')?.addEventListener('click', function(
   }
   const overlay = document.getElementById('modal-periodo-dashboard');
   if (overlay.classList.contains('open')) closeModal('modal-periodo-dashboard');
-  else openModal('modal-periodo-dashboard');
+  else {
+    openModal('modal-periodo-dashboard');
+    window.__bpPeriodoAnchor = document.getElementById('dash-filter-icon');
+    _bpPlacePeriodoSheetNear(window.__bpPeriodoAnchor);
+    setTimeout(function () { window.__bpPeriodoAnchor = document.getElementById('dash-filter-icon');
+    _bpPlacePeriodoSheetNear(window.__bpPeriodoAnchor); }, 30);
+  }
 });
 
 document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
@@ -5643,11 +5708,13 @@ document.querySelectorAll('.dash-periodo-opcao').forEach(btn => {
     state.dashOffset = Number(this.dataset.offset) || 0;
     localStorage.setItem('bp_dash_periodo', state.dashPeriodo);
     localStorage.setItem('bp_dash_offset', String(state.dashOffset));
+    /* Gráfico no mesmo período dos KPIs (dia → série horária no render) */
+    state.chartPeriodo = tipo;
+    try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
     closeModal('modal-periodo-dashboard');
-    // Sai do modo hora ao mudar o período global — gráfico alinhado aos KPIs
-    if (state.chartPeriodo === 'hora') state.chartPeriodo = 'semana';
     try { _bpSyncPeriodLabels((this.textContent || '').trim()); } catch (_) {}
     try { if (typeof _bpHaptic === 'function') _bpHaptic('select'); } catch (_) {}
+    try { if (typeof _bpSetChartFilterActive === 'function') _bpSetChartFilterActive(tipo); } catch (_) {}
     renderDashboard();
     if (typeof renderizarGrafico === 'function') renderizarGrafico();
   });
@@ -5673,7 +5740,8 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
       : null;
     _bpSyncPeriodLabels(_civ && _civ.label ? _civ.label : (ini + ' — ' + fim));
   } catch (_) {}
-  state.chartPeriodo = 'semana';
+  state.chartPeriodo = (ini === fim) ? 'dia' : 'semana';
+  try { localStorage.setItem('bp_chart_periodo', state.chartPeriodo); } catch (_) {}
   renderDashboard();
   if (typeof renderizarGrafico === 'function') renderizarGrafico();
 });
@@ -5682,9 +5750,12 @@ document.getElementById('dash-custom-aplicar')?.addEventListener('click', functi
 document.addEventListener('click', function(e) {
   const overlay = document.getElementById('modal-periodo-dashboard');
   const icon = document.getElementById('dash-filter-icon');
-  if (overlay && overlay.classList.contains('open') && !overlay.contains(e.target) && e.target !== icon && !icon?.contains(e.target)) {
-    closeModal('modal-periodo-dashboard');
-  }
+  const chartToggle = document.getElementById('chart-filter-toggle');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  if (overlay.contains(e.target)) return;
+  if (icon && (e.target === icon || icon.contains(e.target))) return;
+  if (chartToggle && (e.target === chartToggle || chartToggle.contains(e.target))) return;
+  closeModal('modal-periodo-dashboard');
 });
 
 // ====================================================================
@@ -8085,12 +8156,14 @@ function renderizarGrafico() {
   const intervalo = (typeof getIntervaloDashAtual === 'function')
     ? getIntervaloDashAtual()
     : { inicio: (typeof hoje === 'function' ? hoje() : ''), fim: (typeof hoje === 'function' ? hoje() : ''), label: 'Hoje' };
-  const modoHora = (state.chartPeriodo === 'hora');
+  /* Dia único: série por hora (evita 1 barra). chartPeriodo==='hora' força o mesmo. */
+  var _singleDay = !!(intervalo && intervalo.inicio && intervalo.fim && intervalo.inicio === intervalo.fim);
+  const modoHora = (state.chartPeriodo === 'hora') || _singleDay;
   const mostrarValores = state.chartMostrarValores || false;
   const movs = state.movimentos || [];
   const dashOff = state.dashOffset || 0;
 
-  // Modelo único (Fase 1) — série + totais + comparação
+  // Modelo único — série + totais + comparação (alinhado ao intervalo dos KPIs)
   let analise = null;
   if (typeof buildAnaliseTemporal === 'function') {
     var diaRefHora = null;
@@ -8793,23 +8866,30 @@ function _bpInitChartChrome() {
         });
       }
       function placeSheetNearFilter() {
+        var btn = document.getElementById('chart-filter-toggle');
+        if (typeof _bpPlacePeriodoSheetNear === 'function') {
+          _bpPlacePeriodoSheetNear(btn);
+          return;
+        }
         try {
           var sheet = document.querySelector('#modal-periodo-dashboard .modal-sheet');
-          var btn = document.getElementById('chart-filter-toggle');
           if (!sheet || !btn) return;
           var r = btn.getBoundingClientRect();
-          var w = Math.min(220, window.innerWidth * 0.78);
+          var w = Math.min(260, window.innerWidth * 0.88);
           var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
-          var top = Math.min(r.bottom + 6, window.innerHeight - 120);
+          var top = Math.min(r.bottom + 6, window.innerHeight - 140);
+          sheet.style.position = 'fixed';
           sheet.style.top = Math.round(top) + 'px';
           sheet.style.left = Math.round(left) + 'px';
           sheet.style.width = Math.round(w) + 'px';
+          sheet.style.right = 'auto';
         } catch (_) {}
       }
       markActive();
       try { _bpHaptic('open'); } catch (_) {}
       if (typeof openModal === 'function') {
         openModal('modal-periodo-dashboard');
+        try { window.__bpPeriodoAnchor = document.getElementById('chart-filter-toggle'); } catch (_) {}
         placeSheetNearFilter();
         setTimeout(placeSheetNearFilter, 30);
       } else {
@@ -9707,34 +9787,93 @@ window.setServicoModalMode = setServicoModalMode;
 // KPIS DETALHE
 // ====================================================================
 function abrirDetalheFaturamento() {
- const list = document.getElementById('revenue-detail-list');
- const totalSpan = document.getElementById('revenue-detail-total');
- if (!state.movimentos || !Array.isArray(state.movimentos)) {
-  if (list) list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
-  if (totalSpan) totalSpan.textContent = '0 Kz';
-  openModal('modal-revenue-detail');
-  return;
- }
- const hojeStr = hoje();
- const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
- if (vendasHoje.length === 0) {
-  list.innerHTML = '<div class="empty-state"><p>Nenhuma venda hoje</p></div>';
-  totalSpan.textContent = '0 Kz';
- } else {
-  list.innerHTML = vendasHoje.map(v => `
-   <div class="list-item" style="cursor:default;">
-    <div class="avatar" style="background:#E6F4EC;color:var(--green);"></div>
-    <div class="info">
-     <div class="title">${escHtml(v.cliente || 'Anónimo')}</div>
-     <div class="sub">${escHtml(v.descricao)} · ${v.hora}</div>
-    </div>
-    <div class="action">${fmtKz(v.valor)}</div>
-   </div>
-  `).join('');
-  const total = vendasHoje.reduce((s, v) => s + v.valor, 0);
-  totalSpan.textContent = fmtKz(total);
- }
- openModal('modal-revenue-detail');
+  const list = document.getElementById('revenue-detail-list');
+  const totalSpan = document.getElementById('revenue-detail-total');
+  if (!list) {
+    if (typeof openModal === 'function') openModal('modal-revenue-detail');
+    return;
+  }
+  if (!state.movimentos || !Array.isArray(state.movimentos)) {
+    list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
+    if (totalSpan) totalSpan.textContent = '0 Kz';
+    if (typeof openModal === 'function') openModal('modal-revenue-detail');
+    return;
+  }
+
+  /* Mesmo intervalo dos KPIs do Resumo (não fixar só "hoje") */
+  var inicio;
+  var fim;
+  var labelPeriodo = 'Hoje';
+  try {
+    if (typeof getIntervaloDashAtual === 'function') {
+      var iv = getIntervaloDashAtual();
+      if (iv && iv.inicio && iv.fim) {
+        inicio = iv.inicio;
+        fim = iv.fim;
+        labelPeriodo = iv.label || labelPeriodo;
+      }
+    }
+  } catch (_) {}
+  if (!inicio || !fim) {
+    var hojeStr = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+    inicio = fim = hojeStr;
+  }
+  if (inicio > fim) { var _swF = inicio; inicio = fim; fim = _swF; }
+
+  var titleEl = document.getElementById('revenue-title');
+  if (titleEl) {
+    titleEl.textContent = 'Faturamento · ' + labelPeriodo;
+  }
+
+  var vendas = state.movimentos.filter(function (m) {
+    if (!m || m.tipo !== 'venda' || !m.data) return false;
+    if (String(m.status || '').toLowerCase() === 'cancelado') return false;
+    return m.data >= inicio && m.data <= fim;
+  }).sort(function (a, b) {
+    var d = String(b.data || '').localeCompare(String(a.data || ''));
+    if (d !== 0) return d;
+    return String(b.hora || '').localeCompare(String(a.hora || ''));
+  });
+
+  if (vendas.length === 0) {
+    list.innerHTML = '<div class="empty-state"><p>Nenhuma venda neste período</p></div>';
+    if (totalSpan) totalSpan.textContent = '0 Kz';
+  } else {
+    list.innerHTML = vendas.map(function (v) {
+      var nome = v.cliente || 'Anónimo';
+      var av = '<div class="avatar">' + (typeof escHtml === 'function' ? escHtml(String(nome).charAt(0).toUpperCase()) : '?') + '</div>';
+      try {
+        var cli = (state.clientes || []).find(function (c) {
+          return (v.cliente_id && String(c.id) === String(v.cliente_id)) || c.nome === v.cliente;
+        });
+        var src = null;
+        if (cli && window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') {
+          src = BPMedia.resolveFotoSrc(cli);
+        } else if (cli && (cli.foto || cli.foto_url)) {
+          src = cli.foto || cli.foto_url;
+        }
+        if (src) {
+          av = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy" decoding="async"></div>';
+        }
+      } catch (_) {}
+      var dataLbl = (v.data === fim && inicio === fim)
+        ? (v.hora || '')
+        : ((v.data || '') + (v.hora ? ' · ' + v.hora : ''));
+      var sub = (typeof escHtml === 'function' ? escHtml(v.descricao || '') : (v.descricao || ''));
+      if (dataLbl) sub += (sub ? ' · ' : '') + (typeof escHtml === 'function' ? escHtml(String(dataLbl)) : dataLbl);
+      var valorStr = typeof fmtKz === 'function' ? fmtKz(v.valor) : (String(v.valor || 0) + ' Kz');
+      return (
+        '<div class="list-item bp-revenue-row" style="cursor:default;">' + av +
+        '<div class="info">' +
+        '<div class="title">' + (typeof escHtml === 'function' ? escHtml(nome) : nome) + '</div>' +
+        '<div class="sub">' + sub + '</div></div>' +
+        '<div class="action bp-revenue-val">' + valorStr + '</div></div>'
+      );
+    }).join('');
+    var total = vendas.reduce(function (s, v) { return s + (Number(v.valor) || 0); }, 0);
+    if (totalSpan) totalSpan.textContent = typeof fmtKz === 'function' ? fmtKz(total) : (total + ' Kz');
+  }
+  if (typeof openModal === 'function') openModal('modal-revenue-detail');
 }
 
 let agendaDetailFiltro = 'pendentes';
@@ -9755,23 +9894,43 @@ function abrirDetalheAgendamentos(filtro = 'pendentes') {
     if (typeof openModal === 'function') openModal('modal-agenda-detail');
     return;
   }
-  const hojeStr = hoje();
+  const hojeStr = typeof hoje === 'function' ? hoje() : new Date().toISOString().slice(0, 10);
+  /* Mesmo intervalo dos KPIs do Resumo */
+  var inicio = hojeStr, fim = hojeStr, labelPeriodo = 'Hoje';
+  try {
+    if (typeof getIntervaloDashAtual === 'function') {
+      var iv = getIntervaloDashAtual();
+      if (iv && iv.inicio && iv.fim) {
+        inicio = iv.inicio;
+        fim = iv.fim;
+        labelPeriodo = iv.label || labelPeriodo;
+      }
+    }
+  } catch (_) {}
+  if (inicio > fim) { var _sw = inicio; inicio = fim; fim = _sw; }
+  var titleEl = document.getElementById('agenda-detail-title');
+  if (titleEl) titleEl.textContent = 'Agendamentos · ' + labelPeriodo;
+
   const all = state.agendamentos.slice();
-  // Histórico alinhado ao pedido: pendentes (hoje em diante) / realizados (últimos 90 dias)
   let filtrados;
   if (filtro === 'pendentes') {
-    filtrados = all.filter(a => {
+    filtrados = all.filter(function (a) {
+      if (!a || !a.data) return false;
+      if (a.data < inicio || a.data > fim) return false;
       const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
-      return st === 'agendado' && a.data >= hojeStr;
-    }).sort((a, b) => String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || '')));
+      return st === 'agendado';
+    }).sort(function (a, b) {
+      return String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || ''));
+    });
   } else {
-    const d90 = new Date(hojeStr + 'T00:00:00');
-    d90.setDate(d90.getDate() - 89);
-    const inicio90 = d90.toISOString().split('T')[0];
-    filtrados = all.filter(a => {
+    filtrados = all.filter(function (a) {
+      if (!a || !a.data) return false;
+      if (a.data < inicio || a.data > fim) return false;
       const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
-      return st === 'realizado' && a.data >= inicio90 && a.data <= hojeStr;
-    }).sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || '')));
+      return st === 'realizado';
+    }).sort(function (a, b) {
+      return String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || ''));
+    });
   }
   if (btnPend) btnPend.className = 'btn btn-sm ' + (filtro === 'pendentes' ? 'btn-primary' : 'btn-secondary');
   if (btnReal) btnReal.className = 'btn btn-sm ' + (filtro === 'realizados' ? 'btn-primary' : 'btn-secondary');
@@ -9794,7 +9953,7 @@ function abrirDetalheAgendamentos(filtro = 'pendentes') {
         else if (cli && (cli.foto || cli.foto_url)) src = cli.foto || cli.foto_url;
         if (src) av = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy"></div>';
       } catch (_) {}
-      const dataLbl = a.data === hojeStr ? a.hora : ((a.data || '') + ' · ' + (a.hora || ''));
+      const dataLbl = (a.data === fim && inicio === fim) ? (a.hora || '') : ((a.data || '') + (a.hora ? ' · ' + a.hora : ''));
       return (
         '<div class="list-item" style="cursor:default;">' + av +
         '<div class="info"><div class="title">' + escHtml(a.servico || '') + '</div>' +
@@ -14384,6 +14543,16 @@ window.runBeautyProTests = runTests;
 //  esta lista.
 // ====================================================================
 document.addEventListener('DOMContentLoaded', async function init() {
+  /* Overlay o mais cedo possível (<1s): antes de checkSession/UI */
+  try {
+    var loggedOut = false;
+    try { loggedOut = localStorage.getItem('bp_logged_out') === '1'; } catch (_) {}
+    var hasSalao = false;
+    try { hasSalao = !!localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
+    if (!loggedOut && hasSalao && navigator.onLine && typeof bpShowBootOverlay === 'function') {
+      bpShowBootOverlay();
+    }
+  } catch (_) {}
   // Garantir estado inicial da UI
   document.getElementById('login-view').style.display = 'flex';
   document.getElementById('app-view').style.display = 'none';
@@ -14595,6 +14764,142 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+
+/* ===== Etapa 3 — Boot overlay (15s) + continuar offline ===== */
+(function bpBootOverlayModule() {
+  var BOOT_MS = 15000;
+  var timer = null;
+  var active = false;
+
+  function el() { return document.getElementById('bp-boot-overlay'); }
+  function actions() { return document.getElementById('bp-boot-actions'); }
+  function spinner() { return document.querySelector('#bp-boot-overlay .bp-boot-spinner'); }
+  function title() { return document.getElementById('bp-boot-title'); }
+  function desc() { return document.getElementById('bp-boot-desc'); }
+
+  function showSpinnerState() {
+    var a = actions();
+    if (a) a.hidden = true;
+    var s = spinner();
+    if (s) s.style.display = '';
+    if (title()) title().textContent = 'A sincronizar';
+    if (desc()) desc().textContent = 'A actualizar os dados do salão…';
+  }
+
+  function showFailState() {
+    var a = actions();
+    if (a) a.hidden = false;
+    var s = spinner();
+    if (s) s.style.display = 'none';
+    if (title()) title().textContent = 'Sem ligação estável';
+    if (desc()) desc().textContent = '';
+  }
+
+  function openBoot() {
+    var o = el();
+    if (!o) return;
+    active = true;
+    o.hidden = false;
+    try { o.removeAttribute('hidden'); } catch (_) {}
+    o.classList.add('is-open');
+    o.style.display = 'flex';
+    o.setAttribute('aria-hidden', 'false');
+    showSpinnerState();
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!active) return;
+      showFailState();
+    }, BOOT_MS);
+  }
+
+  function closeBoot() {
+    active = false;
+    clearTimeout(timer);
+    timer = null;
+    var o = el();
+    if (!o) return;
+    o.hidden = true;
+    try { o.setAttribute('hidden', ''); } catch (_) {}
+    o.classList.remove('is-open');
+    o.style.display = 'none';
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function retry() {
+    showSpinnerState();
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!active) return;
+      showFailState();
+    }, BOOT_MS);
+    if (typeof carregarDoSupabase === 'function' && navigator.onLine) {
+      carregarDoSupabase().then(function () {
+        closeBoot();
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof flushSyncQueue === 'function') flushSyncQueue();
+      }).catch(function () {
+        showFailState();
+      });
+    } else {
+      showFailState();
+    }
+  }
+
+  function continueOffline() {
+    closeBoot();
+    if (typeof flushSyncQueue === 'function' && navigator.onLine) {
+      try { flushSyncQueue(); } catch (_) {}
+    }
+  }
+
+  function bind() {
+    var r = document.getElementById('bp-boot-retry');
+    var o = document.getElementById('bp-boot-offline');
+    if (r && !r.dataset.bound) {
+      r.dataset.bound = '1';
+      r.addEventListener('click', function (e) { e.preventDefault(); retry(); });
+    }
+    if (o && !o.dataset.bound) {
+      o.dataset.bound = '1';
+      o.addEventListener('click', function (e) { e.preventDefault(); continueOffline(); });
+    }
+  }
+
+  window.bpShowBootOverlay = openBoot;
+  // Se for para login, nunca deixar overlay preso
+  var _bpShowLoginOrig = typeof window.bpShowLoginShell === 'function' ? window.bpShowLoginShell : null;
+  // patch applied after functions exist — see end of IIFE
+
+  window.bpHideBootOverlay = closeBoot;
+  window.bpBootContinueOffline = continueOffline;
+  window.bpBootShowFail = function () {
+    if (!active) return;
+    showFailState();
+  };
+
+  window.addEventListener('offline', function () {
+    /* Offline-first: não prender o utilizador no overlay */
+    closeBoot();
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+  setTimeout(bind, 500);
+
+  // Login shell: fechar overlay se estiver aberto
+  try {
+    if (typeof bpShowLoginShell === 'function') {
+      var _origLogin = bpShowLoginShell;
+      window.bpShowLoginShell = function () {
+        try { closeBoot(); } catch (_) {}
+        return _origLogin.apply(this, arguments);
+      };
+    }
+  } catch (_) {}
+})();
 
 /* ===== FILE: finance-comissoes.js ===== */
 // ================================================================

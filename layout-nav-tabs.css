@@ -316,3 +316,102 @@
   margin: 0 !important;
   border: none !important;
 }
+
+/* ===== Boot overlay + header alinhamento (Etapa 3) ===== */
+.bp-boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(28, 26, 24, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.bp-boot-overlay[hidden] { display: none !important; }
+/* Quando JS define display:flex, ganha ao [hidden] residual */
+.bp-boot-overlay.is-open,
+.bp-boot-overlay:not([hidden]) {
+  display: flex !important;
+}
+.bp-boot-card {
+  background: var(--card-white, #fff);
+  border-radius: 16px;
+  padding: 28px 22px 22px;
+  max-width: 320px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0,0,0,.18);
+}
+.bp-boot-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 16px;
+  border: 3px solid var(--border-soft, #e5e0d8);
+  border-top-color: var(--gold, #D4AF37);
+  border-radius: 50%;
+  animation: bp-boot-spin 0.75s linear infinite;
+}
+@keyframes bp-boot-spin { to { transform: rotate(360deg); } }
+.bp-boot-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #1c1a18);
+}
+.bp-boot-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #5c574e);
+  line-height: 1.4;
+}
+.bp-boot-actions {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bp-boot-actions[hidden] { display: none !important; }
+.bp-boot-fail-msg {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #5c574e);
+  line-height: 1.45;
+  text-align: left;
+  margin: 0 0 4px;
+}
+.app-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+}
+.app-header .logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.05rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.app-header .logo img {
+  height: 26px !important;
+  width: auto;
+}
+.app-header .store-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 42vw;
+  min-width: 0;
+}
+.app-header .sync-status {
+  max-width: 28vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.65rem;
+}
+
