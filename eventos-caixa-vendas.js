@@ -18,24 +18,36 @@ document.getElementById('add-despesa-btn').addEventListener('click', () => {
   openModal('modal-despesa');
   setTimeout(function () { if (d) try { d.focus(); } catch (e) {} }, 100);
 });
-document.getElementById('modal-despesa-save').addEventListener('click', async () => {
+var _bpDespSaveBtn = document.getElementById('modal-despesa-save');
+if (_bpDespSaveBtn) _bpDespSaveBtn.addEventListener('click', async () => {
+  var btn = document.getElementById('modal-despesa-save');
+  if (btn && btn.dataset.bpSaving === '1') return;
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para registar despesas.')) return;
   const desc = document.getElementById('desp-desc').value.trim();
   const valor = Number(document.getElementById('desp-valor').value);
   const categoria = (document.getElementById('desp-categoria') || {}).value || 'outro';
+  const fornEl = document.getElementById('desp-fornecedor');
+  const fornecedor = fornEl ? String(fornEl.value || '').trim() : '';
   if (!desc) { toast('Indica a descrição da despesa.', 'warning'); return; }
   if (!valor || valor <= 0 || isNaN(valor)) { toast('Indica um valor válido.', 'warning'); return; }
-  await addMovimento({
-    tipo: 'despesa',
-    descricao: desc,
-    valor: valor,
-    categoria: categoria
-  });
-  closeModal('modal-despesa');
-  document.getElementById('desp-desc').value = '';
-  document.getElementById('desp-valor').value = '';
-  toast('Despesa registada.', 'success');
-  if (typeof updateUI === 'function') updateUI();
+  if (btn) { btn.dataset.bpSaving = '1'; try { btn.disabled = true; } catch (_) {} }
+  try {
+    await addMovimento({
+      tipo: 'despesa',
+      descricao: desc,
+      valor: valor,
+      categoria: categoria,
+      fornecedor: fornecedor || undefined
+    });
+    closeModal('modal-despesa');
+    document.getElementById('desp-desc').value = '';
+    document.getElementById('desp-valor').value = '';
+    if (fornEl) fornEl.value = '';
+    toast('Despesa registada.', 'success');
+    if (typeof updateUI === 'function') updateUI();
+  } finally {
+    if (btn) { btn.dataset.bpSaving = ''; try { btn.disabled = false; } catch (_) {} }
+  }
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
@@ -322,10 +334,12 @@ document.getElementById('modal-finalizar-cancel').addEventListener('click', () =
 //  CONFIRMAR FECHO DE CAIXA (persistência)
 // ====================================================================
 async function confirmarFechoCaixa() {
+  var cBtn = document.getElementById('confirmar-fecho-btn');
+  if (cBtn && cBtn.dataset.bpSaving === '1') return;
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
 
   const hojeStr = hoje();
-  const movs = state.movimentos.filter(m => m.data === hojeStr);
+  const movs = (state.movimentos && Array.isArray(state.movimentos) ? state.movimentos : []).filter(m => m.data === hojeStr);
   const vendas = movs.filter(m => m.tipo === 'venda');
   const despesas = movs.filter(m => m.tipo === 'despesa');
 
@@ -357,6 +371,8 @@ async function confirmarFechoCaixa() {
     fechado_por: state.config.userId || null,
   };
 
+  if (cBtn) { cBtn.dataset.bpSaving = '1'; try { cBtn.disabled = true; } catch (_) {} }
+  try {
   await dbPut('fechos_caixa', registro);
   // Atualizar o estado local (Store quando disponível — notifica subscribers)
   if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -368,17 +384,21 @@ async function confirmarFechoCaixa() {
   toast('Caixa fechado.', 'success');
   closeModal('modal-fecho');
   updateUI();
+  } finally {
+    if (cBtn) { cBtn.dataset.bpSaving = ''; try { cBtn.disabled = false; } catch (_) {} }
+  }
 }
 
 // ====================================================================
 //  FECHO DE CAIXA (listeners)
 // ====================================================================
 document.getElementById('fecho-caixa-btn').addEventListener('click', abrirFechoCaixa);
-document.getElementById('modal-fecho-fechar').addEventListener('click', () => closeModal('modal-fecho'));
-document.getElementById('btn-imprimir-fecho').addEventListener('click', () => {
+document.getElementById('modal-fecho-fechar')?.addEventListener('click', () => closeModal('modal-fecho'));
+document.getElementById('btn-imprimir-fecho')?.addEventListener('click', () => {
   const hojeStr = hoje();
-  const vendas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
-  const despesas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa');
+  const _movsImp = (state.movimentos && Array.isArray(state.movimentos)) ? state.movimentos : [];
+  const vendas = _movsImp.filter(m => m.data === hojeStr && m.tipo === 'venda');
+  const despesas = _movsImp.filter(m => m.data === hojeStr && m.tipo === 'despesa');
   const tv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const td = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const byPag = {};
@@ -412,25 +432,27 @@ document.getElementById('btn-imprimir-recibo').addEventListener('click', () => {
 
 // KPIs clicáveis
 document.getElementById('kpi-revenue-card').addEventListener('click', abrirDetalheFaturamento);
-document.getElementById('kpi-agenda-card').addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
+document.getElementById('kpi-agenda-card')?.addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
 
 document.getElementById('modal-revenue-close').addEventListener('click', () => closeModal('modal-revenue-detail'));
 document.getElementById('modal-agenda-close').addEventListener('click', () => closeModal('modal-agenda-detail'));
 
-document.getElementById('agenda-detail-pendentes').addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
-document.getElementById('agenda-detail-realizados').addEventListener('click', () => abrirDetalheAgendamentos('realizados'));
+document.getElementById('agenda-detail-pendentes')?.addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
+document.getElementById('agenda-detail-realizados')?.addEventListener('click', () => abrirDetalheAgendamentos('realizados'));
 
 // hist-chip substituído pelo popover caixa-filter (Fase E)
 
 
-// Filtro clientes
+// Filtro frequência clientes — texto só, sem fundo (activo = negrito dourado)
 document.querySelectorAll('.filtro-frequencia').forEach(btn => {
   btn.addEventListener('click', function() {
-    document.querySelectorAll('.filtro-frequencia').forEach(b => b.classList.remove('active'));
-    this.classList.add('active');
-    state.filtroClientes = this.dataset.filtro;
-    localStorage.setItem('bp_filtro_clientes', state.filtroClientes);
-    renderClientes();
+    document.querySelectorAll('.filtro-frequencia').forEach(b => {
+      b.classList.remove('active', 'is-active');
+    });
+    this.classList.add('is-active');
+    state.filtroClientes = this.dataset.filtro || 'todos';
+    try { localStorage.setItem('bp_filtro_clientes', state.filtroClientes); } catch (_) {}
+    if (typeof renderClientes === 'function') renderClientes();
   });
 });
 
@@ -499,6 +521,7 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
     e.stopPropagation();
     const open = pop.style.display === 'block';
     pop.style.display = open ? 'none' : 'block';
+    try { btn.setAttribute('aria-expanded', open ? 'false' : 'true'); } catch (_) {}
     if (buscaBox) buscaBox.style.display = 'none';
     periodoLoc = null;
     document.querySelectorAll('.caixa-loc-periodo').forEach(b => b.classList.remove('active'));
@@ -507,13 +530,35 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
   document.addEventListener('click', function(e) {
     if (pop.style.display === 'block' && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
       pop.style.display = 'none';
+      try { btn.setAttribute('aria-expanded', 'false'); } catch (_) {}
     }
   });
 
   document.querySelectorAll('.caixa-loc-periodo').forEach(b => {
     b.addEventListener('click', function(e) {
       e.stopPropagation();
-      periodoLoc = this.dataset.periodo;
+      var per = this.dataset.periodo;
+      if (per === 'dia') {
+        var din = document.getElementById('caixa-loc-data-exata');
+        if (din) {
+          din.onchange = function () {
+            if (!this.value) return;
+            localStorage.setItem('bp_caixa_loc_data_exata', this.value);
+            localStorage.setItem('bp_caixa_data_exata', this.value);
+            periodoLoc = 'dia';
+            document.querySelectorAll('.caixa-loc-periodo').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            if (buscaBox) buscaBox.style.display = 'block';
+            if (input) { input.value = ''; input.focus(); }
+          };
+          try {
+            if (typeof din.showPicker === 'function') din.showPicker();
+            else din.click();
+          } catch (_) { try { din.click(); } catch (__) {} }
+        }
+        return;
+      }
+      periodoLoc = per;
       document.querySelectorAll('.caixa-loc-periodo').forEach(x => x.classList.remove('active'));
       this.classList.add('active');
       if (buscaBox) buscaBox.style.display = 'block';
@@ -547,8 +592,27 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
     if (cont) {
       cont.innerHTML = movs.sort((a,b) => b.data.localeCompare(a.data) || b.hora.localeCompare(a.hora)).map(m => {
         const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(m.profissional_id) : '';
+        var avLoc = '';
+        try {
+          var cliL = null;
+          if (m.cliente_id) cliL = (state.clientes || []).find(function (c) { return String(c.id) === String(m.cliente_id); });
+          if (!cliL && m.cliente) {
+            var nL = String(m.cliente).toLowerCase().trim();
+            cliL = (state.clientes || []).find(function (c) { return String(c.nome || '').toLowerCase().trim() === nL; });
+          }
+          var srcL = null;
+          if (cliL && window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') srcL = BPMedia.resolveFotoSrc(cliL);
+          else if (cliL && cliL.foto) srcL = cliL.foto;
+          else if (cliL && cliL.foto_url) srcL = cliL.foto_url;
+          if (srcL) avLoc = '<div class="avatar bp-avatar-img"><img src="' + String(srcL).replace(/"/g, '&quot;') + '" alt="" loading="lazy"></div>';
+          else if (cliL && cliL.nome) avLoc = '<div class="avatar">' + escHtml(String(cliL.nome).charAt(0).toUpperCase()) + '</div>';
+          else if (m.cliente) avLoc = '<div class="avatar">' + escHtml(String(m.cliente).charAt(0).toUpperCase()) + '</div>';
+          else avLoc = '<div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+        } catch (_) {
+          avLoc = '<div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+        }
         return `<div class="list-item list-item-venda" data-id="${m.id}" data-tipo="venda" style="padding-right:32px;">
-          <div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
+          ${avLoc}
           <div class="info">
             <div class="title">${escHtml(m.descricao)}</div>
             <div class="sub">${m.data} · ${m.hora} · ${escHtml(m.cliente || '')} · ${escHtml(m.metodoPagamento || '')}</div>
@@ -567,9 +631,43 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
   if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter') procurar(); });
 })();
 
-document.getElementById('modal-cliente-nao-encontrado-ok')?.addEventListener('click', () => {
-  closeModal('modal-cliente-nao-encontrado');
-});
+(function bindClienteNaoEncontradoOk() {
+  function fechar() {
+    if (typeof closeModal === 'function') closeModal('modal-cliente-nao-encontrado');
+    else {
+      var el = document.getElementById('modal-cliente-nao-encontrado');
+      if (el) {
+        el.classList.remove('open');
+        el.style.display = 'none';
+        el.style.pointerEvents = '';
+      }
+      try { document.body.classList.remove('bp-modal-open'); } catch (_) {}
+    }
+  }
+  function bind() {
+    var btn = document.getElementById('modal-cliente-nao-encontrado-ok');
+    if (!btn || btn.dataset.bpBoundOk === '1') return;
+    btn.dataset.bpBoundOk = '1';
+    btn.type = 'button';
+    btn.addEventListener('click', function (ev) {
+      try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+      fechar();
+    });
+  }
+  bind();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+  setTimeout(bind, 500);
+  /* Delegação (captura): cobre re-renders / timing */
+  if (!window.__bpCliNaoEncDeleg) {
+    window.__bpCliNaoEncDeleg = true;
+    document.addEventListener('click', function (ev) {
+      var t = ev.target && ev.target.closest && ev.target.closest('#modal-cliente-nao-encontrado-ok');
+      if (!t) return;
+      try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+      fechar();
+    }, true);
+  }
+})();
 
 
 // R50 — Cancelar venda (confirmação + motivo)

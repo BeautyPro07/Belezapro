@@ -658,6 +658,22 @@ function getAgendamentosFiltrados() {
       return st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
     });
   }
+  if (agendaFilter === 'pendentes') {
+    const hojeP = hojeStr;
+    return list.filter(a => {
+      const st = _statusAg(a);
+      return st === 'agendado' && a.data >= hojeP;
+    }).sort((a, b) => {
+      if (a.data !== b.data) return String(a.data).localeCompare(String(b.data));
+      return String(a.hora || '').localeCompare(String(b.hora || ''));
+    });
+  }
+  if (agendaFilter === '90dias') {
+    const d90 = new Date(hojeStr + 'T00:00:00');
+    d90.setDate(d90.getDate() - 89);
+    const inicio90 = formatarDataISO(d90);
+    return list.filter(a => a.data >= inicio90 && a.data <= hojeStr && _statusAg(a) !== 'cancelado');
+  }
 
   switch (agendaFilter) {
     case 'hoje': {
@@ -727,6 +743,10 @@ if (label) {
     label.textContent = 'Cancelados';
   } else if (agendaFilter === 'nao_realizado') {
     label.textContent = 'Não realizados';
+  } else if (agendaFilter === 'pendentes') {
+    label.textContent = 'Pendentes';
+  } else if (agendaFilter === '90dias') {
+    label.textContent = 'Últimos 90 dias';
   } else {
     label.textContent = 'Todos';
   }
@@ -739,9 +759,24 @@ if (label) {
   }
 
   // Agrupar por data se o filtro não for "hoje" nem "dia"
-  const agrupar = (agendaFilter !== 'hoje' && agendaFilter !== 'dia');
+  const agrupar = (agendaFilter !== 'hoje' && agendaFilter !== 'dia' && agendaFilter !== 'pendentes');
   let html = '';
-  if (agrupar) {
+  const hojeStrR = hoje();
+  // Ponto 12: pendentes de HOJE em destaque (apenas quando o dia visível é hoje)
+  const isViewingHoje = (agendaFilter === 'hoje' && (state.agendaDataAtual || hojeStrR) === hojeStrR)
+    || (agendaFilter === 'dia' && (localStorage.getItem('bp_agenda_data_exata') || hojeStrR) === hojeStrR);
+  if (isViewingHoje && (agendaFilter === 'hoje' || agendaFilter === 'dia')) {
+    const porRealizar = ags.filter(a => _statusAg(a) === 'agendado');
+    const resto = ags.filter(a => _statusAg(a) !== 'agendado');
+    if (porRealizar.length) {
+      html += '<div class="bp-ag-section-title"><span class="bp-ag-pulse-dot" aria-hidden="true"></span>Agendamentos por realizar hoje</div>';
+      html += porRealizar.map(a => renderAgendaItem(a, { pulse: true })).join('');
+    }
+    if (resto.length) {
+      if (porRealizar.length) html += '<div class="bp-ag-section-title bp-ag-section-title--muted">Outros de hoje</div>';
+      html += resto.map(a => renderAgendaItem(a)).join('');
+    }
+  } else if (agrupar) {
     const grupos = {};
     ags.forEach(a => {
       if (!grupos[a.data]) grupos[a.data] = [];
@@ -751,12 +786,22 @@ if (label) {
     datas.forEach(data => {
       const dataLabel = data === hoje() ? 'Hoje' : new Date(data + 'T00:00:00').toLocaleDateString('pt-AO', { day: '2-digit', month: 'short' });
       html += `<div class="bp-ag-date-label">${dataLabel}</div>`;
-      html += grupos[data].map(a => renderAgendaItem(a)).join('');
+      html += grupos[data].map(a => renderAgendaItem(a, data === hojeStrR ? { pulse: _statusAg(a) === 'agendado' } : null)).join('');
     });
   } else {
-    html = ags.map(a => renderAgendaItem(a)).join('');
+    html = ags.map(a => renderAgendaItem(a, { pulse: agendaFilter === 'pendentes' && _statusAg(a) === 'agendado' })).join('');
   }
   cont.innerHTML = html;
+
+  // Bolinha no filtro Pendentes
+  try {
+    const pendBtn = document.getElementById('agenda-filter-pendentes');
+    if (pendBtn) {
+      const nPend = (state.agendamentos || []).filter(a => _statusAg(a) === 'agendado' && a.data >= hojeStrR).length;
+      pendBtn.classList.toggle('has-pending', nPend > 0);
+      pendBtn.setAttribute('data-count', String(nPend));
+    }
+  } catch (_) {}
 
   // Listeners para "Finalizar" (apenas os que não estão expirados)
   cont.querySelectorAll('[data-action="finalizar"]').forEach(btn => {
@@ -767,7 +812,7 @@ if (label) {
   });
 }
 
-function renderAgendaItem(a) {
+function renderAgendaItem(a, opts) {
   // Leitura apenas — expiração é responsabilidade de atualizarAgendamentosExpirados
   const st = _statusAg(a);
   const isRealizado = st === 'realizado';
@@ -797,11 +842,12 @@ function renderAgendaItem(a) {
 
   // Fallback se polish não estiver activo — mesma hierarquia de acções
   if (window.BPAgendaUI && typeof BPAgendaUI.renderAgendaItemPro === 'function') {
-    return BPAgendaUI.renderAgendaItemPro(a);
+    return BPAgendaUI.renderAgendaItemPro(a, opts);
   }
   const hora = String(a.hora || '').slice(0, 5);
+  const pulseCls = (opts && opts.pulse) ? ' bp-ag-card--pulse' : '';
   return `
-    <div class="list-item bp-ag-card" data-agenda-id="${a.id}">
+    <div class="list-item bp-ag-card${pulseCls}" data-agenda-id="${a.id}">
       <div class="avatar bp-ag-avatar">${escHtml((a.cliente || '?').charAt(0).toUpperCase())}</div>
       <div class="info bp-ag-info">
         <div class="bp-ag-top">
@@ -891,7 +937,7 @@ agendaFilter = localStorage.getItem(agendaFilterKey) || 'hoje';
 
 // Marcar opção ativa no popover (usando classes CSS)
 function atualizarFiltroAgendaUI() {
-  document.querySelectorAll('.agenda-periodo-filter').forEach(btn => {
+  document.querySelectorAll('#agenda-filter-popover .agenda-periodo-filter').forEach(btn => {
     const periodo = btn.dataset.periodo;
     btn.classList.toggle('active', periodo === agendaFilter);
   });

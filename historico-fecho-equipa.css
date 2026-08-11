@@ -122,3 +122,170 @@
   margin-top: 6px;
 }
 
+
+
+/* ===== Fecho de caixa — estrutura profissional ===== */
+.bp-fecho-sheet .bp-fecho-title {
+  margin-bottom: 2px;
+  font-size: 1.05rem;
+}
+.bp-fecho-sub {
+  margin: 0 0 14px;
+  font-size: 0.72rem;
+  color: var(--text-muted, #8a8580);
+  letter-spacing: 0.02em;
+}
+.bp-fecho-conteudo { margin-bottom: 4px; }
+.bp-fecho-panel { padding: 0; }
+.bp-fecho-date {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.bp-fecho-card {
+  background: var(--bg-soft, #f7f4ef);
+  border: 1px solid var(--border-soft, #e8e4df);
+  border-radius: 12px;
+  padding: 4px 14px;
+  margin-bottom: 12px;
+}
+.bp-fecho-card--soft {
+  background: var(--card-white, #fff);
+}
+.bp-fecho-card .fecho-row {
+  border-bottom-color: rgba(0,0,0,.06);
+  padding: 10px 0;
+  font-size: 0.84rem;
+}
+.bp-fecho-card .fecho-row:last-child { border-bottom: none; }
+.bp-fecho-section {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+}
+.bp-fecho-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-top: 4px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(201,162,39,0.12), rgba(201,162,39,0.04));
+  border: 1px solid rgba(201,162,39,0.28);
+}
+.bp-fecho-total-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.bp-fecho-total-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--gold-dark, #9a7b1a);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.bp-fecho-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 18px;
+}
+.bp-fecho-btn {
+  min-height: 42px;
+  height: 42px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  box-sizing: border-box;
+  touch-action: manipulation;
+}
+.bp-fecho-btn--ghost {
+  background: var(--card-white, #fff);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft, #e5e0d8);
+}
+.bp-fecho-btn--ghost:active { background: var(--bg-soft, #f5f2ec); }
+.bp-fecho-btn--primary {
+  grid-column: 1 / -1;
+  background: var(--gold, #C9A227);
+  color: #fff;
+  border: 1px solid var(--gold, #C9A227);
+}
+.bp-fecho-btn--primary:active { filter: brightness(0.96); }
+.fecho-row .fr-val--in { color: var(--green, #1B7A4E); }
+.fecho-row .fr-val--out { color: var(--red, #B33A3A); }
+
+/* Localizar cliente no histórico — campo suave */
+.bp-caixa-loc-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  min-height: 0;
+  height: auto;
+}
+.bp-caixa-loc-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  background: var(--card-white, #fff);
+  border: 1px solid var(--border-soft, #e8e4df);
+  border-radius: 10px;
+  color: var(--text-primary, #1c1a18);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.bp-caixa-loc-ic {
+  flex-shrink: 0;
+  opacity: 0.55;
+  color: var(--text-secondary, #5a554c);
+}
+.bp-caixa-loc-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-primary, #2a2724);
+  border-bottom: none;
+  line-height: 1.3;
+}
+.bp-caixa-loc-trigger:hover .bp-caixa-loc-main,
+.bp-caixa-loc-trigger[aria-expanded="true"] .bp-caixa-loc-main {
+  border-color: rgba(201, 162, 39, 0.55);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.1);
+}
+.bp-caixa-loc-trigger[aria-expanded="true"] .bp-caixa-loc-label {
+  color: var(--gold-dark, #8a6d12);
+}
+.bp-caixa-loc-trigger:active .bp-caixa-loc-main { opacity: 0.92; }
+.bp-caixa-loc-hint {
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-primary, #1c1a18);
+  margin: 0 0 10px;
+  padding: 0 2px;
+  opacity: 0.88;
+}

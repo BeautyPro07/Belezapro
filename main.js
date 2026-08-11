@@ -67,8 +67,8 @@ document.addEventListener('DOMContentLoaded', async function init() {
   const filtro = localStorage.getItem('bp_filtro_clientes') || 'todos';
   state.filtroClientes = filtro;
   document.querySelectorAll('.filtro-frequencia').forEach(b => {
-    b.classList.remove('active');
-    if (b.dataset.filtro === filtro) b.classList.add('active');
+    b.classList.remove('active', 'is-active');
+    if (b.dataset.filtro === filtro) b.classList.add('is-active');
   });
 
   const periodo = localStorage.getItem('bp_chart_periodo') || 'semana';

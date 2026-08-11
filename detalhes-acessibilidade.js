@@ -42,44 +42,77 @@ function abrirDetalheFaturamento() {
 let agendaDetailFiltro = 'pendentes';
 
 function abrirDetalheAgendamentos(filtro = 'pendentes') {
- agendaDetailFiltro = filtro;
- const list = document.getElementById('agenda-detail-list');
- const btnPend = document.getElementById('agenda-detail-pendentes');
- const btnReal = document.getElementById('agenda-detail-realizados');
- if (!state.agendamentos || !Array.isArray(state.agendamentos)) {
-  if (list) list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
-  openModal('modal-agenda-detail');
-  return;
- }
- const hojeStr = hoje();
- const ags = state.agendamentos.filter(a => a.data === hojeStr);
- if (btnPend) btnPend.className = 'btn btn-sm ' + (filtro === 'pendentes' ? 'btn-primary' : 'btn-secondary');
- if (btnReal) btnReal.className = 'btn btn-sm ' + (filtro === 'realizados' ? 'btn-primary' : 'btn-secondary');
- const filtrados = filtro === 'pendentes' ? ags.filter(a => a.status !== 'realizado' && a.status !== 'cancelado') : ags.filter(a => a.status === 'realizado');
- if (filtrados.length === 0) {
-  list.innerHTML = `<div class="empty-state"><p>Nenhum agendamento ${filtro === 'pendentes' ? 'pendente' : 'realizado'} hoje</p></div>`;
- } else {
-  list.innerHTML = filtrados.map(a => {
-   const nomeProf = getProfissionalNome(a.profissional_id);
-   return `
-    <div class="list-item" style="cursor:default;">
-     <div class="avatar" style="background:var(--gold-light);color:var(--gold-dark);"></div>
-     <div class="info">
-      <div class="title" style="color:var(--gold-dark);">${escHtml(a.servico)}</div>
-      <div class="sub">${escHtml(a.cliente)} · ${a.hora} · ${escHtml(nomeProf)}</div>
-     </div>
-     <div class="action">${fmtKz(a.preco)}</div>
-    </div>
-   `;
-  }).join('');
- }
- openModal('modal-agenda-detail');
+  agendaDetailFiltro = filtro;
+  const list = document.getElementById('agenda-detail-list');
+  const btnPend = document.getElementById('agenda-detail-pendentes');
+  const btnReal = document.getElementById('agenda-detail-realizados');
+  const totEl = document.getElementById('agenda-detail-totals');
+  if (!list) {
+    if (typeof openModal === 'function') openModal('modal-agenda-detail');
+    return;
+  }
+  if (!state.agendamentos || !Array.isArray(state.agendamentos)) {
+    list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
+    if (totEl) totEl.hidden = true;
+    if (typeof openModal === 'function') openModal('modal-agenda-detail');
+    return;
+  }
+  const hojeStr = hoje();
+  const all = state.agendamentos.slice();
+  // Histórico alinhado ao pedido: pendentes (hoje em diante) / realizados (últimos 90 dias)
+  let filtrados;
+  if (filtro === 'pendentes') {
+    filtrados = all.filter(a => {
+      const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
+      return st === 'agendado' && a.data >= hojeStr;
+    }).sort((a, b) => String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || '')));
+  } else {
+    const d90 = new Date(hojeStr + 'T00:00:00');
+    d90.setDate(d90.getDate() - 89);
+    const inicio90 = d90.toISOString().split('T')[0];
+    filtrados = all.filter(a => {
+      const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
+      return st === 'realizado' && a.data >= inicio90 && a.data <= hojeStr;
+    }).sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || '')));
+  }
+  if (btnPend) btnPend.className = 'btn btn-sm ' + (filtro === 'pendentes' ? 'btn-primary' : 'btn-secondary');
+  if (btnReal) btnReal.className = 'btn btn-sm ' + (filtro === 'realizados' ? 'btn-primary' : 'btn-secondary');
+  const sum = filtrados.reduce((s, a) => s + (Number(a.preco) || 0), 0);
+  if (totEl) {
+    totEl.hidden = false;
+    totEl.innerHTML = '<span>' + filtrados.length + ' · ' + (filtro === 'pendentes' ? 'pendentes' : 'realizados') +
+      '</span><strong>' + (typeof fmtKz === 'function' ? fmtKz(sum) : (sum + ' Kz')) + '</strong>';
+  }
+  if (filtrados.length === 0) {
+    list.innerHTML = '<div class="empty-state"><p>Nenhum agendamento ' + (filtro === 'pendentes' ? 'pendente' : 'realizado') + '</p></div>';
+  } else {
+    list.innerHTML = filtrados.map(a => {
+      const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(a.profissional_id) : '';
+      let av = '<div class="avatar">' + escHtml(String(a.cliente || '?').charAt(0).toUpperCase()) + '</div>';
+      try {
+        const cli = (state.clientes || []).find(c => String(c.id) === String(a.cliente_id) || c.nome === a.cliente);
+        let src = null;
+        if (cli && window.BPMedia && BPMedia.resolveFotoSrc) src = BPMedia.resolveFotoSrc(cli);
+        else if (cli && (cli.foto || cli.foto_url)) src = cli.foto || cli.foto_url;
+        if (src) av = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy"></div>';
+      } catch (_) {}
+      const dataLbl = a.data === hojeStr ? a.hora : ((a.data || '') + ' · ' + (a.hora || ''));
+      return (
+        '<div class="list-item" style="cursor:default;">' + av +
+        '<div class="info"><div class="title">' + escHtml(a.servico || '') + '</div>' +
+        '<div class="sub">' + escHtml(a.cliente || '') + ' · ' + escHtml(String(dataLbl)) +
+        (nomeProf ? ' · ' + escHtml(nomeProf) : '') + '</div></div>' +
+        '<div class="action">' + (typeof fmtKz === 'function' ? fmtKz(a.preco) : a.preco) + '</div></div>'
+      );
+    }).join('');
+  }
+  if (typeof openModal === 'function') openModal('modal-agenda-detail');
 }
 
 function abrirFechoCaixa() {
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
  const hojeStr = hoje();
- const movs = state.movimentos.filter(m => m.data === hojeStr);
+ const movs = (state.movimentos && Array.isArray(state.movimentos) ? state.movimentos : []).filter(m => m.data === hojeStr);
  const vendas = movs.filter(m => m.tipo === 'venda');
  const despesas = movs.filter(m => m.tipo === 'despesa');
  const totalVendas = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
@@ -94,13 +127,22 @@ function abrirFechoCaixa() {
  const fechoBox = document.getElementById('fecho-conteudo');
  if (!fechoBox) return;
  fechoBox.innerHTML = `
-  <div style="font-size:.75rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">${new Date().toLocaleDateString('pt-AO', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
-  <div class="fecho-row"><span class="fr-label">Fundo de abertura</span><span class="fr-val">${fmtKz(state.config.fundo)}</span></div>
-  <div class="fecho-row"><span class="fr-label">Total de vendas (${vendas.length})</span><span class="fr-val" style="color:var(--green)">+${fmtKz(totalVendas)}</span></div>
-  <div class="fecho-row"><span class="fr-label">Total de despesas (${despesas.length})</span><span class="fr-val" style="color:var(--red)">-${fmtKz(totalDespesas)}</span></div>
-  <div style="margin:8px 0 4px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Por método de pagamento</div>
-  ${pagHtml || '<div class="fecho-row"><span class="fr-label">—</span><span class="fr-val">0 Kz</span></div>'}
-  <div class="fecho-row total-row"><span class="fr-label">Saldo Final em Caixa</span><span class="fr-val">${fmtKz(saldoFinal)}</span></div>`;
+  <div class="bp-fecho-panel">
+    <div class="bp-fecho-date">${new Date().toLocaleDateString('pt-AO', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+    <div class="bp-fecho-card">
+      <div class="fecho-row"><span class="fr-label">Fundo de abertura</span><span class="fr-val">${fmtKz(state.config.fundo)}</span></div>
+      <div class="fecho-row"><span class="fr-label">Vendas · ${vendas.length}</span><span class="fr-val fr-val--in">+${fmtKz(totalVendas)}</span></div>
+      <div class="fecho-row"><span class="fr-label">Despesas · ${despesas.length}</span><span class="fr-val fr-val--out">−${fmtKz(totalDespesas)}</span></div>
+    </div>
+    <div class="bp-fecho-section">Métodos de pagamento</div>
+    <div class="bp-fecho-card bp-fecho-card--soft">
+      ${pagHtml || '<div class="fecho-row"><span class="fr-label">Sem vendas hoje</span><span class="fr-val">0 Kz</span></div>'}
+    </div>
+    <div class="bp-fecho-total">
+      <span class="bp-fecho-total-label">Saldo final em caixa</span>
+      <span class="bp-fecho-total-val">${fmtKz(saldoFinal)}</span>
+    </div>
+  </div>`;
  openModal('modal-fecho');
 }
 

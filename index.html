@@ -362,7 +362,8 @@
     <button class="agenda-periodo-filter" data-periodo="semana">Semana</button>
     <button class="agenda-periodo-filter" data-periodo="mes">Mês</button>
     <button class="agenda-periodo-filter" data-periodo="todos">Todos</button>
-    <!-- Dia Exato – agora com data-periodo="dia" e sem ID específico -->
+    <button class="agenda-periodo-filter" data-periodo="90dias">90 dias</button>
+    <!-- Dia Exato -->
     <button class="agenda-periodo-filter agenda-periodo-filter--dia" data-periodo="dia">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
         <rect x="2" y="3" width="12" height="11" rx="1"/>
@@ -370,13 +371,18 @@
         <line x1="5" y1="2" x2="5" y2="4"/>
         <line x1="11" y1="2" x2="11" y2="4"/>
       </svg>
-      <span>Dia exato</span>
+      <span>Dia exacto</span>
     </button>
   </div>
   <div class="agenda-periodo-separador"></div>
-  <div class="agenda-periodo-grid">
-    <button class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="realizados">Realizados</button>
-    <button class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="nao_realizado">Não realizados</button>
+  <div class="agenda-periodo-grid agenda-periodo-grid--status">
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status agenda-periodo-filter--pendentes agenda-periodo-filter--full" data-periodo="pendentes" id="agenda-filter-pendentes">
+      <span class="bp-ag-pulse-dot" aria-hidden="true"></span>
+      Pendentes
+    </button>
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="realizados">Realizados</button>
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="nao_realizado">Não realizados</button>
+    <button type="button" class="agenda-periodo-filter agenda-periodo-filter--status" data-periodo="cancelados">Cancelados</button>
   </div>
   <!-- Input de data – oculto mas clicável (opacity:0 + pointer-events:none) -->
   <input type="date" id="agenda-data-exata" class="input-field" style="display:none;width:100%;margin-top:8px;font-size:16px;" aria-label="Escolher dia exacto">
@@ -394,13 +400,13 @@
               <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Clientes</span>
               <button class="btn btn-sm btn-primary" id="add-cliente-btn">+ Novo</button>
             </div>
-            <div class="input-group">
-              <input type="text" id="search-cliente" class="input-field" placeholder="Nome ou telefone...">
+            <div class="input-group bp-cli-search-wrap">
+              <input type="text" id="search-cliente" class="input-field bp-placeholder-rotating bp-cli-search" placeholder="Nome ou telefone..." data-ph-set="clientes" autocomplete="off">
             </div>
-            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-              <button class="btn btn-sm btn-secondary filtro-frequencia active" data-filtro="todos" style="padding:0 10px;min-height:30px;height:30px;font-size:.6875rem;">Todos</button>
-              <button class="btn btn-sm btn-secondary filtro-frequencia" data-filtro="mais" style="padding:0 10px;min-height:30px;height:30px;font-size:.6875rem;">Mais frequentes</button>
-              <button class="btn btn-sm btn-secondary filtro-frequencia" data-filtro="menos" style="padding:0 10px;min-height:30px;height:30px;font-size:.6875rem;">Menos frequentes</button>
+            <div class="bp-cli-freq-row" role="tablist" aria-label="Filtro de frequência">
+              <button type="button" class="filtro-frequencia is-active" data-filtro="todos">Todos</button>
+              <button type="button" class="filtro-frequencia" data-filtro="mais">Mais frequentes</button>
+              <button type="button" class="filtro-frequencia" data-filtro="menos">Menos frequentes</button>
             </div>
             <div id="clientes-list"></div>
           </div>
@@ -452,29 +458,35 @@
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="7dias">Últimos 7 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="mes">Este mês</button>
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="30dias">Últimos 30 dias</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="90dias">Últimos 90 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="ano">Este ano</button>
-                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter agenda-periodo-filter--dia" data-periodo="dia">Dia exacto</button>
+                  <button type="button" class="agenda-periodo-filter caixa-periodo-filter agenda-periodo-filter--dia agenda-periodo-filter--full" data-periodo="dia">Dia exacto</button>
                 </div>
                 <input type="date" id="caixa-data-exata" style="display:none;" />
               </div>
             </div>
             <div style="margin-bottom:12px;position:relative;">
-              <button type="button" id="caixa-localizar-btn" class="btn btn-secondary btn-block" style="justify-content:flex-start;gap:8px;font-size:.85rem;height:44px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                Localizar cliente no histórico
+              <button type="button" id="caixa-localizar-btn" class="bp-caixa-loc-trigger" aria-expanded="false" aria-controls="caixa-localizar-popover">
+                <span class="bp-caixa-loc-main">
+                  <svg class="bp-caixa-loc-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <span class="bp-caixa-loc-label">Localizar cliente no histórico</span>
+                </span>
               </button>
               <div id="caixa-localizar-popover" class="agenda-filter-popover" style="left:0;right:0;top:calc(100% + 6px);min-width:100%;">
-                <div style="font-size:.65rem;color:var(--text-muted);margin-bottom:8px;padding:0 4px;">Seleccione o período e depois o cliente</div>
+                <div class="bp-caixa-loc-hint">Seleccione o período e depois o cliente</div>
                 <div class="agenda-periodo-grid" id="caixa-localizar-periodos">
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="hoje">Hoje</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="ontem">Ontem</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="7dias">Últimos 7 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="30dias">Últimos 30 dias</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="90dias">Últimos 90 dias</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="mes">Este mês</button>
                   <button type="button" class="agenda-periodo-filter caixa-loc-periodo" data-periodo="ano">Este ano</button>
+                  <button type="button" class="agenda-periodo-filter caixa-loc-periodo agenda-periodo-filter--dia agenda-periodo-filter--full" data-periodo="dia">Dia exacto</button>
                 </div>
+                <input type="date" id="caixa-loc-data-exata" class="input-field" style="display:none;width:100%;margin-top:8px;font-size:16px;" aria-label="Dia exacto para localizar">
                 <div id="caixa-localizar-busca" style="display:none;margin-top:10px;">
-                  <input type="text" id="caixa-localizar-input" class="input-field" placeholder="Nome do cliente..." style="margin-bottom:8px;" />
+                  <input type="text" id="caixa-localizar-input" class="input-field bp-placeholder-rotating" placeholder="Nome do cliente..." data-ph-set="historico" style="margin-bottom:8px;" />
                   <button type="button" id="caixa-localizar-go" class="btn btn-primary btn-block btn-sm">Procurar</button>
                 </div>
               </div>
@@ -808,8 +820,8 @@
   <div id="modal-despesa" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="despesa-title">
     <div class="modal-sheet">
       <div class="handle"></div>
-      <div id="despesa-title" class="modal-title">Registar despesa</div>
-      <p class="venda-modal-sub">Saída de caixa — reduz o saldo do dia.</p>
+      <div id="despesa-title" class="modal-title">Despesa</div>
+      <p class="venda-modal-sub">Saída de caixa do dia</p>
       <div class="input-group">
         <label class="input-label" for="desp-desc">Descrição</label>
         <input type="text" id="desp-desc" class="input-field" placeholder="Ex: Compra de produtos" autocomplete="off">
@@ -946,15 +958,16 @@
 
   <!-- FECHO CAIXA -->
   <div id="modal-fecho" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fecho-title">
-    <div class="modal-sheet">
+    <div class="modal-sheet bp-fecho-sheet">
       <div class="handle"></div>
-      <div id="fecho-title" class="modal-title">Fecho de Caixa</div>
-      <div id="fecho-conteudo"></div>
-      <div class="modal-actions modal-actions--primary-emphasis" style="margin-top:16px;">
-        <button type="button" class="btn btn-secondary" id="modal-fecho-fechar">Voltar</button>
-        <button type="button" class="btn btn-primary" id="confirmar-fecho-btn">Fechar caixa</button>
+      <div id="fecho-title" class="modal-title bp-fecho-title">Fecho de caixa</div>
+      <p class="bp-fecho-sub">Resumo do dia · valores em Kz</p>
+      <div id="fecho-conteudo" class="bp-fecho-conteudo"></div>
+      <div class="bp-fecho-actions">
+        <button type="button" class="bp-fecho-btn bp-fecho-btn--ghost" id="modal-fecho-fechar">Voltar</button>
+        <button type="button" class="bp-fecho-btn bp-fecho-btn--ghost" id="btn-imprimir-fecho">Imprimir</button>
+        <button type="button" class="bp-fecho-btn bp-fecho-btn--primary" id="confirmar-fecho-btn">Fechar caixa</button>
       </div>
-      <button type="button" class="btn btn-secondary btn-block mt-2" id="btn-imprimir-fecho">Imprimir resumo</button>
     </div>
   </div>
 
@@ -1007,24 +1020,24 @@
             <button type="button" id="prof-criar-servico-btn" class="btn btn-secondary btn-sm btn-block">Criar serviço</button>
           </div>
         </div>
-        <div class="prof-form-separador">Dados adicionais <span>(opcional)</span></div>
+        <div class="prof-form-separador">Dados de contacto e identificação</div>
         <div class="input-group">
           <label class="input-label" for="prof-bi">Número do BI</label>
           <input type="text" id="prof-bi" class="input-field" placeholder="Ex: 006543210LA045" maxlength="20">
         </div>
         <div class="input-group">
-          <label class="input-label" for="prof-morada">Morada</label>
+          <label class="input-label" for="prof-morada">Morada *</label>
           <input type="text" id="prof-morada" class="input-field" placeholder="Ex: Talatona, Luanda">
         </div>
         <div class="input-group">
-          <label class="input-label" for="prof-contacto">Contacto (9 dígitos)</label>
+          <label class="input-label" for="prof-contacto">Contacto (9 dígitos) *</label>
           <input type="tel" id="prof-contacto" class="input-field" placeholder="Ex: 923456789" maxlength="9" inputmode="numeric">
         </div>
         <div class="prof-form-separador">Comissões e metas</div>
         <div class="prof-form-row">
           <div class="input-group">
-            <label class="input-label" for="prof-taxa">Taxa de comissão (%)</label>
-            <input type="number" id="prof-taxa" class="input-field" min="0" max="100" step="0.5" placeholder="ex: 30" value="0" inputmode="decimal">
+            <label class="input-label" for="prof-taxa">Taxa de comissão (%) *</label>
+            <input type="number" id="prof-taxa" class="input-field" min="0" max="100" step="0.5" placeholder="ex: 30" inputmode="decimal">
           </div>
           <div class="input-group">
             <label class="input-label" for="prof-meta">Meta mensal (Kz)</label>
@@ -1168,6 +1181,7 @@
         <button class="btn btn-sm btn-secondary" id="agenda-detail-pendentes" style="flex:1;">Pendentes</button>
         <button class="btn btn-sm btn-secondary" id="agenda-detail-realizados" style="flex:1;">Realizados</button>
       </div>
+      <div id="agenda-detail-totals" class="bp-ag-detail-totals" hidden></div>
       <div id="agenda-detail-list" style="max-height:350px;overflow-y:auto;"></div>
       <button class="btn btn-secondary btn-block mt-3" id="modal-agenda-close">Fechar</button>
     </div>

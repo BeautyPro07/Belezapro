@@ -4156,15 +4156,34 @@ async function addProfissional(p) {
   const nome = (p.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  // R29: pode existir na equipa sem serviço; R28 se especialidade preenchida deve ser válida
+  // Ponto 1 (Equipa): serviço obrigatório — especialidade deve ser serviço activo
   var espRaw = String(p.especialidade || '').trim();
-  if (espRaw) {
+  if (!espRaw) {
+    toast('O profissional tem de ter pelo menos um serviço (especialidade) associado.', 'error');
+    return null;
+  }
+  {
     const espCheck = bpValidarEspecialidadeProfissional(espRaw);
     if (!espCheck.ok) {
       toast(espCheck.msg || 'Especialidade inválida: escolha um serviço activo existente.', 'error');
       return null;
     }
     espRaw = String((espCheck.servico && espCheck.servico.nome) || espRaw);
+  }
+  // Contacto, morada e comissão (reforço se chamada fora do formulário)
+  var contactoAdd = String(p.contacto || '').replace(/\D/g, '');
+  if (!contactoAdd || contactoAdd.length !== 9) {
+    toast('Contacto obrigatório: exactamente 9 dígitos.', 'error');
+    return null;
+  }
+  if (!String(p.morada || '').trim()) {
+    toast('A morada do profissional é obrigatória.', 'error');
+    return null;
+  }
+  var taxaAdd = p.taxa_comissao != null ? Number(p.taxa_comissao) : NaN;
+  if (isNaN(taxaAdd) || taxaAdd < 0 || taxaAdd > 100) {
+    toast('Taxa de comissão obrigatória (0 a 100%).', 'error');
+    return null;
   }
 
   if (existeNomeDuplicado('profissionais', nome)) {
@@ -4184,7 +4203,7 @@ async function addProfissional(p) {
     if (espRaw) {
       try { await bpLigarProfissionalAoServico(n, espRaw); } catch (_) {}
     }
-    toast(espRaw ? 'Profissional adicionado.' : 'Profissional adicionado. Associe um serviço para o utilizar em vendas e agenda.', 'success');
+    toast('Profissional adicionado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -4328,6 +4347,10 @@ async function updateProfissional(id, data) {
   if (!actual) return null;
 
   if (data.especialidade != null) {
+    if (!String(data.especialidade || '').trim()) {
+      toast('O profissional tem de ter um serviço (especialidade) associado.', 'error');
+      return null;
+    }
     const espCheck = typeof bpValidarEspecialidadeProfissional === 'function'
       ? bpValidarEspecialidadeProfissional(data.especialidade)
       : { ok: !!(data.especialidade && String(data.especialidade).trim()), msg: 'Especialidade obrigatória' };
@@ -4335,6 +4358,35 @@ async function updateProfissional(id, data) {
       toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
       return null;
     }
+  }
+  if (data.contacto != null) {
+    var dig = String(data.contacto || '').replace(/\D/g, '');
+    if (!dig || dig.length !== 9) {
+      toast('Contacto obrigatório: exactamente 9 dígitos.', 'error');
+      return null;
+    }
+    data = Object.assign({}, data, { contacto: dig });
+  }
+  if (data.morada != null && !String(data.morada || '').trim()) {
+    toast('A morada do profissional é obrigatória.', 'error');
+    return null;
+  }
+  if (data.taxa_comissao != null) {
+    var tUp = Number(data.taxa_comissao);
+    if (isNaN(tUp) || tUp < 0 || tUp > 100) {
+      toast('Taxa de comissão obrigatória (0 a 100%).', 'error');
+      return null;
+    }
+  }
+  if (data.dataContratual != null) {
+    var dChk = typeof bpValidarDataContratual === 'function'
+      ? bpValidarDataContratual(data.dataContratual)
+      : { ok: !!String(data.dataContratual || '').trim(), value: data.dataContratual };
+    if (!dChk.ok) {
+      toast((dChk && dChk.message) || 'Data contratual inválida.', 'error');
+      return null;
+    }
+    data = Object.assign({}, data, { dataContratual: dChk.value || data.dataContratual });
   }
 
   if (data.nome) {
@@ -5719,6 +5771,22 @@ function getAgendamentosFiltrados() {
       return st === 'nao_realizado' || st === 'nao-realizado' || st === 'expirado';
     });
   }
+  if (agendaFilter === 'pendentes') {
+    const hojeP = hojeStr;
+    return list.filter(a => {
+      const st = _statusAg(a);
+      return st === 'agendado' && a.data >= hojeP;
+    }).sort((a, b) => {
+      if (a.data !== b.data) return String(a.data).localeCompare(String(b.data));
+      return String(a.hora || '').localeCompare(String(b.hora || ''));
+    });
+  }
+  if (agendaFilter === '90dias') {
+    const d90 = new Date(hojeStr + 'T00:00:00');
+    d90.setDate(d90.getDate() - 89);
+    const inicio90 = formatarDataISO(d90);
+    return list.filter(a => a.data >= inicio90 && a.data <= hojeStr && _statusAg(a) !== 'cancelado');
+  }
 
   switch (agendaFilter) {
     case 'hoje': {
@@ -5788,6 +5856,10 @@ if (label) {
     label.textContent = 'Cancelados';
   } else if (agendaFilter === 'nao_realizado') {
     label.textContent = 'Não realizados';
+  } else if (agendaFilter === 'pendentes') {
+    label.textContent = 'Pendentes';
+  } else if (agendaFilter === '90dias') {
+    label.textContent = 'Últimos 90 dias';
   } else {
     label.textContent = 'Todos';
   }
@@ -5800,9 +5872,24 @@ if (label) {
   }
 
   // Agrupar por data se o filtro não for "hoje" nem "dia"
-  const agrupar = (agendaFilter !== 'hoje' && agendaFilter !== 'dia');
+  const agrupar = (agendaFilter !== 'hoje' && agendaFilter !== 'dia' && agendaFilter !== 'pendentes');
   let html = '';
-  if (agrupar) {
+  const hojeStrR = hoje();
+  // Ponto 12: pendentes de HOJE em destaque (apenas quando o dia visível é hoje)
+  const isViewingHoje = (agendaFilter === 'hoje' && (state.agendaDataAtual || hojeStrR) === hojeStrR)
+    || (agendaFilter === 'dia' && (localStorage.getItem('bp_agenda_data_exata') || hojeStrR) === hojeStrR);
+  if (isViewingHoje && (agendaFilter === 'hoje' || agendaFilter === 'dia')) {
+    const porRealizar = ags.filter(a => _statusAg(a) === 'agendado');
+    const resto = ags.filter(a => _statusAg(a) !== 'agendado');
+    if (porRealizar.length) {
+      html += '<div class="bp-ag-section-title"><span class="bp-ag-pulse-dot" aria-hidden="true"></span>Agendamentos por realizar hoje</div>';
+      html += porRealizar.map(a => renderAgendaItem(a, { pulse: true })).join('');
+    }
+    if (resto.length) {
+      if (porRealizar.length) html += '<div class="bp-ag-section-title bp-ag-section-title--muted">Outros de hoje</div>';
+      html += resto.map(a => renderAgendaItem(a)).join('');
+    }
+  } else if (agrupar) {
     const grupos = {};
     ags.forEach(a => {
       if (!grupos[a.data]) grupos[a.data] = [];
@@ -5812,12 +5899,22 @@ if (label) {
     datas.forEach(data => {
       const dataLabel = data === hoje() ? 'Hoje' : new Date(data + 'T00:00:00').toLocaleDateString('pt-AO', { day: '2-digit', month: 'short' });
       html += `<div class="bp-ag-date-label">${dataLabel}</div>`;
-      html += grupos[data].map(a => renderAgendaItem(a)).join('');
+      html += grupos[data].map(a => renderAgendaItem(a, data === hojeStrR ? { pulse: _statusAg(a) === 'agendado' } : null)).join('');
     });
   } else {
-    html = ags.map(a => renderAgendaItem(a)).join('');
+    html = ags.map(a => renderAgendaItem(a, { pulse: agendaFilter === 'pendentes' && _statusAg(a) === 'agendado' })).join('');
   }
   cont.innerHTML = html;
+
+  // Bolinha no filtro Pendentes
+  try {
+    const pendBtn = document.getElementById('agenda-filter-pendentes');
+    if (pendBtn) {
+      const nPend = (state.agendamentos || []).filter(a => _statusAg(a) === 'agendado' && a.data >= hojeStrR).length;
+      pendBtn.classList.toggle('has-pending', nPend > 0);
+      pendBtn.setAttribute('data-count', String(nPend));
+    }
+  } catch (_) {}
 
   // Listeners para "Finalizar" (apenas os que não estão expirados)
   cont.querySelectorAll('[data-action="finalizar"]').forEach(btn => {
@@ -5828,7 +5925,7 @@ if (label) {
   });
 }
 
-function renderAgendaItem(a) {
+function renderAgendaItem(a, opts) {
   // Leitura apenas — expiração é responsabilidade de atualizarAgendamentosExpirados
   const st = _statusAg(a);
   const isRealizado = st === 'realizado';
@@ -5858,11 +5955,12 @@ function renderAgendaItem(a) {
 
   // Fallback se polish não estiver activo — mesma hierarquia de acções
   if (window.BPAgendaUI && typeof BPAgendaUI.renderAgendaItemPro === 'function') {
-    return BPAgendaUI.renderAgendaItemPro(a);
+    return BPAgendaUI.renderAgendaItemPro(a, opts);
   }
   const hora = String(a.hora || '').slice(0, 5);
+  const pulseCls = (opts && opts.pulse) ? ' bp-ag-card--pulse' : '';
   return `
-    <div class="list-item bp-ag-card" data-agenda-id="${a.id}">
+    <div class="list-item bp-ag-card${pulseCls}" data-agenda-id="${a.id}">
       <div class="avatar bp-ag-avatar">${escHtml((a.cliente || '?').charAt(0).toUpperCase())}</div>
       <div class="info bp-ag-info">
         <div class="bp-ag-top">
@@ -5952,7 +6050,7 @@ agendaFilter = localStorage.getItem(agendaFilterKey) || 'hoje';
 
 // Marcar opção ativa no popover (usando classes CSS)
 function atualizarFiltroAgendaUI() {
-  document.querySelectorAll('.agenda-periodo-filter').forEach(btn => {
+  document.querySelectorAll('#agenda-filter-popover .agenda-periodo-filter').forEach(btn => {
     const periodo = btn.dataset.periodo;
     btn.classList.toggle('active', periodo === agendaFilter);
   });
@@ -6440,7 +6538,6 @@ function renderClientes() {
   const search = rawSearch.trim().toLowerCase();
   const searchDigits = rawSearch.replace(/\D/g, '');
   const filtro = state.filtroClientes || 'todos';
-
   let filtered = (state.clientes || []).filter(c => {
     if (!search && !searchDigits) return true;
     const nome = String(c.nome || '').toLowerCase();
@@ -6583,9 +6680,37 @@ function renderCaixa() {
   const movRow = (m) => {
     const isV = m.tipo === 'venda';
     const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(m.profissional_id) : '';
+    let avatarHtml;
+    if (isV) {
+      let cli = null;
+      try {
+        if (m.cliente_id) cli = (state.clientes || []).find(function (c) { return String(c.id) === String(m.cliente_id); });
+        if (!cli && m.cliente) {
+          var nn = String(m.cliente).toLowerCase().trim();
+          cli = (state.clientes || []).find(function (c) { return String(c.nome || '').toLowerCase().trim() === nn; });
+        }
+      } catch (_) { cli = null; }
+      var src = null;
+      if (cli) {
+        if (window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') src = BPMedia.resolveFotoSrc(cli);
+        else if (cli.foto) src = cli.foto;
+        else if (cli.foto_url) src = cli.foto_url;
+      }
+      if (src) {
+        avatarHtml = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy" decoding="async"></div>';
+      } else if (cli && cli.nome) {
+        avatarHtml = '<div class="avatar">' + escHtml(String(cli.nome).charAt(0).toUpperCase()) + '</div>';
+      } else if (m.cliente) {
+        avatarHtml = '<div class="avatar">' + escHtml(String(m.cliente).charAt(0).toUpperCase()) + '</div>';
+      } else {
+        avatarHtml = '<div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+      }
+    } else {
+      avatarHtml = '<div class="avatar" style="background:#FDE8E8;color:var(--red);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+    }
     return `
       <div class="list-item${isV ? ' list-item-venda' : ''}" data-id="${m.id}" data-tipo="${m.tipo}" style="padding-right:${isV ? '32px' : '16px'};">
-        <div class="avatar" style="background:${isV ? '#E6F4EC' : '#FDE8E8'};color:${isV ? 'var(--green)' : 'var(--red)'};font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
+        ${avatarHtml}
         <div class="info">
           <div class="title">${escHtml(m.descricao||'')}</div>
           <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}${m.tipo === 'despesa' && m.categoria ? ' · ' + escHtml(m.categoria) : ''}</div>
@@ -6634,7 +6759,8 @@ function getMovimentosPeriodo(periodo) {
   const hojeStr = hoje();
   const now = new Date();
   const iso = (d) => d.toISOString().split('T')[0];
-  return state.movimentos.filter(m => {
+  const list = (state.movimentos && Array.isArray(state.movimentos)) ? state.movimentos : [];
+  return list.filter(m => {
     if (periodo === 'hoje') return m.data === hojeStr;
     if (periodo === 'ontem') {
       const d = new Date(now); d.setDate(d.getDate() - 1);
@@ -6647,6 +6773,10 @@ function getMovimentosPeriodo(periodo) {
     if (periodo === '30dias') {
       const d30 = new Date(now); d30.setDate(d30.getDate() - 29);
       return m.data >= iso(d30);
+    }
+    if (periodo === '90dias') {
+      const d90 = new Date(now); d90.setDate(d90.getDate() - 89);
+      return m.data >= iso(d90);
     }
     if (periodo === 'semana') {
       const d = new Date(hojeStr + 'T00:00:00');
@@ -6677,6 +6807,7 @@ function tituloPeriodoCaixa(periodo) {
     semana: 'Movimentos desta Semana',
     '7dias': 'Últimos 7 dias',
     '30dias': 'Últimos 30 dias',
+    '90dias': 'Últimos 90 dias',
     mes: 'Movimentos deste Mês',
     ano: 'Movimentos deste Ano',
     dia: 'Movimentos do dia seleccionado',
@@ -9609,44 +9740,77 @@ function abrirDetalheFaturamento() {
 let agendaDetailFiltro = 'pendentes';
 
 function abrirDetalheAgendamentos(filtro = 'pendentes') {
- agendaDetailFiltro = filtro;
- const list = document.getElementById('agenda-detail-list');
- const btnPend = document.getElementById('agenda-detail-pendentes');
- const btnReal = document.getElementById('agenda-detail-realizados');
- if (!state.agendamentos || !Array.isArray(state.agendamentos)) {
-  if (list) list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
-  openModal('modal-agenda-detail');
-  return;
- }
- const hojeStr = hoje();
- const ags = state.agendamentos.filter(a => a.data === hojeStr);
- if (btnPend) btnPend.className = 'btn btn-sm ' + (filtro === 'pendentes' ? 'btn-primary' : 'btn-secondary');
- if (btnReal) btnReal.className = 'btn btn-sm ' + (filtro === 'realizados' ? 'btn-primary' : 'btn-secondary');
- const filtrados = filtro === 'pendentes' ? ags.filter(a => a.status !== 'realizado' && a.status !== 'cancelado') : ags.filter(a => a.status === 'realizado');
- if (filtrados.length === 0) {
-  list.innerHTML = `<div class="empty-state"><p>Nenhum agendamento ${filtro === 'pendentes' ? 'pendente' : 'realizado'} hoje</p></div>`;
- } else {
-  list.innerHTML = filtrados.map(a => {
-   const nomeProf = getProfissionalNome(a.profissional_id);
-   return `
-    <div class="list-item" style="cursor:default;">
-     <div class="avatar" style="background:var(--gold-light);color:var(--gold-dark);"></div>
-     <div class="info">
-      <div class="title" style="color:var(--gold-dark);">${escHtml(a.servico)}</div>
-      <div class="sub">${escHtml(a.cliente)} · ${a.hora} · ${escHtml(nomeProf)}</div>
-     </div>
-     <div class="action">${fmtKz(a.preco)}</div>
-    </div>
-   `;
-  }).join('');
- }
- openModal('modal-agenda-detail');
+  agendaDetailFiltro = filtro;
+  const list = document.getElementById('agenda-detail-list');
+  const btnPend = document.getElementById('agenda-detail-pendentes');
+  const btnReal = document.getElementById('agenda-detail-realizados');
+  const totEl = document.getElementById('agenda-detail-totals');
+  if (!list) {
+    if (typeof openModal === 'function') openModal('modal-agenda-detail');
+    return;
+  }
+  if (!state.agendamentos || !Array.isArray(state.agendamentos)) {
+    list.innerHTML = '<div class="empty-state"><p>A carregar...</p></div>';
+    if (totEl) totEl.hidden = true;
+    if (typeof openModal === 'function') openModal('modal-agenda-detail');
+    return;
+  }
+  const hojeStr = hoje();
+  const all = state.agendamentos.slice();
+  // Histórico alinhado ao pedido: pendentes (hoje em diante) / realizados (últimos 90 dias)
+  let filtrados;
+  if (filtro === 'pendentes') {
+    filtrados = all.filter(a => {
+      const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
+      return st === 'agendado' && a.data >= hojeStr;
+    }).sort((a, b) => String(a.data).localeCompare(String(b.data)) || String(a.hora || '').localeCompare(String(b.hora || '')));
+  } else {
+    const d90 = new Date(hojeStr + 'T00:00:00');
+    d90.setDate(d90.getDate() - 89);
+    const inicio90 = d90.toISOString().split('T')[0];
+    filtrados = all.filter(a => {
+      const st = typeof _statusAg === 'function' ? _statusAg(a) : String(a.status || '');
+      return st === 'realizado' && a.data >= inicio90 && a.data <= hojeStr;
+    }).sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.hora || '').localeCompare(String(a.hora || '')));
+  }
+  if (btnPend) btnPend.className = 'btn btn-sm ' + (filtro === 'pendentes' ? 'btn-primary' : 'btn-secondary');
+  if (btnReal) btnReal.className = 'btn btn-sm ' + (filtro === 'realizados' ? 'btn-primary' : 'btn-secondary');
+  const sum = filtrados.reduce((s, a) => s + (Number(a.preco) || 0), 0);
+  if (totEl) {
+    totEl.hidden = false;
+    totEl.innerHTML = '<span>' + filtrados.length + ' · ' + (filtro === 'pendentes' ? 'pendentes' : 'realizados') +
+      '</span><strong>' + (typeof fmtKz === 'function' ? fmtKz(sum) : (sum + ' Kz')) + '</strong>';
+  }
+  if (filtrados.length === 0) {
+    list.innerHTML = '<div class="empty-state"><p>Nenhum agendamento ' + (filtro === 'pendentes' ? 'pendente' : 'realizado') + '</p></div>';
+  } else {
+    list.innerHTML = filtrados.map(a => {
+      const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(a.profissional_id) : '';
+      let av = '<div class="avatar">' + escHtml(String(a.cliente || '?').charAt(0).toUpperCase()) + '</div>';
+      try {
+        const cli = (state.clientes || []).find(c => String(c.id) === String(a.cliente_id) || c.nome === a.cliente);
+        let src = null;
+        if (cli && window.BPMedia && BPMedia.resolveFotoSrc) src = BPMedia.resolveFotoSrc(cli);
+        else if (cli && (cli.foto || cli.foto_url)) src = cli.foto || cli.foto_url;
+        if (src) av = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy"></div>';
+      } catch (_) {}
+      const dataLbl = a.data === hojeStr ? a.hora : ((a.data || '') + ' · ' + (a.hora || ''));
+      return (
+        '<div class="list-item" style="cursor:default;">' + av +
+        '<div class="info"><div class="title">' + escHtml(a.servico || '') + '</div>' +
+        '<div class="sub">' + escHtml(a.cliente || '') + ' · ' + escHtml(String(dataLbl)) +
+        (nomeProf ? ' · ' + escHtml(nomeProf) : '') + '</div></div>' +
+        '<div class="action">' + (typeof fmtKz === 'function' ? fmtKz(a.preco) : a.preco) + '</div></div>'
+      );
+    }).join('');
+  }
+  if (typeof openModal === 'function') openModal('modal-agenda-detail');
 }
 
 function abrirFechoCaixa() {
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
  const hojeStr = hoje();
- const movs = state.movimentos.filter(m => m.data === hojeStr);
+ const movs = (state.movimentos && Array.isArray(state.movimentos) ? state.movimentos : []).filter(m => m.data === hojeStr);
  const vendas = movs.filter(m => m.tipo === 'venda');
  const despesas = movs.filter(m => m.tipo === 'despesa');
  const totalVendas = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
@@ -9661,13 +9825,22 @@ function abrirFechoCaixa() {
  const fechoBox = document.getElementById('fecho-conteudo');
  if (!fechoBox) return;
  fechoBox.innerHTML = `
-  <div style="font-size:.75rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">${new Date().toLocaleDateString('pt-AO', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
-  <div class="fecho-row"><span class="fr-label">Fundo de abertura</span><span class="fr-val">${fmtKz(state.config.fundo)}</span></div>
-  <div class="fecho-row"><span class="fr-label">Total de vendas (${vendas.length})</span><span class="fr-val" style="color:var(--green)">+${fmtKz(totalVendas)}</span></div>
-  <div class="fecho-row"><span class="fr-label">Total de despesas (${despesas.length})</span><span class="fr-val" style="color:var(--red)">-${fmtKz(totalDespesas)}</span></div>
-  <div style="margin:8px 0 4px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Por método de pagamento</div>
-  ${pagHtml || '<div class="fecho-row"><span class="fr-label">—</span><span class="fr-val">0 Kz</span></div>'}
-  <div class="fecho-row total-row"><span class="fr-label">Saldo Final em Caixa</span><span class="fr-val">${fmtKz(saldoFinal)}</span></div>`;
+  <div class="bp-fecho-panel">
+    <div class="bp-fecho-date">${new Date().toLocaleDateString('pt-AO', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+    <div class="bp-fecho-card">
+      <div class="fecho-row"><span class="fr-label">Fundo de abertura</span><span class="fr-val">${fmtKz(state.config.fundo)}</span></div>
+      <div class="fecho-row"><span class="fr-label">Vendas · ${vendas.length}</span><span class="fr-val fr-val--in">+${fmtKz(totalVendas)}</span></div>
+      <div class="fecho-row"><span class="fr-label">Despesas · ${despesas.length}</span><span class="fr-val fr-val--out">−${fmtKz(totalDespesas)}</span></div>
+    </div>
+    <div class="bp-fecho-section">Métodos de pagamento</div>
+    <div class="bp-fecho-card bp-fecho-card--soft">
+      ${pagHtml || '<div class="fecho-row"><span class="fr-label">Sem vendas hoje</span><span class="fr-val">0 Kz</span></div>'}
+    </div>
+    <div class="bp-fecho-total">
+      <span class="bp-fecho-total-label">Saldo final em caixa</span>
+      <span class="bp-fecho-total-val">${fmtKz(saldoFinal)}</span>
+    </div>
+  </div>`;
  openModal('modal-fecho');
 }
 
@@ -10561,6 +10734,104 @@ function openEditProf(id) {
   openModal('modal-prof');
 }
 
+
+/** Botões contacto com identidade visual (WhatsApp / Ligar) — ponto 6 */
+function bpBtnWhatsAppHtml(href, label) {
+  label = label || 'WhatsApp';
+  var icon = '<svg class="bp-ic-wa" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.47 14.3c-.28-.14-1.64-.81-1.9-.9-.25-.1-.44-.14-.62.14-.18.28-.71.9-.87 1.08-.16.18-.32.2-.6.07-.28-.14-1.17-.43-2.23-1.37-.82-.73-1.38-1.64-1.54-1.92-.16-.28-.02-.43.12-.57.13-.13.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.35-.02-.49-.07-.14-.62-1.49-.85-2.04-.22-.53-.45-.46-.62-.47h-.53c-.18 0-.47.07-.71.35-.25.28-.93.91-.93 2.22s.96 2.58 1.09 2.76c.14.18 1.88 2.87 4.56 4.02 1.7.73 2.15.8 2.92.67.45-.08 1.64-.67 1.87-1.32.23-.65.23-1.2.16-1.32-.07-.11-.25-.18-.53-.32z"/><path fill="currentColor" d="M12.04 2C6.5 2 2.01 6.49 2.01 12.03c0 1.85.5 3.57 1.37 5.07L2 22l5.04-1.32A9.96 9.96 0 0 0 12.04 22C17.57 22 22 17.52 22 11.99 22 6.49 17.57 2 12.04 2zm0 18.15c-1.67 0-3.22-.48-4.54-1.32l-.33-.19-3.08.81.82-3-.21-.35a7.94 7.94 0 0 1-1.3-4.38c0-4.4 3.58-7.98 7.99-7.98 4.4 0 7.98 3.58 7.98 7.98 0 4.4-3.58 7.98-7.98 7.98z"/></svg>';
+  return '<a class="btn btn-sm bp-btn-whatsapp" href="' + href + '" target="_blank" rel="noopener noreferrer">' + icon + '<span>' + label + '</span></a>';
+}
+function bpBtnLigarHtml(href, label) {
+  label = label || 'Ligar';
+  var icon = '<svg class="bp-ic-call" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+  return '<a class="btn btn-sm bp-btn-call" href="' + href + '">' + icon + '<span>' + label + '</span></a>';
+}
+if (typeof window !== 'undefined') {
+  window.bpBtnWhatsAppHtml = bpBtnWhatsAppHtml;
+  window.bpBtnLigarHtml = bpBtnLigarHtml;
+}
+
+/** Placeholder animado (typewriter + rotação) — ponto 4 */
+var _bpPhTimers = {};
+function bpPrefersReducedMotion() {
+  try {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_) { return false; }
+}
+function bpStartPlaceholderRotation(inputId, phrases) {
+  var el = document.getElementById(inputId);
+  if (!el || !phrases || !phrases.length) return;
+  if (el.dataset.bpPhBound === '1') return;
+  el.dataset.bpPhBound = '1';
+  /* Acessibilidade: sem animação, placeholder estático da 1.ª frase */
+  if (bpPrefersReducedMotion()) {
+    el.setAttribute('placeholder', phrases[0]);
+    return;
+  }
+  var idx = 0;
+  var char = 0;
+  var phase = 'type'; // type | hold | erase
+  var current = phrases[0];
+  function tick() {
+    if (!document.body.contains(el)) {
+      try { clearTimeout(_bpPhTimers[inputId]); } catch (_) {}
+      return;
+    }
+    if (document.activeElement === el || (el.value && String(el.value).length)) {
+      _bpPhTimers[inputId] = setTimeout(tick, 830);
+      return;
+    }
+    if (phase === 'type') {
+      char++;
+      el.setAttribute('placeholder', current.slice(0, char));
+      if (char >= current.length) {
+        phase = 'hold';
+        _bpPhTimers[inputId] = setTimeout(tick, 2660);
+        return;
+      }
+      _bpPhTimers[inputId] = setTimeout(tick, 70);
+      return;
+    }
+    if (phase === 'hold') {
+      phase = 'erase';
+      _bpPhTimers[inputId] = setTimeout(tick, 30);
+      return;
+    }
+    // erase
+    char--;
+    if (char <= 0) {
+      char = 0;
+      el.setAttribute('placeholder', '');
+      idx = (idx + 1) % phrases.length;
+      current = phrases[idx];
+      phase = 'type';
+      _bpPhTimers[inputId] = setTimeout(tick, 630);
+      return;
+    }
+    el.setAttribute('placeholder', current.slice(0, char));
+    _bpPhTimers[inputId] = setTimeout(tick, 47);
+  }
+  _bpPhTimers[inputId] = setTimeout(tick, 1000);
+}
+function bpInitPlaceholderRotations() {
+  bpStartPlaceholderRotation('search-cliente', [
+    'Nome ou telefone...',
+    'Localizar cliente...',
+    'Pesquisar na lista...',
+    'Nome do cliente...'
+  ]);
+  bpStartPlaceholderRotation('caixa-localizar-input', [
+    'Nome do cliente...',
+    'Localizar no histórico...',
+    'Pesquisar venda por cliente...'
+  ]);
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(bpInitPlaceholderRotations, 400); });
+} else {
+  setTimeout(bpInitPlaceholderRotations, 400);
+}
+
 function abrirDetalheProfView(id) {
   const p = state.profissionais.find(x => x.id === id);
   if (!p) return;
@@ -10579,8 +10850,8 @@ function abrirDetalheProfView(id) {
     const msg = encodeURIComponent('Olá ' + (p.nome || '') + ',');
     contactActions =
       '<div class="bp-view-contact-actions">' +
-      '<a class="btn btn-sm btn-primary" href="https://wa.me/' + wa + '?text=' + msg + '" target="_blank" rel="noopener noreferrer">WhatsApp</a>' +
-      '<a class="btn btn-sm btn-secondary" href="tel:+244' + digits + '">Ligar</a>' +
+      bpBtnWhatsAppHtml('https://wa.me/' + wa + '?text=' + msg) +
+      bpBtnLigarHtml('tel:+244' + digits) +
       '</div>';
   }
 
@@ -10629,7 +10900,7 @@ document.getElementById('add-prof-btn')?.addEventListener('click', () => {
   document.getElementById('prof-modal-title').textContent = 'Novo profissional';
   ['prof-nome', 'prof-idade', 'prof-data-contratual', 'prof-bi', 'prof-morada', 'prof-contacto', 'prof-id', 'prof-taxa', 'prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
-    if (el) el.value = fid === 'prof-taxa' ? '0' : '';
+    if (el) el.value = '';
   });
   popularEspecialidadesProf('');
   try {
@@ -10644,10 +10915,62 @@ document.getElementById('add-prof-btn')?.addEventListener('click', () => {
   openModal('modal-prof');
 });
 
+
+/** Data contratual: obrigatória; aceita AAAA-MM-DD ou DD/MM/AAAA; devolve ISO. */
+function bpValidarDataContratual(raw) {
+  var s = String(raw == null ? '' : raw).trim();
+  if (!s) {
+    return {
+      ok: false,
+      message: 'A data contratual é obrigatória. Introduza a data no formato AAAA-MM-DD (ex: 2024-03-15) ou DD/MM/AAAA (ex: 15/03/2024).'
+    };
+  }
+  var y, m, d;
+  var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  var br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (iso) {
+    y = parseInt(iso[1], 10);
+    m = parseInt(iso[2], 10);
+    d = parseInt(iso[3], 10);
+  } else if (br) {
+    d = parseInt(br[1], 10);
+    m = parseInt(br[2], 10);
+    y = parseInt(br[3], 10);
+  } else {
+    return {
+      ok: false,
+      message: 'Data contratual inválida. Use AAAA-MM-DD (ex: 2024-03-15) ou DD/MM/AAAA (ex: 15/03/2024).'
+    };
+  }
+  if (y < 1950 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) {
+    return {
+      ok: false,
+      message: 'Data contratual impossível. Verifique o dia, o mês e o ano (entre 1950 e 2100).'
+    };
+  }
+  var dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+    return {
+      ok: false,
+      message: 'Data contratual inválida. Essa combinação de dia, mês e ano não existe no calendário.'
+    };
+  }
+  var value = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  return { ok: true, value: value };
+}
+if (typeof window !== 'undefined') window.bpValidarDataContratual = bpValidarDataContratual;
+
 document.getElementById('modal-prof-save')?.addEventListener('click', async () => {
+  var saveBtn = document.getElementById('modal-prof-save');
+  if (saveBtn && saveBtn.dataset.bpSaving === '1') return;
+  if (saveBtn) {
+    saveBtn.dataset.bpSaving = '1';
+    try { saveBtn.disabled = true; } catch (_) {}
+  }
+  try {
   const nome = (document.getElementById('prof-nome')?.value || '').trim();
   const idade = document.getElementById('prof-idade')?.value;
-  const dataContratual = (document.getElementById('prof-data-contratual')?.value || '').trim();
+  let dataContratual = (document.getElementById('prof-data-contratual')?.value || '').trim();
   let espSelect = document.getElementById('prof-esp')?.value || '';
   let especialidade = espSelect === '__criar' ? '' : espSelect;
   const numeroBI = (document.getElementById('prof-bi')?.value || '').trim().toUpperCase();
@@ -10667,37 +10990,93 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     else toast('A idade é obrigatória. Indique a idade do profissional para continuar.', 'warning');
     return;
   }
-  if (!dataContratual) {
-    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('A data contratual é obrigatória. Seleccione a data para continuar.', 'prof-data-contratual', 'warning');
-    else toast('A data contratual é obrigatória. Seleccione a data para continuar.', 'warning');
+  var idadeN = parseInt(idade, 10);
+  if (idadeN < 16 || idadeN > 99) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique uma idade válida entre 16 e 99 anos.', 'prof-idade', 'warning');
+    else toast('Idade inválida (16 a 99).', 'warning');
     return;
   }
+  /* Ponto 2 — data contratual: formato obrigatório + orientação */
+  var dataChk = typeof bpValidarDataContratual === 'function'
+    ? bpValidarDataContratual(dataContratual)
+    : { ok: !!dataContratual, value: dataContratual, message: 'A data contratual é obrigatória.' };
+  if (!dataChk.ok) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError(dataChk.message, 'prof-data-contratual', 'warning');
+    else toast(dataChk.message, 'warning');
+    return;
+  }
+  dataContratual = dataChk.value;
+
   // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
   if (espSelect === '__criar') {
     const criado = await bpCriarServicoDesdeProfModal();
     if (!criado) return;
     especialidade = criado;
   }
-  // R29: especialidade opcional no cadastro; sem ela o profissional não entra em vendas/agenda filtradas
-  if (!especialidade) { especialidade = ''; }
-  if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
-    toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
+
+  /* Ponto 1 — serviço obrigatório (anula R29 permissivo) */
+  if (!especialidade || !String(especialidade).trim()) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('Associe o profissional a um serviço (especialidade). Sem serviço não pode guardar.', 'prof-esp', 'warning');
+    } else {
+      toast('Associe o profissional a um serviço (especialidade).', 'warning');
+    }
     return;
   }
-  if (contacto && contacto.length !== 9) {
-    toast('Contacto deve ter exactamente 9 dígitos, ou deixe em branco.', 'error');
+
+  /* Ponto 1 — morada obrigatória */
+  if (!morada) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('A morada é obrigatória. Indique a morada do profissional para continuar.', 'prof-morada', 'warning');
+    } else {
+      toast('A morada é obrigatória.', 'warning');
+    }
+    return;
+  }
+
+  /* Ponto 1 — número/contacto obrigatório (9 dígitos) */
+  if (!contacto || contacto.length !== 9) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('O contacto é obrigatório e deve ter exactamente 9 dígitos (ex: 923456789).', 'prof-contacto', 'warning');
+    } else {
+      toast('Contacto obrigatório: exactamente 9 dígitos.', 'warning');
+    }
+    return;
+  }
+
+  /* Ponto 1 — comissão obrigatória (taxa preenchida, 0–100) */
+  var taxaRaw = (document.getElementById('prof-taxa')?.value || '').trim();
+  if (taxaRaw === '' || isNaN(taxa)) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('A taxa de comissão é obrigatória. Indique um valor entre 0 e 100 (ex: 30).', 'prof-taxa', 'warning');
+    } else {
+      toast('A taxa de comissão é obrigatória (0 a 100).', 'warning');
+    }
+    return;
+  }
+  if (taxa < 0 || taxa > 100) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('A taxa de comissão deve estar entre 0 e 100%.', 'prof-taxa', 'warning');
+    } else {
+      toast('Taxa de comissão inválida (0 a 100).', 'warning');
+    }
+    return;
+  }
+
+  if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
+    toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
   }
 
   const dados = {
     nome,
-    idade: parseInt(idade, 10),
+    idade: idadeN,
     dataContratual,
     especialidade,
     numeroBI: numeroBI || '',
     morada,
-    contacto: contacto || '',
-    taxa_comissao: isNaN(taxa) ? 0 : taxa,
+    contacto: contacto,
+    taxa_comissao: taxa,
     meta_mensal: isNaN(meta) ? 0 : meta
   };
 
@@ -10724,6 +11103,13 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
         }
       } catch (eFoto) { console.warn('[prof foto save]', eFoto); }
       closeModal('modal-prof');
+    }
+  }
+  } finally {
+    var saveBtn2 = document.getElementById('modal-prof-save');
+    if (saveBtn2) {
+      saveBtn2.dataset.bpSaving = '';
+      try { saveBtn2.disabled = false; } catch (_) {}
     }
   }
 });
@@ -10835,8 +11221,8 @@ function abrirDetalheClienteView(id) {
       const msg = encodeURIComponent('Olá ' + (c.nome || '') + ',');
       contactActions =
         '<div class="bp-view-contact-actions">' +
-        '<a class="btn btn-sm btn-primary" href="https://wa.me/' + wa + '?text=' + msg + '" target="_blank" rel="noopener noreferrer">WhatsApp</a>' +
-        '<a class="btn btn-sm btn-secondary" href="tel:+244' + digits + '">Ligar</a>' +
+        bpBtnWhatsAppHtml('https://wa.me/' + wa + '?text=' + msg) +
+        bpBtnLigarHtml('tel:+244' + digits) +
         '</div>';
     }
     var pts = Number(c.pontos) || 0;
@@ -10863,14 +11249,32 @@ function abrirDetalheClienteView(id) {
   const statsEl = document.getElementById('cliente-perfil-stats');
   if (statsEl) {
     statsEl.hidden = false;
+    statsEl.removeAttribute('hidden');
     statsEl.style.display = 'grid';
+    statsEl.classList.add('bp-cli-stats');
+    var visitas = Number(stats.visitas) || 0;
+    var gasto = Number(stats.totalGasto) || 0;
+    var ult = stats.ultimaVisita;
+    var visitasVal = visitas > 0 ? String(visitas) : '—';
+    var visitasSub = visitas > 0
+      ? (visitas === 1 ? 'Visita' : 'Visitas')
+      : 'Ainda sem visitas';
+    var gastoVal = gasto > 0 ? fmtKz(gasto) : '—';
+    var gastoSub = gasto > 0 ? 'Total gasto' : 'Sem gastos registados';
+    var ultVal = ult
+      ? (typeof formatarUltimaVisita === 'function' ? formatarUltimaVisita(ult) : '—')
+      : '—';
+    var ultSub = ult ? 'Última visita' : 'Sem histórico ainda';
     statsEl.innerHTML =
-      '<div><div class="stat-valor">' + stats.visitas + '</div><div class="stat-legenda">' +
-      (stats.visitas === 1 ? 'Visita' : 'Visitas') + '</div></div>' +
-      '<div><div class="stat-valor">' + fmtKz(stats.totalGasto) + '</div><div class="stat-legenda">Total gasto</div></div>' +
-      '<div><div class="stat-valor">' +
-      (typeof formatarUltimaVisita === 'function' ? formatarUltimaVisita(stats.ultimaVisita) : '—') +
-      '</div><div class="stat-legenda">Última visita</div></div>';
+      '<div class="bp-cli-stat' + (visitas ? '' : ' is-empty') + '">' +
+        '<div class="stat-valor">' + visitasVal + '</div>' +
+        '<div class="stat-legenda">' + visitasSub + '</div></div>' +
+      '<div class="bp-cli-stat' + (gasto ? '' : ' is-empty') + '">' +
+        '<div class="stat-valor">' + gastoVal + '</div>' +
+        '<div class="stat-legenda">' + gastoSub + '</div></div>' +
+      '<div class="bp-cli-stat' + (ult ? '' : ' is-empty') + '">' +
+        '<div class="stat-valor">' + ultVal + '</div>' +
+        '<div class="stat-legenda">' + ultSub + '</div></div>';
   }
   openModal('modal-cliente');
 }
@@ -10932,24 +11336,36 @@ document.getElementById('add-despesa-btn').addEventListener('click', () => {
   openModal('modal-despesa');
   setTimeout(function () { if (d) try { d.focus(); } catch (e) {} }, 100);
 });
-document.getElementById('modal-despesa-save').addEventListener('click', async () => {
+var _bpDespSaveBtn = document.getElementById('modal-despesa-save');
+if (_bpDespSaveBtn) _bpDespSaveBtn.addEventListener('click', async () => {
+  var btn = document.getElementById('modal-despesa-save');
+  if (btn && btn.dataset.bpSaving === '1') return;
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para registar despesas.')) return;
   const desc = document.getElementById('desp-desc').value.trim();
   const valor = Number(document.getElementById('desp-valor').value);
   const categoria = (document.getElementById('desp-categoria') || {}).value || 'outro';
+  const fornEl = document.getElementById('desp-fornecedor');
+  const fornecedor = fornEl ? String(fornEl.value || '').trim() : '';
   if (!desc) { toast('Indica a descrição da despesa.', 'warning'); return; }
   if (!valor || valor <= 0 || isNaN(valor)) { toast('Indica um valor válido.', 'warning'); return; }
-  await addMovimento({
-    tipo: 'despesa',
-    descricao: desc,
-    valor: valor,
-    categoria: categoria
-  });
-  closeModal('modal-despesa');
-  document.getElementById('desp-desc').value = '';
-  document.getElementById('desp-valor').value = '';
-  toast('Despesa registada.', 'success');
-  if (typeof updateUI === 'function') updateUI();
+  if (btn) { btn.dataset.bpSaving = '1'; try { btn.disabled = true; } catch (_) {} }
+  try {
+    await addMovimento({
+      tipo: 'despesa',
+      descricao: desc,
+      valor: valor,
+      categoria: categoria,
+      fornecedor: fornecedor || undefined
+    });
+    closeModal('modal-despesa');
+    document.getElementById('desp-desc').value = '';
+    document.getElementById('desp-valor').value = '';
+    if (fornEl) fornEl.value = '';
+    toast('Despesa registada.', 'success');
+    if (typeof updateUI === 'function') updateUI();
+  } finally {
+    if (btn) { btn.dataset.bpSaving = ''; try { btn.disabled = false; } catch (_) {} }
+  }
 });
 document.getElementById('modal-despesa-cancel').addEventListener('click', () => closeModal('modal-despesa'));
 
@@ -11236,10 +11652,12 @@ document.getElementById('modal-finalizar-cancel').addEventListener('click', () =
 //  CONFIRMAR FECHO DE CAIXA (persistência)
 // ====================================================================
 async function confirmarFechoCaixa() {
+  var cBtn = document.getElementById('confirmar-fecho-btn');
+  if (cBtn && cBtn.dataset.bpSaving === '1') return;
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin'], 'Apenas administradores podem fechar o caixa.')) return;
 
   const hojeStr = hoje();
-  const movs = state.movimentos.filter(m => m.data === hojeStr);
+  const movs = (state.movimentos && Array.isArray(state.movimentos) ? state.movimentos : []).filter(m => m.data === hojeStr);
   const vendas = movs.filter(m => m.tipo === 'venda');
   const despesas = movs.filter(m => m.tipo === 'despesa');
 
@@ -11271,6 +11689,8 @@ async function confirmarFechoCaixa() {
     fechado_por: state.config.userId || null,
   };
 
+  if (cBtn) { cBtn.dataset.bpSaving = '1'; try { cBtn.disabled = true; } catch (_) {} }
+  try {
   await dbPut('fechos_caixa', registro);
   // Atualizar o estado local (Store quando disponível — notifica subscribers)
   if (window.BeautyStore && window.BeautyStore.pushToList) {
@@ -11282,17 +11702,21 @@ async function confirmarFechoCaixa() {
   toast('Caixa fechado.', 'success');
   closeModal('modal-fecho');
   updateUI();
+  } finally {
+    if (cBtn) { cBtn.dataset.bpSaving = ''; try { cBtn.disabled = false; } catch (_) {} }
+  }
 }
 
 // ====================================================================
 //  FECHO DE CAIXA (listeners)
 // ====================================================================
 document.getElementById('fecho-caixa-btn').addEventListener('click', abrirFechoCaixa);
-document.getElementById('modal-fecho-fechar').addEventListener('click', () => closeModal('modal-fecho'));
-document.getElementById('btn-imprimir-fecho').addEventListener('click', () => {
+document.getElementById('modal-fecho-fechar')?.addEventListener('click', () => closeModal('modal-fecho'));
+document.getElementById('btn-imprimir-fecho')?.addEventListener('click', () => {
   const hojeStr = hoje();
-  const vendas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
-  const despesas = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa');
+  const _movsImp = (state.movimentos && Array.isArray(state.movimentos)) ? state.movimentos : [];
+  const vendas = _movsImp.filter(m => m.data === hojeStr && m.tipo === 'venda');
+  const despesas = _movsImp.filter(m => m.data === hojeStr && m.tipo === 'despesa');
   const tv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
   const td = despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const byPag = {};
@@ -11326,25 +11750,27 @@ document.getElementById('btn-imprimir-recibo').addEventListener('click', () => {
 
 // KPIs clicáveis
 document.getElementById('kpi-revenue-card').addEventListener('click', abrirDetalheFaturamento);
-document.getElementById('kpi-agenda-card').addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
+document.getElementById('kpi-agenda-card')?.addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
 
 document.getElementById('modal-revenue-close').addEventListener('click', () => closeModal('modal-revenue-detail'));
 document.getElementById('modal-agenda-close').addEventListener('click', () => closeModal('modal-agenda-detail'));
 
-document.getElementById('agenda-detail-pendentes').addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
-document.getElementById('agenda-detail-realizados').addEventListener('click', () => abrirDetalheAgendamentos('realizados'));
+document.getElementById('agenda-detail-pendentes')?.addEventListener('click', () => abrirDetalheAgendamentos('pendentes'));
+document.getElementById('agenda-detail-realizados')?.addEventListener('click', () => abrirDetalheAgendamentos('realizados'));
 
 // hist-chip substituído pelo popover caixa-filter (Fase E)
 
 
-// Filtro clientes
+// Filtro frequência clientes — texto só, sem fundo (activo = negrito dourado)
 document.querySelectorAll('.filtro-frequencia').forEach(btn => {
   btn.addEventListener('click', function() {
-    document.querySelectorAll('.filtro-frequencia').forEach(b => b.classList.remove('active'));
-    this.classList.add('active');
-    state.filtroClientes = this.dataset.filtro;
-    localStorage.setItem('bp_filtro_clientes', state.filtroClientes);
-    renderClientes();
+    document.querySelectorAll('.filtro-frequencia').forEach(b => {
+      b.classList.remove('active', 'is-active');
+    });
+    this.classList.add('is-active');
+    state.filtroClientes = this.dataset.filtro || 'todos';
+    try { localStorage.setItem('bp_filtro_clientes', state.filtroClientes); } catch (_) {}
+    if (typeof renderClientes === 'function') renderClientes();
   });
 });
 
@@ -11413,6 +11839,7 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
     e.stopPropagation();
     const open = pop.style.display === 'block';
     pop.style.display = open ? 'none' : 'block';
+    try { btn.setAttribute('aria-expanded', open ? 'false' : 'true'); } catch (_) {}
     if (buscaBox) buscaBox.style.display = 'none';
     periodoLoc = null;
     document.querySelectorAll('.caixa-loc-periodo').forEach(b => b.classList.remove('active'));
@@ -11421,13 +11848,35 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
   document.addEventListener('click', function(e) {
     if (pop.style.display === 'block' && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
       pop.style.display = 'none';
+      try { btn.setAttribute('aria-expanded', 'false'); } catch (_) {}
     }
   });
 
   document.querySelectorAll('.caixa-loc-periodo').forEach(b => {
     b.addEventListener('click', function(e) {
       e.stopPropagation();
-      periodoLoc = this.dataset.periodo;
+      var per = this.dataset.periodo;
+      if (per === 'dia') {
+        var din = document.getElementById('caixa-loc-data-exata');
+        if (din) {
+          din.onchange = function () {
+            if (!this.value) return;
+            localStorage.setItem('bp_caixa_loc_data_exata', this.value);
+            localStorage.setItem('bp_caixa_data_exata', this.value);
+            periodoLoc = 'dia';
+            document.querySelectorAll('.caixa-loc-periodo').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            if (buscaBox) buscaBox.style.display = 'block';
+            if (input) { input.value = ''; input.focus(); }
+          };
+          try {
+            if (typeof din.showPicker === 'function') din.showPicker();
+            else din.click();
+          } catch (_) { try { din.click(); } catch (__) {} }
+        }
+        return;
+      }
+      periodoLoc = per;
       document.querySelectorAll('.caixa-loc-periodo').forEach(x => x.classList.remove('active'));
       this.classList.add('active');
       if (buscaBox) buscaBox.style.display = 'block';
@@ -11461,8 +11910,27 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
     if (cont) {
       cont.innerHTML = movs.sort((a,b) => b.data.localeCompare(a.data) || b.hora.localeCompare(a.hora)).map(m => {
         const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(m.profissional_id) : '';
+        var avLoc = '';
+        try {
+          var cliL = null;
+          if (m.cliente_id) cliL = (state.clientes || []).find(function (c) { return String(c.id) === String(m.cliente_id); });
+          if (!cliL && m.cliente) {
+            var nL = String(m.cliente).toLowerCase().trim();
+            cliL = (state.clientes || []).find(function (c) { return String(c.nome || '').toLowerCase().trim() === nL; });
+          }
+          var srcL = null;
+          if (cliL && window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') srcL = BPMedia.resolveFotoSrc(cliL);
+          else if (cliL && cliL.foto) srcL = cliL.foto;
+          else if (cliL && cliL.foto_url) srcL = cliL.foto_url;
+          if (srcL) avLoc = '<div class="avatar bp-avatar-img"><img src="' + String(srcL).replace(/"/g, '&quot;') + '" alt="" loading="lazy"></div>';
+          else if (cliL && cliL.nome) avLoc = '<div class="avatar">' + escHtml(String(cliL.nome).charAt(0).toUpperCase()) + '</div>';
+          else if (m.cliente) avLoc = '<div class="avatar">' + escHtml(String(m.cliente).charAt(0).toUpperCase()) + '</div>';
+          else avLoc = '<div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+        } catch (_) {
+          avLoc = '<div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+        }
         return `<div class="list-item list-item-venda" data-id="${m.id}" data-tipo="venda" style="padding-right:32px;">
-          <div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
+          ${avLoc}
           <div class="info">
             <div class="title">${escHtml(m.descricao)}</div>
             <div class="sub">${m.data} · ${m.hora} · ${escHtml(m.cliente || '')} · ${escHtml(m.metodoPagamento || '')}</div>
@@ -11481,9 +11949,43 @@ document.querySelectorAll('.filtro-frequencia').forEach(btn => {
   if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter') procurar(); });
 })();
 
-document.getElementById('modal-cliente-nao-encontrado-ok')?.addEventListener('click', () => {
-  closeModal('modal-cliente-nao-encontrado');
-});
+(function bindClienteNaoEncontradoOk() {
+  function fechar() {
+    if (typeof closeModal === 'function') closeModal('modal-cliente-nao-encontrado');
+    else {
+      var el = document.getElementById('modal-cliente-nao-encontrado');
+      if (el) {
+        el.classList.remove('open');
+        el.style.display = 'none';
+        el.style.pointerEvents = '';
+      }
+      try { document.body.classList.remove('bp-modal-open'); } catch (_) {}
+    }
+  }
+  function bind() {
+    var btn = document.getElementById('modal-cliente-nao-encontrado-ok');
+    if (!btn || btn.dataset.bpBoundOk === '1') return;
+    btn.dataset.bpBoundOk = '1';
+    btn.type = 'button';
+    btn.addEventListener('click', function (ev) {
+      try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+      fechar();
+    });
+  }
+  bind();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+  setTimeout(bind, 500);
+  /* Delegação (captura): cobre re-renders / timing */
+  if (!window.__bpCliNaoEncDeleg) {
+    window.__bpCliNaoEncDeleg = true;
+    document.addEventListener('click', function (ev) {
+      var t = ev.target && ev.target.closest && ev.target.closest('#modal-cliente-nao-encontrado-ok');
+      if (!t) return;
+      try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+      fechar();
+    }, true);
+  }
+})();
 
 
 // R50 — Cancelar venda (confirmação + motivo)
@@ -13929,8 +14431,8 @@ document.addEventListener('DOMContentLoaded', async function init() {
   const filtro = localStorage.getItem('bp_filtro_clientes') || 'todos';
   state.filtroClientes = filtro;
   document.querySelectorAll('.filtro-frequencia').forEach(b => {
-    b.classList.remove('active');
-    if (b.dataset.filtro === filtro) b.classList.add('active');
+    b.classList.remove('active', 'is-active');
+    if (b.dataset.filtro === filtro) b.classList.add('is-active');
   });
 
   const periodo = localStorage.getItem('bp_chart_periodo') || 'semana';
@@ -14706,39 +15208,9 @@ window.renderBarraMeta = renderBarraMeta;
     });
   }
 
-  // Hook despesa save to include categoria
+  // Save unificado em eventos-caixa-vendas.js (evita duplo registo) — só realça campos
   function hookDespesaSave() {
-    var btn = document.getElementById('modal-despesa-save');
-    if (!btn || btn.dataset.bpHooked) return;
-    btn.dataset.bpHooked = '1';
-    var orig = btn.onclick;
-    btn.onclick = async function (e) {
-      enhanceDespesaModal();
-      var desc = (document.getElementById('desp-desc') || {}).value;
-      var valor = parseFloat((document.getElementById('desp-valor') || {}).value);
-      var cat = (document.getElementById('desp-categoria') || {}).value || 'outro';
-      var forn = (document.getElementById('desp-fornecedor') || {}).value || '';
-      if (!desc || !valor || valor <= 0) {
-        if (typeof toast === 'function') toast('Indica descrição e valor válidos.', 'warning');
-        return;
-      }
-      if (typeof addMovimento === 'function') {
-        await addMovimento({
-          tipo: 'despesa',
-          descricao: desc,
-          valor: valor,
-          categoria: cat,
-          fornecedor: forn
-        });
-      }
-      if (typeof closeModal === 'function') closeModal('modal-despesa');
-      var d1 = document.getElementById('desp-desc'); if (d1) d1.value = '';
-      var d2 = document.getElementById('desp-valor'); if (d2) d2.value = '';
-      var d3 = document.getElementById('desp-fornecedor'); if (d3) d3.value = '';
-      if (typeof toast === 'function') toast('Despesa registada.', 'success');
-      if (typeof renderCaixa === 'function') renderCaixa();
-      if (typeof updateUI === 'function') updateUI();
-    };
+    try { if (typeof enhanceDespesaModal === 'function') enhanceDespesaModal(); } catch (_) {}
   }
 
   function init() {
@@ -18589,6 +19061,59 @@ window.renderBarraMeta = renderBarraMeta;
     }
   }
 
+  /** Offline robusto: se só há foto_url, descarrega e guarda data: em entity.foto */
+  async function ensureLocalFotoCache(kind, entityId) {
+    try {
+      if (!entityId || typeof navigator === "undefined" || !navigator.onLine) return false;
+      var ent = kind === "clientes" ? getCliente(entityId) : getProf(entityId);
+      if (!ent) return false;
+      if (ent.foto && String(ent.foto).indexOf("data:") === 0) return true;
+      if (!ent.foto_url) return false;
+      var res = await fetch(ent.foto_url, { mode: "cors", credentials: "omit" });
+      if (!res.ok) return false;
+      var blob = await res.blob();
+      if (!blob || blob.size < 32) return false;
+      var dataUrl = await new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+      if (!dataUrl || String(dataUrl).indexOf("data:") !== 0) return false;
+      var patch = { foto: dataUrl, updated_at: new Date().toISOString() };
+      if (kind === "clientes" && typeof updateCliente === "function") await updateCliente(entityId, patch);
+      else if (kind === "profissionais" && typeof updateProfissional === "function") await updateProfissional(entityId, patch);
+      else {
+        Object.assign(ent, patch);
+        if (typeof dbPut === "function") await dbPut(kind, ent);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function warmFotoCaches() {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    try {
+      var clients = (state.clientes || []).slice(0, 40);
+      var i = 0;
+      function next() {
+        if (i >= clients.length) return;
+        var c = clients[i++];
+        if (c && c.id && c.foto_url && !(c.foto && String(c.foto).indexOf("data:") === 0)) {
+          ensureLocalFotoCache("clientes", c.id).finally(function () { setTimeout(next, 120); });
+        } else setTimeout(next, 0);
+      }
+      setTimeout(next, 1500);
+    } catch (_) {}
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", function () { setTimeout(warmFotoCaches, 800); });
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(warmFotoCaches, 2500); });
+    else setTimeout(warmFotoCaches, 2500);
+  }
+
   /** Preferir cache local (data:) depois URL remota. */
   function resolveFotoSrc(entity) {
     if (!entity) return null;
@@ -18759,7 +19284,8 @@ window.renderBarraMeta = renderBarraMeta;
             continue;
           }
           var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
-          var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
+          /* Offline: manter data URL local como cache; foto_url para online */
+        var patch = { foto_url: bustUrl, updated_at: new Date().toISOString() };
           if (item.kind === "clientes" && typeof updateCliente === "function") {
             await updateCliente(item.entityId, patch);
           } else if (item.kind === "profissionais" && typeof updateProfissional === "function") {
@@ -18794,7 +19320,8 @@ window.renderBarraMeta = renderBarraMeta;
       removeFotoQueueItem(kind, entityId);
       // Cache-bust: mesmo path .jpg no Storage mantém URL pública — forçar ?v=
       var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
-      var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
+      /* Offline: manter data URL local como cache; foto_url para online */
+        var patch = { foto_url: bustUrl, updated_at: new Date().toISOString() };
       if (kind === "clientes") {
         var c = (state.clientes || []).find(function (x) { return x.id === entityId; });
         // Só cancelar se o utilizador já escolheu OUTRA foto mais recente
@@ -19910,6 +20437,7 @@ window.renderBarraMeta = renderBarraMeta;
     enhanceListAvatars: enhanceListAvatars,
     patchRowAvatar: patchRowAvatar,
     resolveFotoSrc: resolveFotoSrc,
+    ensureLocalFotoCache: ensureLocalFotoCache,
     uploadFotoStorage: uploadFotoStorage,
     session: session
   };
@@ -19976,8 +20504,9 @@ window.renderBarraMeta = renderBarraMeta;
     return "https://wa.me/" + num + "?text=" + encodeURIComponent(msg);
   }
 
-  function renderAgendaItemPro(a) {
+  function renderAgendaItemPro(a, opts) {
     if (!a) return "";
+    opts = opts || null;
     var st = statusOf(a);
     var isRealizado = st === "realizado";
     var isCancelado = st === "cancelado";
@@ -20044,9 +20573,11 @@ window.renderBarraMeta = renderBarraMeta;
       }
       if (podeWhatsApp) {
         cells.push(
-          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' +
+          '<button type="button" class="btn btn-sm bp-btn-whatsapp bp-ag-btn" data-id="' +
             a.id +
-            '" data-action="whatsapp-agenda" aria-label="WhatsApp">WhatsApp</button>'
+            '" data-action="whatsapp-agenda" aria-label="WhatsApp">' +
+            '<svg class="bp-ic-wa" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 3.5A11 11 0 004.1 17.6L3 21l3.5-1A11 11 0 1020.5 3.5zM12 20a8 8 0 01-4.1-1.1l-.3-.2-2.4.7.7-2.3-.2-.3A8 8 0 1112 20zm4.4-5.6c-.2-.1-1.4-.7-1.6-.8-.2-.1-.4-.1-.5.1-.2.2-.6.8-.8 1-.1.2-.3.2-.5.1-.2-.1-1-.4-1.9-1.2-.7-.6-1.2-1.4-1.3-1.6-.1-.2 0-.4.1-.5l.4-.4c.1-.1.2-.3.2-.4 0-.1 0-.3-.1-.4-.1-.1-.5-1.3-.7-1.8-.2-.5-.4-.4-.5-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 2 0 1.2.9 2.3 1 2.5.1.2 1.7 2.6 4.1 3.6.6.3 1 .4 1.4.5.6.2 1.1.2 1.5.1.5-.1 1.4-.6 1.6-1.1.2-.5.2-1 .1-1.1-.1-.1-.2-.2-.5-.3z"/></svg>' +
+            '<span>WhatsApp</span></button>'
         );
       } else if (podeFinalizar) {
         cells.push(
@@ -20070,8 +20601,9 @@ window.renderBarraMeta = renderBarraMeta;
         "</div>";
     }
 
+    var pulseCls = (opts && opts.pulse) ? " bp-ag-card--pulse" : "";
     return (
-      '<div class="list-item bp-ag-card" data-agenda-id="' +
+      '<div class="list-item bp-ag-card' + pulseCls + '" data-agenda-id="' +
       a.id +
       '">' +
       avHtml +

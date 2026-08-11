@@ -1,3 +1,240 @@
+# BeautyPro — README
+
+
+### Varredura pós-implementação — Caixa (2026-08-11)
+
+#### Problemas encontrados e corrigidos
+1. **Fecho / imprimir** sem guard se `state.movimentos` for null → crash. **Corrigido:** `Array.isArray` fallback `[]`.
+2. **Entendi:** só listener directo; timing frágil. **Corrigido:** delegação em captura + `type=button`.
+3. **Despesa:** `getElementById(...).addEventListener` sem null-check. **Corrigido.**
+4. **Avatar foto na lista:** sem CSS `object-fit` → foto cortada/errada. **Corrigido** em `kpis-caixa-listas.css`.
+5. **Botões:** `max-height: 40px` para resistir a overrides do design-system.
+
+#### Duplicação
+- Confirmado: **um** `addMovimento` despesa em `eventos-caixa-vendas.js`; finance só `enhanceDespesaModal`.
+
+#### Segunda varredura: PASSED
+
+---
+
+## Etapa Caixa + botões (2026-08-11) — Pontos 8 e 11 + paridade WA/Fechar
+
+### Implementado
+- **Entendi** (`modal-cliente-nao-encontrado`): bind reforçado + fallback de fecho.
+- **Despesa**: single-flight (`bpSaving`); hook duplicado em `finance-fase1-extra.js` desactivado (só enhance).
+- **Fecho**: painel `bp-fecho-panel` sem inline excessivo; lógica de totais intacta.
+- **Lista movimentos / localizar**: avatar do cliente (foto → inicial → bolinha); despesas mantêm bolinha vermelha; clique venda intacto.
+- **Botões**: WA / Ligar / Fechar / Editar a **40px** em `#modal-cliente` e `#modal-prof`.
+
+### Ficheiros
+`eventos-caixa-vendas.js`, `ui-render-clientes-caixa-equipa.js`, `detalhes-acessibilidade.js`, `finance-fase1-extra.js`, `componentes-base.css`, `kpis-caixa-listas.css`, `index.html`, `app.bundle.js`
+
+---
+
+
+### Correcção CSS (2026-08-11)
+- Estilos da etapa Cliente estavam em `style.css`, **não referenciado** pelo `index.html`.
+- **Movidos** para `componentes-base.css` (carregado pelo index).
+- Regra: **nunca** entregar CSS/JS que o `index.html` / `build-bundle.js` não carreguem.
+
+## Etapa Cliente (2026-08-11) — Pontos 3, 4, 5, 6 (parcial), 7 (parcial)
+
+### Pedido
+3. Remover filtros Todos / Mais frequentes / Menos frequentes (poluição).
+4. Placeholder «Localizar cliente» com animação (escreve, pausa, apaga, próxima frase) na aba Cliente e no histórico (Caixa).
+5. Estados vazios de Visitas / Total gasto / Última visita estruturados e legíveis.
+6. WhatsApp com ícone e identidade visual; Ligar com identidade própria; botões Editar/Cancelar mais compactos no modal cliente.
+7. Imagens: mecanismo para a foto permanecer visível offline (parcial nesta etapa: não apagar data URL local após upload).
+
+### Encontrado
+- Chips `.filtro-frequencia` em `index.html` + sort em `renderClientes` + handlers em `eventos-caixa-vendas.js`.
+- Placeholders estáticos.
+- Stats do perfil: `0` / `0 Kz` / texto longo sem hierarquia de empty state.
+- WhatsApp/Ligar: `btn-primary` / `btn-secondary` genéricos, só texto.
+- Após upload bem-sucedido, `media-galeria.js` fazia `foto: null` e ficava só `foto_url` (falha offline).
+
+### Alterado
+| Ficheiro | Mudança |
+|----------|---------|
+| `index.html` | Removidos 3 botões de frequência; attrs `bp-placeholder-rotating` nos inputs de pesquisa |
+| `ui-render-clientes-caixa-equipa.js` | Lista só por nome + pesquisa (sem sort por frequência) |
+| `eventos-caixa-vendas.js` | Handlers de frequência removidos |
+| `eventos-cadastros.js` | `bpBtnWhatsAppHtml` / `bpBtnLigarHtml`; `bpStartPlaceholderRotation`; stats `bp-cli-stat is-empty` |
+| `media-galeria.js` | Após upload: mantém `foto` (data URL) + grava `foto_url` (cache offline) |
+| `style.css` | Estilos WA (#25D366), Ligar (#1a73e8), stats empty, modal cliente compacto |
+| `app.bundle.js` | Rebuild |
+
+### Removido
+- UI e lógica dos filtros de frequência de clientes (ponto 3).
+- `foto: null` no patch pós-upload (ponto 7 parcial).
+
+### Preservado
+- Pesquisa por nome/telefone/notas.
+- Pipeline BPMedia / avatars.
+- Notificações e SMS intocados.
+- Agenda WhatsApp (pode alinhar-se numa etapa seguinte do ponto 6).
+
+### Verificação
+| Ponto | Estado |
+|-------|--------|
+| 3 | Implementado |
+| 4 | Implementado (Cliente + Caixa localizar) |
+| 5 | Implementado |
+| 6 | Parcial (vista cliente + ficha profissional; agenda noutro passo se necessário) |
+| 7 | Parcial (cache local data URL preservado; SW/cache HTTP de foto_url ainda pode falhar se nunca houve data URL) |
+
+---
+
+
+### Varredura pós-implementação (2026-08-11) — Cliente
+
+#### Problemas encontrados e corrigidos
+1. **Stats em grelha**: `display:grid` no JS sem `grid-template-columns` → podia empilhar numa coluna. **Corrigido:** `repeat(3, minmax(0,1fr))` em `style.css`.
+2. **`hidden` no stats**: só `hidden=false` por vezes insuficiente. **Corrigido:** `removeAttribute('hidden')`.
+3. **Placeholder e a11y**: animação sem respeito a `prefers-reduced-motion`. **Corrigido:** placeholder estático se reduced motion; clear timeout se o input sair do DOM.
+4. **Helpers globais**: `bpBtnWhatsAppHtml` / `bpBtnLigarHtml` expostos em `window` para uso consistente.
+
+#### Segunda varredura — checklist automático
+- Sem botões `.filtro-frequencia` no HTML
+- Sem sort por frequência em `renderClientes`
+- Placeholders animados em search-cliente e caixa-localizar-input
+- WA/Ligar com helpers (sem btn-primary genérico no fluxo de ficha)
+- Empty stats com copy estruturado
+- Upload de foto **não** faz `foto: null`
+- Bundle regenerado + `node --check` OK
+
+#### Confrontação requisitos
+| Ponto | Cumprido | Notas |
+|-------|----------|-------|
+| 3 | Sim | Filtros removidos |
+| 4 | Sim | Typewriter + erase; reduced motion |
+| 5 | Sim | Cards is-empty + legendas |
+| 6 | Parcial | Ficha cliente + profissional; Agenda ainda genérico (fora do núcleo desta etapa) |
+| 7 | Parcial | Cache data URL mantido; clientes *só* com foto_url legada offline continuam limitados |
+
+#### Não inventado / não tocado
+- Notificações e SMS
+- Lógica de pesquisa nome/telefone
+- Soft-delete / RBAC
+
+---
+
+## Etapa Equipa (2026-08-11) — Pontos 1 e 2 dos 19 requisitos
+
+### Pedido
+1. **Profissional** não pode ser criado/guardado sem: serviço (especialidade), comissão (taxa), número (contacto 9 dígitos) e morada.
+2. **Data contratual** obrigatória com formato válido; se inválida/vazia/impossível, informar e orientar o formato correcto (utilizador digita; sem valor por defeito implícito inválido).
+
+### Encontrado no ZIP (antes)
+- `eventos-cadastros.js` (`#modal-prof-save`): nome, idade e data vazia já bloqueavam; **especialidade era opcional (R29)**; contacto só validado se preenchido; morada e taxa não obrigatórias (`taxa` NaN → 0).
+- `crud-operations.js` `addProfissional`: R29 permitia `especialidade` vazia; toast a pedir associação posterior.
+- `updateProfissional`: validava especialidade só se enviada; não reforçava contacto/morada/taxa.
+- `index.html`: labels de morada/contacto/taxa sem `*`; separador «Dados adicionais (opcional)»; data já era `input type="text"` com placeholder de formato.
+
+### Alterado
+
+#### `eventos-cadastros.js`
+- **Adicionado** `bpValidarDataContratual(raw)`:
+  - vazio → mensagem de obrigatoriedade + formatos `AAAA-MM-DD` / `DD/MM/AAAA`;
+  - formato errado → orientação explícita;
+  - data impossível (ex. 31/02) ou fora de 1950–2100 → rejeição;
+  - sucesso → normaliza para ISO `YYYY-MM-DD`.
+- **Substituída** a validação só-de-vazio da data contratual por chamada a `bpValidarDataContratual`.
+- **Removida** a lógica R29 «especialidade opcional» no submit do formulário.
+- **Adicionadas** validações obrigatórias antes de montar `dados`:
+  - serviço/especialidade;
+  - morada não vazia;
+  - contacto exactamente 9 dígitos;
+  - taxa de comissão preenchida e ∈ [0, 100].
+- Feedback via `bpNotifyFormError` (campo + mensagem) quando disponível.
+
+#### `crud-operations.js`
+- **`addProfissional`**: especialidade **obrigatória** + `bpValidarEspecialidadeProfissional`; contacto 9 dígitos; morada; taxa 0–100. Toast de sucesso unificado («Profissional adicionado.»).
+- **`updateProfissional`**: rejeita especialidade vazia; reforço de contacto, morada e taxa quando esses campos vêm em `data`.
+
+#### `index.html`
+- Labels: `Morada *`, `Contacto (9 dígitos) *`, `Taxa de comissão (%) *`.
+- Separador: «Dados de contacto e identificação» (removido «opcional» enganador).
+- Data contratual: mantido input de texto com placeholder de formato (sem default automático de data).
+
+#### `app.bundle.js`
+- Regenerado com `node build-bundle.js` (inclui as alterações acima).
+
+### Código removido / substituído e porquê
+- R29 permissivo no formulário e em `addProfissional` → **substituído** por obrigatoriedade de serviço, alinhado ao requisito dos 19 pontos (prevalece sobre a regra antiga do código).
+- `taxa_comissao: isNaN(taxa) ? 0 : taxa` no submit → **substituído** por rejeição se vazio/NaN (0 só se o utilizador indicar 0).
+- Mensagem «Associe um serviço…» no add sem especialidade → **removida** (já não se grava sem serviço).
+
+### Lógica implementada (resumo)
+```
+Guardar profissional
+  → validar nome, idade
+  → validar data contratual (formato + calendário) → ISO
+  → criar serviço se "__criar"
+  → exigir especialidade, morada, contacto 9 dig, taxa 0–100
+  → addProfissional / updateProfissional (mesmas regras de defesa)
+```
+
+### Preservado
+- Fluxo «Criar seu serviço» no modal.
+- BI continua opcional (com validação se preenchido).
+- Meta mensal continua opcional.
+- RBAC admin em add/update.
+- Limite de plano de profissionais.
+- Notificações e SMS: **não alterados**.
+
+### Ficheiros afectados
+- `eventos-cadastros.js`
+- `crud-operations.js`
+- `index.html`
+- `app.bundle.js`
+- `README.md` (este registo)
+
+### Verificação face ao pedido
+| Requisito | Cumprido |
+|-----------|----------|
+| Sem serviço → não guarda | Sim (UI + `addProfissional`/`updateProfissional`) |
+| Sem comissão (taxa) → não guarda | Sim |
+| Sem número (contacto) → não guarda | Sim |
+| Sem morada → não guarda | Sim |
+| Data vazia/ inválida / impossível → mensagem + formato | Sim |
+| Utilizador digita a data (sem default inválido) | Sim (`type="text"`) |
+
+### Riscos / notas
+- Profissionais **já existentes** incompletos no IDB não são apagados; ao **editar/guardar** passam a ter de completar os campos.
+- Taxa `0` é válida (comissão zero explícita); campo vazio não é.
+
+---
+
+
+### Varredura pós-implementação (2026-08-11) — Equipa
+
+#### Problemas encontrados e corrigidos
+1. **Crítico — `const dataContratual` + reatribuição** (`dataContratual = dataChk.value`): em runtime lançava `TypeError: Assignment to constant variable` **depois** de validar a data com sucesso, impedindo Guardar. **Corrigido:** `let dataContratual`.
+2. **Taxa pré-preenchida com `0`** (`index.html` `value="0"` + novo formulário `fid === 'prof-taxa' ? '0'`): permitia gravar «comissão» sem o utilizador a indicar conscientemente. **Corrigido:** campo vazio no HTML e no «Novo profissional»; validação continua a exigir valor explícito 0–100.
+3. **Duplo clique em Guardar:** risco de dois `addProfissional`. **Corrigido:** flag `data-bp-saving` + `disabled` com `try/finally`.
+4. **Idade fora do intervalo do input (16–99):** só bloqueava vazio/NaN. **Corrigido:** validação 16–99 no submit.
+5. **`updateProfissional` sem validar data contratual** quando o campo vinha no payload. **Corrigido:** usa `bpValidarDataContratual` e normaliza ISO.
+
+#### Segunda varredura (após correcção)
+- `node --check` em `eventos-cadastros.js`, `crud-operations.js`, `app.bundle.js`: OK.
+- Testes unitários de `bpValidarDataContratual`: vazio, ISO, DD/MM/AAAA, 31/02, mês 13, bissexto, ano &lt; 1950 — todos conformes.
+- Confirmação: sem `value="0"` em taxa; open form limpa taxa; sem reassign a const.
+- Bundle regenerado.
+
+#### Requisitos vs código (fecho)
+| Requisito | Estado após varredura |
+|-----------|------------------------|
+| Sem serviço → não guarda | UI + `addProfissional` + `updateProfissional` |
+| Sem comissão consciente → não guarda | Taxa vazia rejeitada; sem default 0 |
+| Sem contacto 9 dígitos → não guarda | UI + CRUD |
+| Sem morada → não guarda | UI + CRUD |
+| Data inválida/vazia/impossível → mensagem + formato | `bpValidarDataContratual` |
+| Utilizador digita data | `type="text"`, sem default |
+
+---
+
+
 Offline boot: entrada instantanea com cache local; login so apos Sair
 
 

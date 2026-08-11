@@ -523,39 +523,9 @@
     });
   }
 
-  // Hook despesa save to include categoria
+  // Save unificado em eventos-caixa-vendas.js (evita duplo registo) — só realça campos
   function hookDespesaSave() {
-    var btn = document.getElementById('modal-despesa-save');
-    if (!btn || btn.dataset.bpHooked) return;
-    btn.dataset.bpHooked = '1';
-    var orig = btn.onclick;
-    btn.onclick = async function (e) {
-      enhanceDespesaModal();
-      var desc = (document.getElementById('desp-desc') || {}).value;
-      var valor = parseFloat((document.getElementById('desp-valor') || {}).value);
-      var cat = (document.getElementById('desp-categoria') || {}).value || 'outro';
-      var forn = (document.getElementById('desp-fornecedor') || {}).value || '';
-      if (!desc || !valor || valor <= 0) {
-        if (typeof toast === 'function') toast('Indica descrição e valor válidos.', 'warning');
-        return;
-      }
-      if (typeof addMovimento === 'function') {
-        await addMovimento({
-          tipo: 'despesa',
-          descricao: desc,
-          valor: valor,
-          categoria: cat,
-          fornecedor: forn
-        });
-      }
-      if (typeof closeModal === 'function') closeModal('modal-despesa');
-      var d1 = document.getElementById('desp-desc'); if (d1) d1.value = '';
-      var d2 = document.getElementById('desp-valor'); if (d2) d2.value = '';
-      var d3 = document.getElementById('desp-fornecedor'); if (d3) d3.value = '';
-      if (typeof toast === 'function') toast('Despesa registada.', 'success');
-      if (typeof renderCaixa === 'function') renderCaixa();
-      if (typeof updateUI === 'function') updateUI();
-    };
+    try { if (typeof enhanceDespesaModal === 'function') enhanceDespesaModal(); } catch (_) {}
   }
 
   function init() {

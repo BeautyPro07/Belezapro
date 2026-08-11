@@ -545,6 +545,104 @@ function openEditProf(id) {
   openModal('modal-prof');
 }
 
+
+/** Botões contacto com identidade visual (WhatsApp / Ligar) — ponto 6 */
+function bpBtnWhatsAppHtml(href, label) {
+  label = label || 'WhatsApp';
+  var icon = '<svg class="bp-ic-wa" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.47 14.3c-.28-.14-1.64-.81-1.9-.9-.25-.1-.44-.14-.62.14-.18.28-.71.9-.87 1.08-.16.18-.32.2-.6.07-.28-.14-1.17-.43-2.23-1.37-.82-.73-1.38-1.64-1.54-1.92-.16-.28-.02-.43.12-.57.13-.13.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.35-.02-.49-.07-.14-.62-1.49-.85-2.04-.22-.53-.45-.46-.62-.47h-.53c-.18 0-.47.07-.71.35-.25.28-.93.91-.93 2.22s.96 2.58 1.09 2.76c.14.18 1.88 2.87 4.56 4.02 1.7.73 2.15.8 2.92.67.45-.08 1.64-.67 1.87-1.32.23-.65.23-1.2.16-1.32-.07-.11-.25-.18-.53-.32z"/><path fill="currentColor" d="M12.04 2C6.5 2 2.01 6.49 2.01 12.03c0 1.85.5 3.57 1.37 5.07L2 22l5.04-1.32A9.96 9.96 0 0 0 12.04 22C17.57 22 22 17.52 22 11.99 22 6.49 17.57 2 12.04 2zm0 18.15c-1.67 0-3.22-.48-4.54-1.32l-.33-.19-3.08.81.82-3-.21-.35a7.94 7.94 0 0 1-1.3-4.38c0-4.4 3.58-7.98 7.99-7.98 4.4 0 7.98 3.58 7.98 7.98 0 4.4-3.58 7.98-7.98 7.98z"/></svg>';
+  return '<a class="btn btn-sm bp-btn-whatsapp" href="' + href + '" target="_blank" rel="noopener noreferrer">' + icon + '<span>' + label + '</span></a>';
+}
+function bpBtnLigarHtml(href, label) {
+  label = label || 'Ligar';
+  var icon = '<svg class="bp-ic-call" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+  return '<a class="btn btn-sm bp-btn-call" href="' + href + '">' + icon + '<span>' + label + '</span></a>';
+}
+if (typeof window !== 'undefined') {
+  window.bpBtnWhatsAppHtml = bpBtnWhatsAppHtml;
+  window.bpBtnLigarHtml = bpBtnLigarHtml;
+}
+
+/** Placeholder animado (typewriter + rotação) — ponto 4 */
+var _bpPhTimers = {};
+function bpPrefersReducedMotion() {
+  try {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_) { return false; }
+}
+function bpStartPlaceholderRotation(inputId, phrases) {
+  var el = document.getElementById(inputId);
+  if (!el || !phrases || !phrases.length) return;
+  if (el.dataset.bpPhBound === '1') return;
+  el.dataset.bpPhBound = '1';
+  /* Acessibilidade: sem animação, placeholder estático da 1.ª frase */
+  if (bpPrefersReducedMotion()) {
+    el.setAttribute('placeholder', phrases[0]);
+    return;
+  }
+  var idx = 0;
+  var char = 0;
+  var phase = 'type'; // type | hold | erase
+  var current = phrases[0];
+  function tick() {
+    if (!document.body.contains(el)) {
+      try { clearTimeout(_bpPhTimers[inputId]); } catch (_) {}
+      return;
+    }
+    if (document.activeElement === el || (el.value && String(el.value).length)) {
+      _bpPhTimers[inputId] = setTimeout(tick, 830);
+      return;
+    }
+    if (phase === 'type') {
+      char++;
+      el.setAttribute('placeholder', current.slice(0, char));
+      if (char >= current.length) {
+        phase = 'hold';
+        _bpPhTimers[inputId] = setTimeout(tick, 2660);
+        return;
+      }
+      _bpPhTimers[inputId] = setTimeout(tick, 70);
+      return;
+    }
+    if (phase === 'hold') {
+      phase = 'erase';
+      _bpPhTimers[inputId] = setTimeout(tick, 30);
+      return;
+    }
+    // erase
+    char--;
+    if (char <= 0) {
+      char = 0;
+      el.setAttribute('placeholder', '');
+      idx = (idx + 1) % phrases.length;
+      current = phrases[idx];
+      phase = 'type';
+      _bpPhTimers[inputId] = setTimeout(tick, 630);
+      return;
+    }
+    el.setAttribute('placeholder', current.slice(0, char));
+    _bpPhTimers[inputId] = setTimeout(tick, 47);
+  }
+  _bpPhTimers[inputId] = setTimeout(tick, 1000);
+}
+function bpInitPlaceholderRotations() {
+  bpStartPlaceholderRotation('search-cliente', [
+    'Nome ou telefone...',
+    'Localizar cliente...',
+    'Pesquisar na lista...',
+    'Nome do cliente...'
+  ]);
+  bpStartPlaceholderRotation('caixa-localizar-input', [
+    'Nome do cliente...',
+    'Localizar no histórico...',
+    'Pesquisar venda por cliente...'
+  ]);
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(bpInitPlaceholderRotations, 400); });
+} else {
+  setTimeout(bpInitPlaceholderRotations, 400);
+}
+
 function abrirDetalheProfView(id) {
   const p = state.profissionais.find(x => x.id === id);
   if (!p) return;
@@ -563,8 +661,8 @@ function abrirDetalheProfView(id) {
     const msg = encodeURIComponent('Olá ' + (p.nome || '') + ',');
     contactActions =
       '<div class="bp-view-contact-actions">' +
-      '<a class="btn btn-sm btn-primary" href="https://wa.me/' + wa + '?text=' + msg + '" target="_blank" rel="noopener noreferrer">WhatsApp</a>' +
-      '<a class="btn btn-sm btn-secondary" href="tel:+244' + digits + '">Ligar</a>' +
+      bpBtnWhatsAppHtml('https://wa.me/' + wa + '?text=' + msg) +
+      bpBtnLigarHtml('tel:+244' + digits) +
       '</div>';
   }
 
@@ -613,7 +711,7 @@ document.getElementById('add-prof-btn')?.addEventListener('click', () => {
   document.getElementById('prof-modal-title').textContent = 'Novo profissional';
   ['prof-nome', 'prof-idade', 'prof-data-contratual', 'prof-bi', 'prof-morada', 'prof-contacto', 'prof-id', 'prof-taxa', 'prof-meta'].forEach(fid => {
     const el = document.getElementById(fid);
-    if (el) el.value = fid === 'prof-taxa' ? '0' : '';
+    if (el) el.value = '';
   });
   popularEspecialidadesProf('');
   try {
@@ -628,10 +726,62 @@ document.getElementById('add-prof-btn')?.addEventListener('click', () => {
   openModal('modal-prof');
 });
 
+
+/** Data contratual: obrigatória; aceita AAAA-MM-DD ou DD/MM/AAAA; devolve ISO. */
+function bpValidarDataContratual(raw) {
+  var s = String(raw == null ? '' : raw).trim();
+  if (!s) {
+    return {
+      ok: false,
+      message: 'A data contratual é obrigatória. Introduza a data no formato AAAA-MM-DD (ex: 2024-03-15) ou DD/MM/AAAA (ex: 15/03/2024).'
+    };
+  }
+  var y, m, d;
+  var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  var br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (iso) {
+    y = parseInt(iso[1], 10);
+    m = parseInt(iso[2], 10);
+    d = parseInt(iso[3], 10);
+  } else if (br) {
+    d = parseInt(br[1], 10);
+    m = parseInt(br[2], 10);
+    y = parseInt(br[3], 10);
+  } else {
+    return {
+      ok: false,
+      message: 'Data contratual inválida. Use AAAA-MM-DD (ex: 2024-03-15) ou DD/MM/AAAA (ex: 15/03/2024).'
+    };
+  }
+  if (y < 1950 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) {
+    return {
+      ok: false,
+      message: 'Data contratual impossível. Verifique o dia, o mês e o ano (entre 1950 e 2100).'
+    };
+  }
+  var dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+    return {
+      ok: false,
+      message: 'Data contratual inválida. Essa combinação de dia, mês e ano não existe no calendário.'
+    };
+  }
+  var value = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  return { ok: true, value: value };
+}
+if (typeof window !== 'undefined') window.bpValidarDataContratual = bpValidarDataContratual;
+
 document.getElementById('modal-prof-save')?.addEventListener('click', async () => {
+  var saveBtn = document.getElementById('modal-prof-save');
+  if (saveBtn && saveBtn.dataset.bpSaving === '1') return;
+  if (saveBtn) {
+    saveBtn.dataset.bpSaving = '1';
+    try { saveBtn.disabled = true; } catch (_) {}
+  }
+  try {
   const nome = (document.getElementById('prof-nome')?.value || '').trim();
   const idade = document.getElementById('prof-idade')?.value;
-  const dataContratual = (document.getElementById('prof-data-contratual')?.value || '').trim();
+  let dataContratual = (document.getElementById('prof-data-contratual')?.value || '').trim();
   let espSelect = document.getElementById('prof-esp')?.value || '';
   let especialidade = espSelect === '__criar' ? '' : espSelect;
   const numeroBI = (document.getElementById('prof-bi')?.value || '').trim().toUpperCase();
@@ -651,37 +801,93 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
     else toast('A idade é obrigatória. Indique a idade do profissional para continuar.', 'warning');
     return;
   }
-  if (!dataContratual) {
-    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('A data contratual é obrigatória. Seleccione a data para continuar.', 'prof-data-contratual', 'warning');
-    else toast('A data contratual é obrigatória. Seleccione a data para continuar.', 'warning');
+  var idadeN = parseInt(idade, 10);
+  if (idadeN < 16 || idadeN > 99) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError('Indique uma idade válida entre 16 e 99 anos.', 'prof-idade', 'warning');
+    else toast('Idade inválida (16 a 99).', 'warning');
     return;
   }
+  /* Ponto 2 — data contratual: formato obrigatório + orientação */
+  var dataChk = typeof bpValidarDataContratual === 'function'
+    ? bpValidarDataContratual(dataContratual)
+    : { ok: !!dataContratual, value: dataContratual, message: 'A data contratual é obrigatória.' };
+  if (!dataChk.ok) {
+    if (typeof bpNotifyFormError === 'function') bpNotifyFormError(dataChk.message, 'prof-data-contratual', 'warning');
+    else toast(dataChk.message, 'warning');
+    return;
+  }
+  dataContratual = dataChk.value;
+
   // Criar serviço no próprio fluxo se escolheu «Criar novo serviço»
   if (espSelect === '__criar') {
     const criado = await bpCriarServicoDesdeProfModal();
     if (!criado) return;
     especialidade = criado;
   }
-  // R29: especialidade opcional no cadastro; sem ela o profissional não entra em vendas/agenda filtradas
-  if (!especialidade) { especialidade = ''; }
-  if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
-    toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
+
+  /* Ponto 1 — serviço obrigatório (anula R29 permissivo) */
+  if (!especialidade || !String(especialidade).trim()) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('Associe o profissional a um serviço (especialidade). Sem serviço não pode guardar.', 'prof-esp', 'warning');
+    } else {
+      toast('Associe o profissional a um serviço (especialidade).', 'warning');
+    }
     return;
   }
-  if (contacto && contacto.length !== 9) {
-    toast('Contacto deve ter exactamente 9 dígitos, ou deixe em branco.', 'error');
+
+  /* Ponto 1 — morada obrigatória */
+  if (!morada) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('A morada é obrigatória. Indique a morada do profissional para continuar.', 'prof-morada', 'warning');
+    } else {
+      toast('A morada é obrigatória.', 'warning');
+    }
+    return;
+  }
+
+  /* Ponto 1 — número/contacto obrigatório (9 dígitos) */
+  if (!contacto || contacto.length !== 9) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('O contacto é obrigatório e deve ter exactamente 9 dígitos (ex: 923456789).', 'prof-contacto', 'warning');
+    } else {
+      toast('Contacto obrigatório: exactamente 9 dígitos.', 'warning');
+    }
+    return;
+  }
+
+  /* Ponto 1 — comissão obrigatória (taxa preenchida, 0–100) */
+  var taxaRaw = (document.getElementById('prof-taxa')?.value || '').trim();
+  if (taxaRaw === '' || isNaN(taxa)) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('A taxa de comissão é obrigatória. Indique um valor entre 0 e 100 (ex: 30).', 'prof-taxa', 'warning');
+    } else {
+      toast('A taxa de comissão é obrigatória (0 a 100).', 'warning');
+    }
+    return;
+  }
+  if (taxa < 0 || taxa > 100) {
+    if (typeof bpNotifyFormError === 'function') {
+      bpNotifyFormError('A taxa de comissão deve estar entre 0 e 100%.', 'prof-taxa', 'warning');
+    } else {
+      toast('Taxa de comissão inválida (0 a 100).', 'warning');
+    }
+    return;
+  }
+
+  if (numeroBI && typeof validarBI === 'function' && !validarBI(numeroBI)) {
+    toast('Número do BI incompleto ou em formato inválido. Preencha correctamente ou deixe em branco.', 'error');
     return;
   }
 
   const dados = {
     nome,
-    idade: parseInt(idade, 10),
+    idade: idadeN,
     dataContratual,
     especialidade,
     numeroBI: numeroBI || '',
     morada,
-    contacto: contacto || '',
-    taxa_comissao: isNaN(taxa) ? 0 : taxa,
+    contacto: contacto,
+    taxa_comissao: taxa,
     meta_mensal: isNaN(meta) ? 0 : meta
   };
 
@@ -708,6 +914,13 @@ document.getElementById('modal-prof-save')?.addEventListener('click', async () =
         }
       } catch (eFoto) { console.warn('[prof foto save]', eFoto); }
       closeModal('modal-prof');
+    }
+  }
+  } finally {
+    var saveBtn2 = document.getElementById('modal-prof-save');
+    if (saveBtn2) {
+      saveBtn2.dataset.bpSaving = '';
+      try { saveBtn2.disabled = false; } catch (_) {}
     }
   }
 });
@@ -819,8 +1032,8 @@ function abrirDetalheClienteView(id) {
       const msg = encodeURIComponent('Olá ' + (c.nome || '') + ',');
       contactActions =
         '<div class="bp-view-contact-actions">' +
-        '<a class="btn btn-sm btn-primary" href="https://wa.me/' + wa + '?text=' + msg + '" target="_blank" rel="noopener noreferrer">WhatsApp</a>' +
-        '<a class="btn btn-sm btn-secondary" href="tel:+244' + digits + '">Ligar</a>' +
+        bpBtnWhatsAppHtml('https://wa.me/' + wa + '?text=' + msg) +
+        bpBtnLigarHtml('tel:+244' + digits) +
         '</div>';
     }
     var pts = Number(c.pontos) || 0;
@@ -847,14 +1060,32 @@ function abrirDetalheClienteView(id) {
   const statsEl = document.getElementById('cliente-perfil-stats');
   if (statsEl) {
     statsEl.hidden = false;
+    statsEl.removeAttribute('hidden');
     statsEl.style.display = 'grid';
+    statsEl.classList.add('bp-cli-stats');
+    var visitas = Number(stats.visitas) || 0;
+    var gasto = Number(stats.totalGasto) || 0;
+    var ult = stats.ultimaVisita;
+    var visitasVal = visitas > 0 ? String(visitas) : '—';
+    var visitasSub = visitas > 0
+      ? (visitas === 1 ? 'Visita' : 'Visitas')
+      : 'Ainda sem visitas';
+    var gastoVal = gasto > 0 ? fmtKz(gasto) : '—';
+    var gastoSub = gasto > 0 ? 'Total gasto' : 'Sem gastos registados';
+    var ultVal = ult
+      ? (typeof formatarUltimaVisita === 'function' ? formatarUltimaVisita(ult) : '—')
+      : '—';
+    var ultSub = ult ? 'Última visita' : 'Sem histórico ainda';
     statsEl.innerHTML =
-      '<div><div class="stat-valor">' + stats.visitas + '</div><div class="stat-legenda">' +
-      (stats.visitas === 1 ? 'Visita' : 'Visitas') + '</div></div>' +
-      '<div><div class="stat-valor">' + fmtKz(stats.totalGasto) + '</div><div class="stat-legenda">Total gasto</div></div>' +
-      '<div><div class="stat-valor">' +
-      (typeof formatarUltimaVisita === 'function' ? formatarUltimaVisita(stats.ultimaVisita) : '—') +
-      '</div><div class="stat-legenda">Última visita</div></div>';
+      '<div class="bp-cli-stat' + (visitas ? '' : ' is-empty') + '">' +
+        '<div class="stat-valor">' + visitasVal + '</div>' +
+        '<div class="stat-legenda">' + visitasSub + '</div></div>' +
+      '<div class="bp-cli-stat' + (gasto ? '' : ' is-empty') + '">' +
+        '<div class="stat-valor">' + gastoVal + '</div>' +
+        '<div class="stat-legenda">' + gastoSub + '</div></div>' +
+      '<div class="bp-cli-stat' + (ult ? '' : ' is-empty') + '">' +
+        '<div class="stat-valor">' + ultVal + '</div>' +
+        '<div class="stat-legenda">' + ultSub + '</div></div>';
   }
   openModal('modal-cliente');
 }

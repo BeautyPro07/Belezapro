@@ -44,8 +44,9 @@
     return "https://wa.me/" + num + "?text=" + encodeURIComponent(msg);
   }
 
-  function renderAgendaItemPro(a) {
+  function renderAgendaItemPro(a, opts) {
     if (!a) return "";
+    opts = opts || null;
     var st = statusOf(a);
     var isRealizado = st === "realizado";
     var isCancelado = st === "cancelado";
@@ -112,9 +113,11 @@
       }
       if (podeWhatsApp) {
         cells.push(
-          '<button type="button" class="btn btn-sm btn-secondary bp-ag-btn" data-id="' +
+          '<button type="button" class="btn btn-sm bp-btn-whatsapp bp-ag-btn" data-id="' +
             a.id +
-            '" data-action="whatsapp-agenda" aria-label="WhatsApp">WhatsApp</button>'
+            '" data-action="whatsapp-agenda" aria-label="WhatsApp">' +
+            '<svg class="bp-ic-wa" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 3.5A11 11 0 004.1 17.6L3 21l3.5-1A11 11 0 1020.5 3.5zM12 20a8 8 0 01-4.1-1.1l-.3-.2-2.4.7.7-2.3-.2-.3A8 8 0 1112 20zm4.4-5.6c-.2-.1-1.4-.7-1.6-.8-.2-.1-.4-.1-.5.1-.2.2-.6.8-.8 1-.1.2-.3.2-.5.1-.2-.1-1-.4-1.9-1.2-.7-.6-1.2-1.4-1.3-1.6-.1-.2 0-.4.1-.5l.4-.4c.1-.1.2-.3.2-.4 0-.1 0-.3-.1-.4-.1-.1-.5-1.3-.7-1.8-.2-.5-.4-.4-.5-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 2 0 1.2.9 2.3 1 2.5.1.2 1.7 2.6 4.1 3.6.6.3 1 .4 1.4.5.6.2 1.1.2 1.5.1.5-.1 1.4-.6 1.6-1.1.2-.5.2-1 .1-1.1-.1-.1-.2-.2-.5-.3z"/></svg>' +
+            '<span>WhatsApp</span></button>'
         );
       } else if (podeFinalizar) {
         cells.push(
@@ -138,8 +141,9 @@
         "</div>";
     }
 
+    var pulseCls = (opts && opts.pulse) ? " bp-ag-card--pulse" : "";
     return (
-      '<div class="list-item bp-ag-card" data-agenda-id="' +
+      '<div class="list-item bp-ag-card' + pulseCls + '" data-agenda-id="' +
       a.id +
       '">' +
       avHtml +

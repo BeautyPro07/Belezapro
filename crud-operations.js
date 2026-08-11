@@ -622,15 +622,34 @@ async function addProfissional(p) {
   const nome = (p.nome || '').trim();
   if (!nome) { toast('Introduz o nome.', 'warning'); return null; }
 
-  // R29: pode existir na equipa sem serviço; R28 se especialidade preenchida deve ser válida
+  // Ponto 1 (Equipa): serviço obrigatório — especialidade deve ser serviço activo
   var espRaw = String(p.especialidade || '').trim();
-  if (espRaw) {
+  if (!espRaw) {
+    toast('O profissional tem de ter pelo menos um serviço (especialidade) associado.', 'error');
+    return null;
+  }
+  {
     const espCheck = bpValidarEspecialidadeProfissional(espRaw);
     if (!espCheck.ok) {
       toast(espCheck.msg || 'Especialidade inválida: escolha um serviço activo existente.', 'error');
       return null;
     }
     espRaw = String((espCheck.servico && espCheck.servico.nome) || espRaw);
+  }
+  // Contacto, morada e comissão (reforço se chamada fora do formulário)
+  var contactoAdd = String(p.contacto || '').replace(/\D/g, '');
+  if (!contactoAdd || contactoAdd.length !== 9) {
+    toast('Contacto obrigatório: exactamente 9 dígitos.', 'error');
+    return null;
+  }
+  if (!String(p.morada || '').trim()) {
+    toast('A morada do profissional é obrigatória.', 'error');
+    return null;
+  }
+  var taxaAdd = p.taxa_comissao != null ? Number(p.taxa_comissao) : NaN;
+  if (isNaN(taxaAdd) || taxaAdd < 0 || taxaAdd > 100) {
+    toast('Taxa de comissão obrigatória (0 a 100%).', 'error');
+    return null;
   }
 
   if (existeNomeDuplicado('profissionais', nome)) {
@@ -650,7 +669,7 @@ async function addProfissional(p) {
     if (espRaw) {
       try { await bpLigarProfissionalAoServico(n, espRaw); } catch (_) {}
     }
-    toast(espRaw ? 'Profissional adicionado.' : 'Profissional adicionado. Associe um serviço para o utilizar em vendas e agenda.', 'success');
+    toast('Profissional adicionado.', 'success');
     return n;
   } catch (err) {
     if (err.message === 'LIMITE_PLANO_ATINGIDO') {
@@ -794,6 +813,10 @@ async function updateProfissional(id, data) {
   if (!actual) return null;
 
   if (data.especialidade != null) {
+    if (!String(data.especialidade || '').trim()) {
+      toast('O profissional tem de ter um serviço (especialidade) associado.', 'error');
+      return null;
+    }
     const espCheck = typeof bpValidarEspecialidadeProfissional === 'function'
       ? bpValidarEspecialidadeProfissional(data.especialidade)
       : { ok: !!(data.especialidade && String(data.especialidade).trim()), msg: 'Especialidade obrigatória' };
@@ -801,6 +824,35 @@ async function updateProfissional(id, data) {
       toast(espCheck.msg || 'O profissional tem de ter um serviço associado.', 'error');
       return null;
     }
+  }
+  if (data.contacto != null) {
+    var dig = String(data.contacto || '').replace(/\D/g, '');
+    if (!dig || dig.length !== 9) {
+      toast('Contacto obrigatório: exactamente 9 dígitos.', 'error');
+      return null;
+    }
+    data = Object.assign({}, data, { contacto: dig });
+  }
+  if (data.morada != null && !String(data.morada || '').trim()) {
+    toast('A morada do profissional é obrigatória.', 'error');
+    return null;
+  }
+  if (data.taxa_comissao != null) {
+    var tUp = Number(data.taxa_comissao);
+    if (isNaN(tUp) || tUp < 0 || tUp > 100) {
+      toast('Taxa de comissão obrigatória (0 a 100%).', 'error');
+      return null;
+    }
+  }
+  if (data.dataContratual != null) {
+    var dChk = typeof bpValidarDataContratual === 'function'
+      ? bpValidarDataContratual(data.dataContratual)
+      : { ok: !!String(data.dataContratual || '').trim(), value: data.dataContratual };
+    if (!dChk.ok) {
+      toast((dChk && dChk.message) || 'Data contratual inválida.', 'error');
+      return null;
+    }
+    data = Object.assign({}, data, { dataContratual: dChk.value || data.dataContratual });
   }
 
   if (data.nome) {

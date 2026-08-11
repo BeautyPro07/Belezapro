@@ -176,3 +176,177 @@ select.input-field {
   padding-right: 40px;
 }
 
+/* === BP action buttons: WA / Ligar / Fechar / Editar (Cliente + Equipa) === */
+.bp-btn-whatsapp,
+.bp-btn-call {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px !important;
+  font-weight: 600;
+  font-size: 0.78rem !important;
+  padding: 0 12px !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  max-height: 40px !important;
+  line-height: 1 !important;
+  box-sizing: border-box !important;
+  text-decoration: none !important;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.bp-btn-whatsapp {
+  background: #25D366 !important;
+  color: #fff !important;
+  border: 1px solid #25D366 !important;
+}
+.bp-btn-whatsapp:active { filter: brightness(0.95); }
+.bp-btn-whatsapp .bp-ic-wa { flex-shrink: 0; width: 16px; height: 16px; }
+.bp-btn-call {
+  background: #fff !important;
+  border: 1px solid var(--border-soft, #e5e0d8) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.bp-btn-call .bp-ic-call {
+  color: #25D366 !important;
+  stroke: #25D366 !important;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+.bp-btn-call span { color: #25D366 !important; }
+.bp-btn-call:active { filter: brightness(0.97); background: #fafafa !important; }
+
+.bp-view-contact-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-top: 10px;
+  width: 100%;
+}
+
+/* Fechar / Editar — mesma caixa 40px que WA / Ligar */
+#modal-cliente .modal-actions,
+#modal-cliente-sheet .modal-actions,
+#modal-prof .modal-actions,
+#modal-prof-sheet .modal-actions {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: stretch !important;
+  width: 100%;
+}
+#modal-cliente .modal-actions .btn,
+#modal-cliente-sheet .modal-actions .btn,
+#modal-cliente #cliente-view-fechar,
+#modal-cliente #cliente-view-editar,
+#modal-cliente #modal-cliente-cancel,
+#modal-cliente #modal-cliente-save,
+#modal-prof .modal-actions .btn,
+#modal-prof-sheet .modal-actions .btn,
+#modal-prof #prof-view-fechar,
+#modal-prof #prof-view-editar,
+#modal-prof #modal-prof-cancel,
+#modal-prof #modal-prof-save {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 12px !important;
+  font-size: 0.78rem !important;
+  border-radius: 8px !important;
+  box-sizing: border-box !important;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#cliente-perfil-stats.bp-cli-stats,
+.bp-cli-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 0 8px;
+  margin-bottom: 4px;
+}
+.bp-cli-stat {
+  text-align: center;
+  padding: 10px 8px;
+  background: var(--bg-soft, #f5f2ec);
+  border-radius: 10px;
+  border: 1px solid var(--border-soft, #e8e4df);
+}
+.bp-cli-stat .stat-valor {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+.bp-cli-stat .stat-legenda {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.3;
+}
+.bp-cli-stat.is-empty .stat-valor {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.bp-cli-stat.is-empty .stat-legenda {
+  color: var(--text-muted);
+}
+
+/* Filtros frequência — só texto, sem fundo; Todos activo = negrito dourado */
+.bp-cli-freq-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  align-items: center;
+  margin: 4px 0 14px;
+  padding: 0 2px;
+}
+.filtro-frequencia {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  font-size: 0.72rem !important;
+  font-weight: 500;
+  color: var(--text-muted, #8a8580) !important;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+}
+.filtro-frequencia:active {
+  opacity: 0.75;
+}
+.filtro-frequencia.is-active,
+.filtro-frequencia.active {
+  color: var(--gold-dark, #B8860B) !important;
+  font-weight: 700 !important;
+  background: transparent !important;
+}
+/* Pesquisa cliente — menos amador */
+.bp-cli-search-wrap {
+  margin-bottom: 8px;
+}
+.bp-cli-search-wrap .bp-cli-search,
+#search-cliente.bp-cli-search {
+  border-radius: 10px;
+  min-height: 42px;
+  font-size: 0.875rem;
+  padding: 10px 14px;
+  border: 1px solid var(--border-soft, #e5e0d8);
+  background: var(--bg-elevated, #fff);
+}
+.bp-cli-search-wrap .bp-cli-search:focus {
+  outline: none;
+  border-color: var(--gold, #C9A227);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.15);
+}

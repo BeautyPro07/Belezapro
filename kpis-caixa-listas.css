@@ -1929,3 +1929,47 @@
   border: none !important;
   overflow: hidden !important;
 }
+
+
+/* Caixa — fecho e despesa (etapa) */
+.bp-fecho-panel { padding: 4px 0 8px; }
+.bp-fecho-date {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+}
+.bp-fecho-section {
+  margin: 12px 0 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.fecho-row .fr-val--in { color: var(--green, #1B7A4E); }
+.fecho-row .fr-val--out { color: var(--red, #B33A3A); }
+#modal-despesa .venda-modal-sub {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+  line-height: 1.35;
+}
+#modal-despesa .modal-title { margin-bottom: 4px; }
+
+/* Avatar foto nas linhas da caixa */
+.list-item .avatar.bp-avatar-img {
+  overflow: hidden;
+  padding: 0;
+  font-size: 0;
+  background: var(--bg-soft, #f5f2ec);
+}
+.list-item .avatar.bp-avatar-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+}

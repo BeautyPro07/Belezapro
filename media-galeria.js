@@ -273,6 +273,59 @@
     }
   }
 
+  /** Offline robusto: se só há foto_url, descarrega e guarda data: em entity.foto */
+  async function ensureLocalFotoCache(kind, entityId) {
+    try {
+      if (!entityId || typeof navigator === "undefined" || !navigator.onLine) return false;
+      var ent = kind === "clientes" ? getCliente(entityId) : getProf(entityId);
+      if (!ent) return false;
+      if (ent.foto && String(ent.foto).indexOf("data:") === 0) return true;
+      if (!ent.foto_url) return false;
+      var res = await fetch(ent.foto_url, { mode: "cors", credentials: "omit" });
+      if (!res.ok) return false;
+      var blob = await res.blob();
+      if (!blob || blob.size < 32) return false;
+      var dataUrl = await new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+      if (!dataUrl || String(dataUrl).indexOf("data:") !== 0) return false;
+      var patch = { foto: dataUrl, updated_at: new Date().toISOString() };
+      if (kind === "clientes" && typeof updateCliente === "function") await updateCliente(entityId, patch);
+      else if (kind === "profissionais" && typeof updateProfissional === "function") await updateProfissional(entityId, patch);
+      else {
+        Object.assign(ent, patch);
+        if (typeof dbPut === "function") await dbPut(kind, ent);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function warmFotoCaches() {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    try {
+      var clients = (state.clientes || []).slice(0, 40);
+      var i = 0;
+      function next() {
+        if (i >= clients.length) return;
+        var c = clients[i++];
+        if (c && c.id && c.foto_url && !(c.foto && String(c.foto).indexOf("data:") === 0)) {
+          ensureLocalFotoCache("clientes", c.id).finally(function () { setTimeout(next, 120); });
+        } else setTimeout(next, 0);
+      }
+      setTimeout(next, 1500);
+    } catch (_) {}
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", function () { setTimeout(warmFotoCaches, 800); });
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(warmFotoCaches, 2500); });
+    else setTimeout(warmFotoCaches, 2500);
+  }
+
   /** Preferir cache local (data:) depois URL remota. */
   function resolveFotoSrc(entity) {
     if (!entity) return null;
@@ -443,7 +496,8 @@
             continue;
           }
           var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
-          var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
+          /* Offline: manter data URL local como cache; foto_url para online */
+        var patch = { foto_url: bustUrl, updated_at: new Date().toISOString() };
           if (item.kind === "clientes" && typeof updateCliente === "function") {
             await updateCliente(item.entityId, patch);
           } else if (item.kind === "profissionais" && typeof updateProfissional === "function") {
@@ -478,7 +532,8 @@
       removeFotoQueueItem(kind, entityId);
       // Cache-bust: mesmo path .jpg no Storage mantém URL pública — forçar ?v=
       var bustUrl = url + (url.indexOf("?") >= 0 ? "&" : "?") + "v=" + Date.now();
-      var patch = { foto_url: bustUrl, foto: null, updated_at: new Date().toISOString() };
+      /* Offline: manter data URL local como cache; foto_url para online */
+        var patch = { foto_url: bustUrl, updated_at: new Date().toISOString() };
       if (kind === "clientes") {
         var c = (state.clientes || []).find(function (x) { return x.id === entityId; });
         // Só cancelar se o utilizador já escolheu OUTRA foto mais recente
@@ -1594,6 +1649,7 @@
     enhanceListAvatars: enhanceListAvatars,
     patchRowAvatar: patchRowAvatar,
     resolveFotoSrc: resolveFotoSrc,
+    ensureLocalFotoCache: ensureLocalFotoCache,
     uploadFotoStorage: uploadFotoStorage,
     session: session
   };

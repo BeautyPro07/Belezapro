@@ -162,7 +162,6 @@ function renderClientes() {
   const search = rawSearch.trim().toLowerCase();
   const searchDigits = rawSearch.replace(/\D/g, '');
   const filtro = state.filtroClientes || 'todos';
-
   let filtered = (state.clientes || []).filter(c => {
     if (!search && !searchDigits) return true;
     const nome = String(c.nome || '').toLowerCase();
@@ -305,9 +304,37 @@ function renderCaixa() {
   const movRow = (m) => {
     const isV = m.tipo === 'venda';
     const nomeProf = typeof getProfissionalNome === 'function' ? getProfissionalNome(m.profissional_id) : '';
+    let avatarHtml;
+    if (isV) {
+      let cli = null;
+      try {
+        if (m.cliente_id) cli = (state.clientes || []).find(function (c) { return String(c.id) === String(m.cliente_id); });
+        if (!cli && m.cliente) {
+          var nn = String(m.cliente).toLowerCase().trim();
+          cli = (state.clientes || []).find(function (c) { return String(c.nome || '').toLowerCase().trim() === nn; });
+        }
+      } catch (_) { cli = null; }
+      var src = null;
+      if (cli) {
+        if (window.BPMedia && typeof BPMedia.resolveFotoSrc === 'function') src = BPMedia.resolveFotoSrc(cli);
+        else if (cli.foto) src = cli.foto;
+        else if (cli.foto_url) src = cli.foto_url;
+      }
+      if (src) {
+        avatarHtml = '<div class="avatar bp-avatar-img"><img src="' + String(src).replace(/"/g, '&quot;') + '" alt="" loading="lazy" decoding="async"></div>';
+      } else if (cli && cli.nome) {
+        avatarHtml = '<div class="avatar">' + escHtml(String(cli.nome).charAt(0).toUpperCase()) + '</div>';
+      } else if (m.cliente) {
+        avatarHtml = '<div class="avatar">' + escHtml(String(m.cliente).charAt(0).toUpperCase()) + '</div>';
+      } else {
+        avatarHtml = '<div class="avatar" style="background:#E6F4EC;color:var(--green);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+      }
+    } else {
+      avatarHtml = '<div class="avatar" style="background:#FDE8E8;color:var(--red);font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>';
+    }
     return `
       <div class="list-item${isV ? ' list-item-venda' : ''}" data-id="${m.id}" data-tipo="${m.tipo}" style="padding-right:${isV ? '32px' : '16px'};">
-        <div class="avatar" style="background:${isV ? '#E6F4EC' : '#FDE8E8'};color:${isV ? 'var(--green)' : 'var(--red)'};font-size:0;" aria-hidden="true"><span style="display:block;width:8px;height:8px;border-radius:50%;background:currentColor;margin:auto;"></span></div>
+        ${avatarHtml}
         <div class="info">
           <div class="title">${escHtml(m.descricao||'')}</div>
           <div class="sub">${m.data} · ${m.hora || ''}${m.cliente ? ' · ' + escHtml(m.cliente) : ''}${nomeProf ? ' · ' + escHtml(nomeProf) : ''}${m.tipo === 'despesa' && m.categoria ? ' · ' + escHtml(m.categoria) : ''}</div>
@@ -356,7 +383,8 @@ function getMovimentosPeriodo(periodo) {
   const hojeStr = hoje();
   const now = new Date();
   const iso = (d) => d.toISOString().split('T')[0];
-  return state.movimentos.filter(m => {
+  const list = (state.movimentos && Array.isArray(state.movimentos)) ? state.movimentos : [];
+  return list.filter(m => {
     if (periodo === 'hoje') return m.data === hojeStr;
     if (periodo === 'ontem') {
       const d = new Date(now); d.setDate(d.getDate() - 1);
@@ -369,6 +397,10 @@ function getMovimentosPeriodo(periodo) {
     if (periodo === '30dias') {
       const d30 = new Date(now); d30.setDate(d30.getDate() - 29);
       return m.data >= iso(d30);
+    }
+    if (periodo === '90dias') {
+      const d90 = new Date(now); d90.setDate(d90.getDate() - 89);
+      return m.data >= iso(d90);
     }
     if (periodo === 'semana') {
       const d = new Date(hojeStr + 'T00:00:00');
@@ -399,6 +431,7 @@ function tituloPeriodoCaixa(periodo) {
     semana: 'Movimentos desta Semana',
     '7dias': 'Últimos 7 dias',
     '30dias': 'Últimos 30 dias',
+    '90dias': 'Últimos 90 dias',
     mes: 'Movimentos deste Mês',
     ano: 'Movimentos deste Ano',
     dia: 'Movimentos do dia seleccionado',

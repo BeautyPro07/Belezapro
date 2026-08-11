@@ -254,3 +254,96 @@
   justify-content: center;
   box-sizing: border-box;
 }
+
+
+/* Agenda — pendentes / pulse / secção */
+.bp-ag-pulse-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  animation: bp-ag-pulse 1.4s ease-out infinite;
+}
+@keyframes bp-ag-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+  70% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+.agenda-periodo-filter--pendentes.has-pending .bp-ag-pulse-dot { opacity: 1; }
+.agenda-periodo-filter--pendentes:not(.has-pending) .bp-ag-pulse-dot {
+  animation: none;
+  background: #c5c0b8;
+  box-shadow: none;
+}
+.bp-ag-card--pulse { position: relative; }
+.bp-ag-card--pulse::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+  animation: bp-ag-pulse 1.4s ease-out infinite;
+  z-index: 2;
+}
+.bp-ag-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-primary, #1c1a18);
+  margin: 12px 0 8px;
+  padding: 0 2px;
+}
+.bp-ag-section-title--muted {
+  color: var(--text-muted, #8a8580);
+  font-weight: 600;
+}
+.bp-ag-detail-totals {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: var(--bg-soft, #f7f4ef);
+  border: 1px solid var(--border-soft, #e8e4df);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.bp-ag-detail-totals strong {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.bp-ag-actions .bp-btn-whatsapp {
+  min-height: 34px !important;
+  height: 34px !important;
+  max-height: 34px !important;
+  padding: 0 10px !important;
+  font-size: 0.75rem !important;
+}
+
+
+/* Filtro status: Pendentes linha inteira */
+.agenda-periodo-filter--full,
+.agenda-periodo-filter--pendentes {
+  grid-column: 1 / -1;
+}
+.agenda-periodo-filter--dia {
+  grid-column: 1 / -1;
+}
+.agenda-periodo-grid--status {
+  grid-template-columns: 1fr 1fr;
+}
