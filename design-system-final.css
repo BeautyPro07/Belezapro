@@ -470,7 +470,10 @@ textarea.input-field:focus-visible,
 }
 
 
-/* ===== Etapa 1 — Checkmark de verificação concluída ===== */
+/* ===== Confirmação de sincronização — verde profissional (design system)
+   Tokens: --green #2C7A4D, --green-50 #E6F4EC (editorial, tipo Notion success #0a8754)
+   Padrão: checkmark.circle.fill (HIG) — círculo preenchido + traço branco
+   Não usar verde neon/chartreuse genérico. */
 .bp-checkmark-overlay {
   position: fixed;
   inset: 0;
@@ -478,69 +481,134 @@ textarea.input-field:focus-visible,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(20, 17, 15, 0.28);
+  background: rgba(20, 17, 15, 0.22);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .bp-checkmark-overlay.is-open {
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .bp-checkmark-overlay[hidden] { display: none !important; }
+
 .bp-checkmark-card {
-  background: var(--card-white, #fff);
-  border-radius: var(--radius-md, 12px);
-  box-shadow: var(--shadow-floating, 0 8px 28px rgba(0,0,0,.12));
-  padding: 28px 32px 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  min-width: 140px;
-  transform: scale(0.92);
+  gap: 16px;
+  padding: 28px 32px 24px;
+  background: var(--card-white, #fff);
+  border-radius: 16px;
+  border: 1px solid var(--border-soft, #DCD5C9);
+  box-shadow: var(--shadow-floating, 0 12px 40px rgba(20, 17, 15, 0.14));
+  transform: translateY(8px) scale(0.94);
   opacity: 0;
-  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .bp-checkmark-overlay.is-open .bp-checkmark-card {
   opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.bp-checkmark-icon {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bp-checkmark-icon::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(44, 122, 77, 0.18) 0%,
+    rgba(44, 122, 77, 0.05) 50%,
+    transparent 72%
+  );
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bp-checkmark-overlay.is-open .bp-checkmark-icon::before {
+  opacity: 1;
   transform: scale(1);
 }
+
 .bp-checkmark-svg {
-  color: var(--gold, #D4AF37);
+  width: 56px;
+  height: 56px;
   display: block;
 }
+
+/* Círculo preenchido — --green do sistema */
 .bp-checkmark-circle {
-  stroke: var(--gold, #D4AF37);
-  stroke-dasharray: 126;
-  stroke-dashoffset: 126;
+  fill: var(--green, #2C7A4D);
+  stroke: none;
+  transform-origin: 24px 24px;
+  transform: scale(0);
+  opacity: 0;
 }
 .bp-checkmark-poly {
-  stroke: var(--gold-dark, #A7872B);
+  fill: none;
+  stroke: #FFFFFF;
+  stroke-width: 2.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   stroke-dasharray: 40;
   stroke-dashoffset: 40;
 }
+
 .bp-checkmark-overlay.is-animating .bp-checkmark-circle {
-  animation: bp-check-circle 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: bp-sync-fill 0.42s cubic-bezier(0.34, 1.3, 0.64, 1) forwards;
 }
 .bp-checkmark-overlay.is-animating .bp-checkmark-poly {
-  animation: bp-check-poly 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.35s forwards;
+  animation: bp-sync-tick 0.36s cubic-bezier(0.33, 1, 0.68, 1) 0.28s forwards;
 }
-@keyframes bp-check-circle {
+
+@keyframes bp-sync-fill {
+  0% { transform: scale(0); opacity: 0; }
+  60% { opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes bp-sync-tick {
   to { stroke-dashoffset: 0; }
 }
-@keyframes bp-check-poly {
-  to { stroke-dashoffset: 0; }
-}
+
 .bp-checkmark-text {
   margin: 0;
-  font-size: var(--text-xs, 0.75rem);
-  color: var(--text-muted, #6B6560);
-  font-weight: 500;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 0.8125rem;
+  font-weight: 600;
   letter-spacing: 0.02em;
+  color: var(--green, #2C7A4D);
   text-align: center;
 }
-.bp-checkmark-overlay.is-offline .bp-checkmark-svg { color: var(--text-muted, #6B6560); }
+
+/* Offline — neutro, sem verde de sucesso */
+.bp-checkmark-overlay.is-offline .bp-checkmark-card {
+  border-color: var(--border-soft, #DCD5C9);
+}
+.bp-checkmark-overlay.is-offline .bp-checkmark-icon::before {
+  background: radial-gradient(
+    circle,
+    rgba(92, 86, 78, 0.12) 0%,
+    transparent 70%
+  );
+}
+.bp-checkmark-overlay.is-offline .bp-checkmark-text {
+  color: var(--text-muted, #6B6560);
+  font-weight: 500;
+}
+
 .plano-badge[data-bp-plano-ready="0"] {
   visibility: hidden !important;
   min-width: 3.5rem;

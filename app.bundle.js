@@ -722,8 +722,8 @@ if (typeof window !== 'undefined') window.safeStringify = safeStringify;
 /** Etapa 1 — overlay checkmark / offline após boot */
 function showCheckmark(opts) {
   opts = opts || {};
-  var mode = opts.mode || 'ok'; // ok | offline
-  var duration = opts.duration != null ? opts.duration : 1000;
+  var mode = opts.mode || 'ok';
+  var duration = opts.duration != null ? opts.duration : 900;
   return new Promise(function (resolve) {
     var el = document.getElementById('bp-checkmark-overlay');
     if (!el) { resolve(); return; }
@@ -732,21 +732,22 @@ function showCheckmark(opts) {
     el.classList.remove('is-offline', 'is-animating', 'is-open');
     if (mode === 'offline') {
       el.classList.add('is-offline');
-      if (text) text.textContent = 'Offline';
+      if (text) text.textContent = opts.label || 'Offline';
       if (icon) {
         icon.innerHTML =
-          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-          '<path d="M16 30a10 10 0 0 1 16-6 7 7 0 0 1 2 14H16a7 7 0 0 1 0-14z"/>' +
-          '<line x1="18" y1="18" x2="30" y2="30"/><line x1="30" y1="18" x2="18" y2="30"/>' +
+          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--neutral-600,#5C564E)">' +
+          '<circle cx="24" cy="24" r="20" fill="var(--neutral-50,#F3F2EF)" stroke="var(--neutral-300,#ADA090)"/>' +
+          '<path d="M14 29a10 10 0 0 1 16-6.5 7 7 0 0 1 2 13.5H14.5A6.5 6.5 0 0 1 14 29z" fill="none"/>' +
           '</svg>';
       }
     } else {
       if (text) text.textContent = opts.label || 'Sincronizado';
       if (icon) {
+        /* Padrão profissional: círculo --green preenchido + check branco */
         icon.innerHTML =
-          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-          '<circle class="bp-checkmark-circle" cx="24" cy="24" r="20"></circle>' +
-          '<polyline class="bp-checkmark-poly" points="14,24 22,32 34,18"></polyline>' +
+          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">' +
+          '<circle class="bp-checkmark-circle" cx="24" cy="24" r="22"></circle>' +
+          '<polyline class="bp-checkmark-poly" points="14.5,24.5 21,31 34,16.5"></polyline>' +
           '</svg>';
       }
     }
@@ -754,6 +755,7 @@ function showCheckmark(opts) {
     try { el.removeAttribute('hidden'); } catch (_) {}
     el.setAttribute('aria-hidden', 'false');
     el.style.display = 'flex';
+    void el.offsetWidth;
     requestAnimationFrame(function () {
       el.classList.add('is-open', 'is-animating');
     });
@@ -763,6 +765,7 @@ function showCheckmark(opts) {
     }, duration);
   });
 }
+
 function hideCheckmark() {
   return new Promise(function (resolve) {
     var el = document.getElementById('bp-checkmark-overlay');
@@ -15728,9 +15731,9 @@ if ('serviceWorker' in navigator) {
     try {
       if (typeof showCheckmark === 'function') {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          showCheckmark({ mode: 'offline', duration: 900 });
+          showCheckmark({ mode: 'offline', duration: 850 });
         } else if (opts.success !== false) {
-          showCheckmark({ mode: 'ok', duration: 1000, label: 'Sincronizado' });
+          showCheckmark({ mode: 'ok', duration: 850, label: 'Sincronizado' });
         }
       }
     } catch (_) {}
@@ -15759,7 +15762,7 @@ if ('serviceWorker' in navigator) {
   function continueOffline() {
     closeBoot({ skipCheckmark: true });
     try {
-      if (typeof showCheckmark === 'function') showCheckmark({ mode: 'offline', duration: 900 });
+      if (typeof showCheckmark === 'function') showCheckmark({ mode: 'offline', duration: 850 });
     } catch (_) {}
     if (typeof flushSyncQueue === 'function' && navigator.onLine) {
       try { flushSyncQueue(); } catch (_) {}
