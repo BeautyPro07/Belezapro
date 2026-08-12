@@ -637,3 +637,17 @@ if (typeof window !== 'undefined') {
   window.ensureBpSheetModal = ensureBpSheetModal;
   window.openBpSheetModal = openBpSheetModal;
 }
+
+
+/** JSON.stringify com limite de tamanho (evitar QuotaExceeded). */
+function safeStringify(obj, maxBytes) {
+  maxBytes = maxBytes || (4.5 * 1024 * 1024);
+  try {
+    var s = JSON.stringify(obj);
+    if (s.length <= maxBytes) return s;
+    return JSON.stringify({ _truncated: true, length: s.length });
+  } catch (e) {
+    return 'null';
+  }
+}
+if (typeof window !== 'undefined') window.safeStringify = safeStringify;

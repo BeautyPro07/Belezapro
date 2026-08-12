@@ -285,18 +285,10 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
 })();
 
 
-// ONLINE/OFFLINE — multi-dispositivo: indicador sempre legível
+// ONLINE — flush apenas em sync-queue.js (evitar double flush). Actualiza UI IA se existir.
 window.addEventListener('online', () => {
   if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
-  if (typeof flushSyncQueue === 'function') {
-    flushSyncQueue().then(function () {
-      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-    }).catch(function () {
-      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-    });
-  } else if (typeof atualizarIndicadorSync === 'function') {
-    atualizarIndicadorSync();
-  }
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 });
 
 window.addEventListener('offline', () => {

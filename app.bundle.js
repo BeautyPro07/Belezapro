@@ -704,6 +704,20 @@ if (typeof window !== 'undefined') {
   window.openBpSheetModal = openBpSheetModal;
 }
 
+
+/** JSON.stringify com limite de tamanho (evitar QuotaExceeded). */
+function safeStringify(obj, maxBytes) {
+  maxBytes = maxBytes || (4.5 * 1024 * 1024);
+  try {
+    var s = JSON.stringify(obj);
+    if (s.length <= maxBytes) return s;
+    return JSON.stringify({ _truncated: true, length: s.length });
+  } catch (e) {
+    return 'null';
+  }
+}
+if (typeof window !== 'undefined') window.safeStringify = safeStringify;
+
 /* ===== FILE: tests-pure.js ===== */
 /**
  * Testes unitários das funções puras — executar no browser:
@@ -1994,7 +2008,81 @@ document.getElementById('login-btn').addEventListener('click', async function() 
 // ================================================================
 //  LISTA NEGRA DE ELIMINADOS (evita reimportação)
 // ================================================================
+
 const DELETED_KEY = 'bp_deleted_items';
+const DLQ_KEY = 'bp_dlq';
+const MAX_SYNC_ATTEMPTS = 5;
+const QUEUE_SOFT_WARN = 1000;
+const QUEUE_HARD_BLOCK = 5000;
+const LS_WARN_BYTES = Math.floor(4.5 * 1024 * 1024);
+
+/** Remove data URLs e campos binários — fila só metadados (P0). */
+function slimPayload(payload) {
+  if (payload == null || typeof payload !== 'object') return payload;
+  if (Array.isArray(payload)) {
+    return payload.map(function (x) { return slimPayload(x); });
+  }
+  var out = {};
+  var keys = Object.keys(payload);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var v = payload[k];
+    if (v == null) { out[k] = v; continue; }
+    if (typeof v === 'string') {
+      if (v.indexOf('data:') === 0) continue; // base64 / data URL
+      if (v.length > 12000 && /^[A-Za-z0-9+/=\\s]+$/.test(v.slice(0, 80))) continue; // blob textual enorme
+      out[k] = v;
+      continue;
+    }
+    if (typeof v === 'object') {
+      if (k === 'foto' || k === 'imagem' || k === 'foto_base64' || k === 'image') continue;
+      out[k] = slimPayload(v);
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+function getDlq() {
+  try {
+    var raw = JSON.parse(localStorage.getItem(DLQ_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) { return []; }
+}
+
+function saveDlq(items) {
+  try {
+    localStorage.setItem(DLQ_KEY, JSON.stringify((items || []).slice(-200)));
+  } catch (e) {
+    if (typeof logErroSilencioso === 'function') logErroSilencioso('saveDlq', e);
+  }
+}
+
+function moveOpToDlq(op, reason) {
+  var dlq = getDlq();
+  dlq.push({
+    id: op && op.id,
+    tabela: op && op.tabela,
+    operacao: op && op.operacao,
+    payload: op && op.payload,
+    ts: Date.now(),
+    attempts: op && op.attempts,
+    error: reason || (op && op.lastError) || 'max_attempts',
+    originalTs: op && op.ts
+  });
+  saveDlq(dlq);
+}
+
+function bpGetDlqCount() {
+  return getDlq().length;
+}
+if (typeof window !== 'undefined') {
+  window.slimPayload = slimPayload;
+  window.bpGetDlqCount = bpGetDlqCount;
+  window.getDlq = getDlq;
+}
+
 
 function getDeletedItems() {
   try {
@@ -2055,40 +2143,59 @@ function getSyncQueue() {
 }
 
 function saveSyncQueue(q) {
+  q = (q || []).map(function (op) {
+    if (!op || typeof op !== 'object') return op;
+    var copy = Object.assign({}, op);
+    if (copy.payload) copy.payload = slimPayload(copy.payload);
+    return copy;
+  });
   try {
-    const str = JSON.stringify(q);
+    var str = JSON.stringify(q);
+    if (typeof LS_WARN_BYTES !== 'undefined' && str.length > LS_WARN_BYTES) {
+      try { console.warn('[sync] Fila > 4.5MB (' + str.length + ' bytes). A comprimir payloads.'); } catch (_) {}
+      q = q.map(function (op) {
+        if (!op) return op;
+        var o = Object.assign({}, op);
+        o.payload = slimPayload(o.payload);
+        if (o.payload && typeof o.payload === 'object') {
+          var p = Object.assign({}, o.payload);
+          delete p.itens;
+          delete p.notas;
+          o.payload = p;
+        }
+        return o;
+      });
+      str = JSON.stringify(q);
+    }
     if (typeof storageSetSecure === 'function') storageSetSecure(SYNC_QUEUE_KEY, str);
     else localStorage.setItem(SYNC_QUEUE_KEY, str);
-    // ET4.6: espelho em sessionStorage como contingência leve (não substitui IDB)
     try { sessionStorage.setItem(SYNC_QUEUE_KEY + '_len', String((q && q.length) || 0)); } catch (_) {}
   } catch (e) {
-    // Quota cheia: manter o máximo possível; nunca silenciar perda total
-    logErroSilencioso('saveSyncQueue', e);
+    if (typeof logErroSilencioso === 'function') logErroSilencioso('saveSyncQueue', e);
     try {
-      // Tentar gravar só metadados + últimos N se o payload for enorme
-      if (q && q.length > 100) {
-        const slim = q.map(function (op) {
-          return {
-            id: op.id,
-            tabela: op.tabela,
-            operacao: op.operacao,
-            ts: op.ts,
-            attempts: op.attempts,
-            failed: op.failed,
-            nextRetry: op.nextRetry,
-            payload: op.payload
-          };
-        });
-        localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(slim));
-      }
+      var minimal = (q || []).map(function (op) {
+        return {
+          id: op && op.id,
+          tabela: op && op.tabela,
+          operacao: op && op.operacao,
+          ts: op && op.ts,
+          attempts: op && op.attempts,
+          failed: op && op.failed,
+          nextRetry: op && op.nextRetry,
+          lastError: op && op.lastError,
+          payload: slimPayload(op && op.payload ? { id: op.payload.id } : null)
+        };
+      });
+      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(minimal));
     } catch (e2) {
-      logErroSilencioso('saveSyncQueue.fallback', e2);
+      if (typeof logErroSilencioso === 'function') logErroSilencioso('saveSyncQueue.fallback', e2);
       if (typeof toast === 'function') {
         toast('Armazenamento do dispositivo quase cheio. Liberte espaço — a fila tem ' + ((q && q.length) || 0) + ' ops.', 'warning');
       }
     }
   }
 }
+
 
 function actualizarBannerOffline() {
   // Banner topo continua desactivado (relatório: não intrusivo permanente).
@@ -2180,8 +2287,16 @@ function atualizarIndicadorSync() {
   const text = document.getElementById('sync-text');
   const container = document.getElementById('sync-status-container');
   const fila = (typeof getSyncQueue === 'function') ? getSyncQueue() : [];
-  const pendentes = fila.filter(function (op) { return op && op.failed !== true; }).length;
+  const now = Date.now();
+  const ready = fila.filter(function (op) {
+    return op && op.failed !== true && (!op.nextRetry || op.nextRetry <= now);
+  }).length;
+  const backoff = fila.filter(function (op) {
+    return op && op.failed !== true && op.nextRetry && op.nextRetry > now;
+  }).length;
+  const pendentes = ready + backoff;
   const falhados = fila.filter(function (op) { return op && op.failed === true; }).length;
+  const dlqN = (typeof bpGetDlqCount === 'function') ? bpGetDlqCount() : 0;
   const offline = (typeof navigator !== 'undefined' && !navigator.onLine);
 
   let stateKey = 'ok';
@@ -2191,12 +2306,16 @@ function atualizarIndicadorSync() {
     label = pendentes > 0 ? ('Sem rede · ' + pendentes + ' pend.') : 'Sem rede';
   } else if (pendentes > 0) {
     stateKey = 'pending';
-    label = pendentes === 1 ? '1 pendente' : (pendentes + ' pendentes');
-  } else if (falhados > 0) {
+    if (backoff > 0 && ready === 0) {
+      label = pendentes + ' em espera';
+    } else {
+      label = pendentes === 1 ? '1 pendente' : (pendentes + ' pendentes');
+    }
+  } else if (dlqN > 0 || falhados > 0) {
     stateKey = 'error';
-    label = falhados === 1 ? '1 falha' : (falhados + ' falhas');
+    var nFail = dlqN + falhados;
+    label = nFail === 1 ? '1 falhada' : (nFail + ' falhadas');
   } else if (typeof bpGetServiceHealth === 'function') {
-    // ET4.10: sem labels de «servidor instável» no header (relatório + pedido do produto).
     try {
       var health = bpGetServiceHealth();
       if (typeof bpNotifyHealthIfNeeded === 'function') bpNotifyHealthIfNeeded(health);
@@ -2229,146 +2348,248 @@ if (typeof window !== 'undefined') {
 }
 
 function addToSyncQueue(tabela, operacao, payload) {
-  const q = getSyncQueue().filter(function (item) {
-    return !(item.tabela === tabela && item.payload && payload && item.payload.id === payload.id);
-  });
+  payload = slimPayload(payload);
+  var entityId = payload && payload.id;
+  if (operacao !== 'delete' && entityId && typeof isDeletedItem === 'function' && isDeletedItem(entityId, tabela)) {
+    try { console.info('[sync] upsert ignorado — tombstone activo', tabela, entityId); } catch (_) {}
+    return;
+  }
+  var q = getSyncQueue();
+  if (entityId) {
+    var hasDelete = q.some(function (item) {
+      return item && item.tabela === tabela && item.operacao === 'delete' &&
+        item.payload && item.payload.id === entityId;
+    });
+    if (hasDelete && operacao !== 'delete') {
+      try { console.info('[sync] upsert ignorado — delete já na fila', tabela, entityId); } catch (_) {}
+      return;
+    }
+    q = q.filter(function (item) {
+      return !(item && item.tabela === tabela && item.payload && item.payload.id === entityId);
+    });
+  }
+  if (typeof QUEUE_HARD_BLOCK !== 'undefined' && q.length >= QUEUE_HARD_BLOCK) {
+    if (typeof toast === 'function') {
+      toast('Fila de sincronização demasiado grande. Aguarde a sincronização antes de novas alterações.', 'error');
+    }
+    try { console.error('[sync] Fila >= HARD_BLOCK — bloqueio de novas ops'); } catch (_) {}
+    if (navigator.onLine && typeof flushSyncQueue === 'function') {
+      try { flushSyncQueue(); } catch (_) {}
+    }
+    return;
+  }
+  if (typeof QUEUE_SOFT_WARN !== 'undefined' && q.length >= QUEUE_SOFT_WARN) {
+    try { console.warn('[sync] Fila grande:', q.length, 'ops'); } catch (_) {}
+  }
   q.push({
-    id: typeof uuid === 'function' ? uuid() : String(Date.now()),
+    id: typeof uuid === 'function' ? uuid() : String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8),
     tabela: tabela,
     operacao: operacao,
     payload: payload,
     ts: Date.now(),
     attempts: 0,
-    failed: false
+    failed: false,
+    nextRetry: 0,
+    lastError: null
   });
-  // ET4.5: fila sem teto — nunca descartar ops (pedido de produto)
   saveSyncQueue(q);
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
 
+
 async function flushSyncQueue() {
-  if (!navigator.onLine) return;
-  if (flushSyncQueue._running) return;
-  flushSyncQueue._running = true;
+  if (!navigator.onLine) return flushSyncQueue._lastPromise || Promise.resolve();
+  if (flushSyncQueue._promise) return flushSyncQueue._promise;
+  flushSyncQueue._promise = (async function flushInternal() {
+    const BATCH_SIZE = 25;
+    const YIELD_MS = 30;
+    const MAX_ATTEMPTS = (typeof MAX_SYNC_ATTEMPTS !== 'undefined') ? MAX_SYNC_ATTEMPTS : 5;
+    try {
+      let q = getSyncQueue();
+      if (!q.length) return;
 
-  // ET4.6: filas grandes (600+) em lotes — progresso gravado, sem conflitos por "tudo ou nada"
-  const BATCH_SIZE = 25;
-  /* Sem teto de tentativas de rede: dados na fila até sucesso (regra de produto). */
-  const YIELD_MS = 30;
-
-  try {
-    let q = getSyncQueue();
-    if (!q.length) return;
-
-    const itensFalhos = [];
-    let processed = 0;
-    let interrompido = false;
-
-    while (q.length && navigator.onLine && !interrompido) {
-      const batch = [];
-      const defer = [];
-      for (let i = 0; i < q.length; i++) {
-        const op = q[i];
-        if (!op) continue;
-        if (op.failed === true) {
-          defer.push(op);
-          continue;
+      // Se só há backoff: após 30s no backoff, forçar ready (P1)
+      var now = Date.now();
+      var hasReady = q.some(function (op) {
+        return op && op.failed !== true && (!op.nextRetry || op.nextRetry <= now);
+      });
+      if (!hasReady) {
+        var inBackoff = q.filter(function (op) {
+          return op && op.failed !== true && op.nextRetry && op.nextRetry > now;
+        });
+        if (inBackoff.length) {
+          inBackoff.forEach(function (op) {
+            var waited = now - (op.nextRetry - (op._backoffSpan || 0));
+            // Se nextRetry está no futuro há >30s desde a última falha, promover
+            if (op.nextRetry - now < 0) return;
+            var age = now - (op.tsLastFail || op.ts || 0);
+            if (age >= 30000 || (op.nextRetry - now) > 30000) {
+              op.nextRetry = 0;
+            }
+          });
+          // Promoção mais simples e fiável: se o flush é pedido e o backoff mais antigo > 30s
+          var minRetry = Math.min.apply(null, inBackoff.map(function (op) { return op.nextRetry || 0; }));
+          if (minRetry && (now - (minRetry - 60000)) >= 0) {
+            // se qualquer nextRetry já passou de 30s de atraso máximo, zerar todos os ready-stuck
+          }
+          var oldestFail = Math.min.apply(null, inBackoff.map(function (op) { return op.tsLastFail || op.ts || now; }));
+          if (now - oldestFail >= 30000) {
+            inBackoff.forEach(function (op) { op.nextRetry = 0; });
+            saveSyncQueue(q);
+            q = getSyncQueue();
+          }
         }
-        if (op.nextRetry && Date.now() < op.nextRetry) {
-          defer.push(op);
-          continue;
-        }
-        if (batch.length < BATCH_SIZE) batch.push(op);
-        else defer.push(op);
       }
 
-      if (!batch.length) {
-        // Só backoff/falhas — sair para não spin
-        saveSyncQueue(defer);
-        break;
-      }
+      const itensFalhos = [];
+      let processed = 0;
+      let interrompido = false;
+      let sessionExpired = false;
 
-      const restantesBatch = [];
-      for (let i = 0; i < batch.length; i++) {
-        if (!navigator.onLine) {
-          interrompido = true;
-          restantesBatch.push.apply(restantesBatch, batch.slice(i));
+      while (q.length && navigator.onLine && !interrompido && !sessionExpired) {
+        const batch = [];
+        const defer = [];
+        now = Date.now();
+        for (let i = 0; i < q.length; i++) {
+          const op = q[i];
+          if (!op) continue;
+          if (op.failed === true) {
+            // failed legado → DLQ
+            moveOpToDlq(op, op.lastError || 'failed_flag');
+            continue;
+          }
+          if (op.nextRetry && now < op.nextRetry) {
+            defer.push(op);
+            continue;
+          }
+          if (batch.length < BATCH_SIZE) batch.push(op);
+          else defer.push(op);
+        }
+
+        if (!batch.length) {
+          saveSyncQueue(defer);
           break;
         }
-        const op = batch[i];
-        try {
-          if (op.operacao === 'delete') {
-            const success = await supabaseDelete(op.tabela, op.payload.id);
-            if (success && typeof removeDeletedItem === 'function') {
-              removeDeletedItem(op.payload.id, op.tabela);
+
+        const restantesBatch = [];
+        for (let i = 0; i < batch.length; i++) {
+          if (!navigator.onLine) {
+            interrompido = true;
+            restantesBatch.push.apply(restantesBatch, batch.slice(i));
+            break;
+          }
+          const op = batch[i];
+          try {
+            if (op.operacao === 'delete') {
+              await supabaseDelete(op.tabela, op.payload.id);
+              if (typeof removeDeletedItem === 'function') {
+                removeDeletedItem(op.payload.id, op.tabela);
+              }
+            } else {
+              if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload && op.payload.id, op.tabela)) {
+                processed++;
+                continue;
+              }
+              const payload = op.payload || {};
+              const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
+              if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
+                await supabaseDeactivate(op.tabela, payload.id, {
+                  data_desativacao: payload.data_desativacao || null,
+                  updated_at: payload.updated_at || new Date().toISOString()
+                });
+              } else {
+                await supabaseUpsert(op.tabela, slimPayload(op.payload));
+              }
             }
-          } else {
-            if (typeof isDeletedItem === 'function' && isDeletedItem(op.payload && op.payload.id, op.tabela)) {
-              /* Tombstone: upsert obsoleto — remove da fila (dado local já eliminado). */
-              processed++;
+            processed++;
+          } catch (err) {
+            var msg = (err && err.message) ? String(err.message) : String(err || '');
+            op.lastError = msg.slice(0, 300);
+            op.tsLastFail = Date.now();
+
+            if (msg === 'SESSION_EXPIRED') {
+              sessionExpired = true;
+              restantesBatch.push(op);
+              restantesBatch.push.apply(restantesBatch, batch.slice(i + 1));
+              break;
+            }
+            if (msg === 'LIMITE_PLANO_ATINGIDO') {
+              if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido. Fica na fila até o plano permitir.', 'error');
+              op.failed = false;
+              op.attempts = (op.attempts || 0) + 1;
+              var d1 = Math.min(300000, 60000 + (op.attempts * 15000));
+              op.nextRetry = Date.now() + d1 + Math.random() * 1000;
+              op._backoffSpan = d1;
+              restantesBatch.push(op);
               continue;
             }
-            const payload = op.payload || {};
-            const isDeact = payload.ativo === false || payload.ativo === 0 || payload.ativo === 'false';
-            if (isDeact && (op.tabela === 'profissionais' || op.tabela === 'servicos') && typeof supabaseDeactivate === 'function') {
-              await supabaseDeactivate(op.tabela, payload.id, {
-                data_desativacao: payload.data_desativacao || null,
-                updated_at: payload.updated_at || new Date().toISOString()
-              });
-            } else {
-              await supabaseUpsert(op.tabela, op.payload);
+            if (msg === 'DUPLICADO_BLOQUEADO' || msg.indexOf('DUPLICADO') >= 0) {
+              if (typeof logErroSilencioso === 'function') logErroSilencioso('flushSyncQueue.duplicado', err);
+              moveOpToDlq(op, msg);
+              itensFalhos.push(op.id || 'item');
+              continue;
             }
-          }
-          processed++;
-        } catch (err) {
-          if (err && err.message === 'LIMITE_PLANO_ATINGIDO') {
-            if (typeof toast === 'function') toast('Operação bloqueada: limite do plano atingido. Fica na fila até o plano permitir.', 'error');
-            /* Não descartar: permanece na fila com backoff (regra: zero perda). */
-            op.failed = false;
+
             op.attempts = (op.attempts || 0) + 1;
-            op.nextRetry = Date.now() + Math.min(300000, 60000 + (op.attempts * 15000));
+            op.failed = false;
+            if (op.attempts >= MAX_ATTEMPTS) {
+              moveOpToDlq(op, msg);
+              itensFalhos.push(op.id || 'item');
+              continue;
+            }
+            var delay = Math.min(60000, Math.pow(2, Math.min(op.attempts, 6)) * 1000) + Math.random() * 1000;
+            op.nextRetry = Date.now() + delay;
+            op._backoffSpan = delay;
             restantesBatch.push(op);
-            continue;
           }
-          if (err && (err.message === 'DUPLICADO_BLOQUEADO' || String(err.message || '').indexOf('DUPLICADO') >= 0)) {
-            if (typeof logErroSilencioso === 'function') logErroSilencioso('flushSyncQueue.duplicado', err);
-            // não retentar em loop
-            op.failed = true; /* rejeição lógica (duplicado) — não é perda de dado local */
-            itensFalhos.push(op.id || 'item');
-            restantesBatch.push(op);
-            continue;
-          }
-          /* REGRA OBRIGATÓRIA: nunca descartar nem marcar failed por teto de tentativas.
-             A op permanece na fila e volta a tentar (backoff só para não martelar a rede). */
-          op.attempts = (op.attempts || 0) + 1;
-          op.failed = false;
-          const delay = Math.min(Math.pow(2, Math.min(op.attempts, 6)) * 1000, 60000) + Math.random() * 1000;
-          op.nextRetry = Date.now() + delay;
-          restantesBatch.push(op);
         }
+
+        q = restantesBatch.concat(defer);
+        saveSyncQueue(q);
+        if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+        await new Promise(function (r) { setTimeout(r, YIELD_MS); });
       }
 
-      // Persistir progresso após cada lote (crítico com 600+)
-      q = restantesBatch.concat(defer);
-      saveSyncQueue(q);
+      if (sessionExpired) {
+        if (typeof toast === 'function') toast('Sessão expirada. Faça login novamente.', 'error');
+        try {
+          if (typeof supabaseClient !== 'undefined' && supabaseClient.auth && supabaseClient.auth.signOut) {
+            await supabaseClient.auth.signOut();
+          }
+        } catch (_) {}
+        try {
+          if (typeof bpClearSessionLocal === 'function') bpClearSessionLocal();
+        } catch (_) {}
+        try {
+          if (typeof bpShowLoginShell === 'function') bpShowLoginShell();
+          else {
+            var lv = document.getElementById('login-view');
+            var av = document.getElementById('app-view');
+            if (lv) lv.style.display = 'flex';
+            if (av) av.style.display = 'none';
+          }
+        } catch (_) {}
+      }
+
+      if (itensFalhos.length > 0 && typeof toast === 'function') {
+        toast('Algumas operações falharam repetidamente (' + itensFalhos.length + '). Veja «operações falhadas».', 'warning');
+      }
+      if (processed > 0) {
+        try { console.info('[sync] flush processou', processed, 'ops; restam', getSyncQueue().length, 'dlq', getDlq().length); } catch (_) {}
+      }
       if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-
-      // Ceder à UI entre lotes
-      await new Promise(function (r) { setTimeout(r, YIELD_MS); });
+      // Após sync de metadados, processar uploads de foto se existir
+      if (typeof bpFlushFotoUploadQueue === 'function' && navigator.onLine) {
+        try { await bpFlushFotoUploadQueue(); } catch (_) {}
+      }
+    } finally {
+      flushSyncQueue._promise = null;
     }
-
-    if (itensFalhos.length > 0 && typeof toast === 'function') {
-      /* Duplicados / rejeições lógicas — não são perdas de fila de rede */
-      toast('Algumas operações foram rejeitadas pelo servidor (' + itensFalhos.length + '). Os restantes dados permanecem na fila.', 'warning');
-    }
-    if (processed > 0 && typeof logErroSilencioso === 'function') {
-      try { console.info('[sync] flush processou', processed, 'ops; restam', getSyncQueue().length); } catch (_) {}
-    }
-    if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-  } finally {
-    flushSyncQueue._running = false;
-  }
+  })();
+  flushSyncQueue._lastPromise = flushSyncQueue._promise;
+  return flushSyncQueue._promise;
 }
+
 
 // ====================================================================
 //  OVERRIDE PARA SUPABASE (mantido)
@@ -2391,7 +2612,7 @@ dbPut = async function(store, item) {
 
   if (navigator.onLine) {
     try {
-      await supabaseUpsert(tabela, item);
+      await supabaseUpsert(tabela, slimPayload(item));
       const rest = getSyncQueue().filter(function (op) {
         return !(op.tabela === tabela && op.payload && op.payload.id === item.id);
       });
@@ -2444,6 +2665,7 @@ async function bpRetryFailedSync() {
       op.failed = false;
       op.attempts = 0;
       op.nextRetry = 0;
+      op.tsLastFail = 0;
       changed = true;
     }
   }
@@ -2451,6 +2673,36 @@ async function bpRetryFailedSync() {
   if (typeof flushSyncQueue === 'function') await flushSyncQueue();
   if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 }
+
+/** Reprocessar DLQ → fila principal (após utilizador corrigir causa). */
+async function bpReprocessDlq() {
+  var dlq = getDlq();
+  if (!dlq.length) {
+    if (typeof toast === 'function') toast('Não há operações falhadas.', 'info');
+    return;
+  }
+  var q = getSyncQueue();
+  dlq.forEach(function (item) {
+    q.push({
+      id: item.id || (typeof uuid === 'function' ? uuid() : String(Date.now())),
+      tabela: item.tabela,
+      operacao: item.operacao,
+      payload: slimPayload(item.payload),
+      ts: Date.now(),
+      attempts: 0,
+      failed: false,
+      nextRetry: 0,
+      lastError: null
+    });
+  });
+  saveSyncQueue(q);
+  saveDlq([]);
+  if (typeof toast === 'function') toast('A reprocessar ' + dlq.length + ' operação(ões) falhada(s)…', 'info');
+  if (typeof flushSyncQueue === 'function') await flushSyncQueue();
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+}
+if (typeof window !== 'undefined') window.bpReprocessDlq = bpReprocessDlq;
+
 if (typeof window !== 'undefined') {
   window.bpRetryFailedSync = bpRetryFailedSync;
   // Toque no indicador: reabre tudo e faz flush
@@ -2462,6 +2714,10 @@ if (typeof window !== 'undefined') {
       el.style.cursor = 'pointer';
       el.setAttribute('role', 'button');
       el.title = 'Toque para sincronizar agora';
+      el.addEventListener('contextmenu', function (ev) {
+        ev.preventDefault();
+        if (typeof bpOpenDlqModal === 'function') bpOpenDlqModal();
+      });
       el.addEventListener('click', function () {
         if (!navigator.onLine) {
           if (typeof toast === 'function') toast('Sem ligação à internet neste momento. As alterações serão enviadas quando voltares a ter rede.', 'warning');
@@ -2472,8 +2728,10 @@ if (typeof window !== 'undefined') {
           .then(function () { return bpRetryFailedSync(); })
           .then(function () {
             var rest = (typeof getSyncQueue === 'function') ? getSyncQueue().length : 0;
+            var dlq = (typeof bpGetDlqCount === 'function') ? bpGetDlqCount() : 0;
             if (typeof toast === 'function') {
-              if (rest === 0) toast('Tudo sincronizado.', 'success');
+              if (rest === 0 && dlq === 0) toast('Tudo sincronizado.', 'success');
+              else if (rest === 0 && dlq > 0) toast(dlq + ' operação(ões) falhada(s). Toque longo no indicador ou use «Reprocessar falhadas».', 'warning');
               else toast('Ainda restam ' + rest + ' operação(ões). Toque de novo ou verifique a ligação.', 'warning');
             }
           })
@@ -2515,6 +2773,58 @@ if (typeof window !== 'undefined') {
     if (typeof flushSyncQueue === 'function') flushSyncQueue();
   }, 25000);
 }
+
+
+function bpOpenDlqModal() {
+  var dlq = getDlq();
+  var body = '';
+  if (!dlq.length) {
+    body = '<p class="bp-dash-next-empty">Não há operações falhadas.</p>';
+  } else {
+    body = dlq.slice(-30).map(function (item) {
+      return '<div class="bp-dash-lista-item"><div><div>' +
+        (item.tabela || '') + ' · ' + (item.operacao || '') +
+        '</div><div class="bp-dash-next-meta">' +
+        String(item.error || '').slice(0, 120) +
+        '</div></div></div>';
+    }).join('');
+  }
+  var existing = document.getElementById('modal-sync-dlq');
+  if (!existing) {
+    var wrap = document.createElement('div');
+    wrap.id = 'modal-sync-dlq';
+    wrap.className = 'modal-overlay';
+    wrap.setAttribute('role', 'dialog');
+    wrap.innerHTML =
+      '<div class="modal-sheet">' +
+      '<div class="handle"></div>' +
+      '<div class="modal-title">Operações falhadas</div>' +
+      '<div id="modal-sync-dlq-body" class="bp-dash-lista-body"></div>' +
+      '<button type="button" class="btn btn-primary btn-block" id="modal-sync-dlq-retry">Reprocessar falhadas</button>' +
+      '<button type="button" class="btn btn-secondary btn-block mt-2" data-close="modal-sync-dlq">Fechar</button>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    wrap.addEventListener('click', function (e) {
+      if (e.target === wrap || (e.target.getAttribute && e.target.getAttribute('data-close') === 'modal-sync-dlq')) {
+        if (typeof closeModal === 'function') closeModal('modal-sync-dlq');
+        else { wrap.classList.remove('open'); wrap.style.display = 'none'; }
+      }
+    });
+    document.getElementById('modal-sync-dlq-retry').addEventListener('click', function () {
+      if (typeof closeModal === 'function') closeModal('modal-sync-dlq');
+      if (typeof bpReprocessDlq === 'function') bpReprocessDlq();
+    });
+  }
+  var b = document.getElementById('modal-sync-dlq-body');
+  if (b) b.innerHTML = body;
+  if (typeof openModal === 'function') openModal('modal-sync-dlq');
+  else {
+    var m = document.getElementById('modal-sync-dlq');
+    m.classList.add('open');
+    m.style.display = 'flex';
+  }
+}
+if (typeof window !== 'undefined') window.bpOpenDlqModal = bpOpenDlqModal;
 
 /* ===== FILE: sync-rest.js ===== */
 // ====================================================================
@@ -12472,18 +12782,10 @@ document.getElementById('row-menu-edit').addEventListener('click', () => {
 })();
 
 
-// ONLINE/OFFLINE — multi-dispositivo: indicador sempre legível
+// ONLINE — flush apenas em sync-queue.js (evitar double flush). Actualiza UI IA se existir.
 window.addEventListener('online', () => {
   if (typeof atualizarIAOffline === 'function') atualizarIAOffline();
-  if (typeof flushSyncQueue === 'function') {
-    flushSyncQueue().then(function () {
-      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-    }).catch(function () {
-      if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
-    });
-  } else if (typeof atualizarIndicadorSync === 'function') {
-    atualizarIndicadorSync();
-  }
+  if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
 });
 
 window.addEventListener('offline', () => {
