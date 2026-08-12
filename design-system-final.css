@@ -468,3 +468,83 @@ textarea.input-field:focus-visible,
   outline: none !important;
   box-shadow: none !important;
 }
+
+
+/* ===== Etapa 1 — Checkmark de verificação concluída ===== */
+.bp-checkmark-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 17, 15, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.bp-checkmark-overlay.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.bp-checkmark-overlay[hidden] { display: none !important; }
+.bp-checkmark-card {
+  background: var(--card-white, #fff);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--shadow-floating, 0 8px 28px rgba(0,0,0,.12));
+  padding: 28px 32px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 140px;
+  transform: scale(0.92);
+  opacity: 0;
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bp-checkmark-overlay.is-open .bp-checkmark-card {
+  opacity: 1;
+  transform: scale(1);
+}
+.bp-checkmark-svg {
+  color: var(--gold, #D4AF37);
+  display: block;
+}
+.bp-checkmark-circle {
+  stroke: var(--gold, #D4AF37);
+  stroke-dasharray: 126;
+  stroke-dashoffset: 126;
+}
+.bp-checkmark-poly {
+  stroke: var(--gold-dark, #A7872B);
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+}
+.bp-checkmark-overlay.is-animating .bp-checkmark-circle {
+  animation: bp-check-circle 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bp-checkmark-overlay.is-animating .bp-checkmark-poly {
+  animation: bp-check-poly 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.35s forwards;
+}
+@keyframes bp-check-circle {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes bp-check-poly {
+  to { stroke-dashoffset: 0; }
+}
+.bp-checkmark-text {
+  margin: 0;
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-muted, #6B6560);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+.bp-checkmark-overlay.is-offline .bp-checkmark-svg { color: var(--text-muted, #6B6560); }
+.plano-badge[data-bp-plano-ready="0"] {
+  visibility: hidden !important;
+  min-width: 3.5rem;
+}
+.plano-badge[data-bp-plano-ready="1"] {
+  visibility: visible !important;
+}

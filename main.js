@@ -20,14 +20,35 @@
 //  esta lista.
 // ====================================================================
 document.addEventListener('DOMContentLoaded', async function init() {
+  /* Etapa 1 — splash só na 1ª execução */
+  try {
+    if (typeof bpControlSplashOnBoot === 'function') bpControlSplashOnBoot();
+    else {
+      var _sp = document.getElementById('splash-screen');
+      var _seen = false;
+      try { _seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
+      if (_sp && _seen) { _sp.style.display = 'none'; _sp.style.opacity = '0'; }
+    }
+  } catch (_) {}
   /* Overlay o mais cedo possível (<1s): antes de checkSession/UI */
   try {
     var loggedOut = false;
     try { loggedOut = localStorage.getItem('bp_logged_out') === '1'; } catch (_) {}
     var hasSalao = false;
     try { hasSalao = !!localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
-    if (!loggedOut && hasSalao && navigator.onLine && typeof bpShowBootOverlay === 'function') {
-      bpShowBootOverlay();
+    if (!loggedOut && hasSalao) {
+      if (navigator.onLine && typeof bpShowBootOverlay === 'function') {
+        bpShowBootOverlay();
+      } else if (!navigator.onLine && typeof bpShowBootOverlay === 'function') {
+        /* Offline: spinner com texto de modo offline */
+        try {
+          bpShowBootOverlay();
+          var t = document.getElementById('bp-boot-title');
+          var d = document.getElementById('bp-boot-desc');
+          if (t) t.textContent = 'Modo offline';
+          if (d) d.textContent = 'Dados disponíveis no dispositivo…';
+        } catch (_) {}
+      }
     }
   } catch (_) {}
   // Garantir estado inicial da UI
@@ -289,7 +310,8 @@ if ('serviceWorker' in navigator) {
     }, BOOT_MS);
   }
 
-  function closeBoot() {
+  function closeBoot(opts) {
+    opts = opts || {};
     active = false;
     clearTimeout(timer);
     timer = null;
@@ -300,6 +322,17 @@ if ('serviceWorker' in navigator) {
     o.classList.remove('is-open');
     o.style.display = 'none';
     o.setAttribute('aria-hidden', 'true');
+    /* Etapa 1 — checkmark após boot (online ok); offline → ícone nuvem */
+    if (opts.skipCheckmark) return;
+    try {
+      if (typeof showCheckmark === 'function') {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          showCheckmark({ mode: 'offline', duration: 900 });
+        } else if (opts.success !== false) {
+          showCheckmark({ mode: 'ok', duration: 1000, label: 'Sincronizado' });
+        }
+      }
+    } catch (_) {}
   }
 
   function retry() {
@@ -323,7 +356,10 @@ if ('serviceWorker' in navigator) {
   }
 
   function continueOffline() {
-    closeBoot();
+    closeBoot({ skipCheckmark: true });
+    try {
+      if (typeof showCheckmark === 'function') showCheckmark({ mode: 'offline', duration: 900 });
+    } catch (_) {}
     if (typeof flushSyncQueue === 'function' && navigator.onLine) {
       try { flushSyncQueue(); } catch (_) {}
     }
@@ -356,7 +392,7 @@ if ('serviceWorker' in navigator) {
 
   window.addEventListener('offline', function () {
     /* Offline-first: não prender o utilizador no overlay */
-    closeBoot();
+    closeBoot({ skipCheckmark: true });
   });
 
   if (document.readyState === 'loading') {

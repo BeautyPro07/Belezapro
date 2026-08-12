@@ -651,3 +651,67 @@ function safeStringify(obj, maxBytes) {
   }
 }
 if (typeof window !== 'undefined') window.safeStringify = safeStringify;
+
+
+/** Etapa 1 — overlay checkmark / offline após boot */
+function showCheckmark(opts) {
+  opts = opts || {};
+  var mode = opts.mode || 'ok'; // ok | offline
+  var duration = opts.duration != null ? opts.duration : 1000;
+  return new Promise(function (resolve) {
+    var el = document.getElementById('bp-checkmark-overlay');
+    if (!el) { resolve(); return; }
+    var text = document.getElementById('bp-checkmark-text');
+    var icon = el.querySelector('.bp-checkmark-icon');
+    el.classList.remove('is-offline', 'is-animating', 'is-open');
+    if (mode === 'offline') {
+      el.classList.add('is-offline');
+      if (text) text.textContent = 'Offline';
+      if (icon) {
+        icon.innerHTML =
+          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<path d="M16 30a10 10 0 0 1 16-6 7 7 0 0 1 2 14H16a7 7 0 0 1 0-14z"/>' +
+          '<line x1="18" y1="18" x2="30" y2="30"/><line x1="30" y1="18" x2="18" y2="30"/>' +
+          '</svg>';
+      }
+    } else {
+      if (text) text.textContent = opts.label || 'Sincronizado';
+      if (icon) {
+        icon.innerHTML =
+          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<circle class="bp-checkmark-circle" cx="24" cy="24" r="20"></circle>' +
+          '<polyline class="bp-checkmark-poly" points="14,24 22,32 34,18"></polyline>' +
+          '</svg>';
+      }
+    }
+    el.hidden = false;
+    try { el.removeAttribute('hidden'); } catch (_) {}
+    el.setAttribute('aria-hidden', 'false');
+    el.style.display = 'flex';
+    requestAnimationFrame(function () {
+      el.classList.add('is-open', 'is-animating');
+    });
+    clearTimeout(showCheckmark._t);
+    showCheckmark._t = setTimeout(function () {
+      hideCheckmark().then(resolve);
+    }, duration);
+  });
+}
+function hideCheckmark() {
+  return new Promise(function (resolve) {
+    var el = document.getElementById('bp-checkmark-overlay');
+    if (!el) { resolve(); return; }
+    el.classList.remove('is-open', 'is-animating');
+    setTimeout(function () {
+      el.hidden = true;
+      try { el.setAttribute('hidden', ''); } catch (_) {}
+      el.setAttribute('aria-hidden', 'true');
+      el.style.display = 'none';
+      resolve();
+    }, 280);
+  });
+}
+if (typeof window !== 'undefined') {
+  window.showCheckmark = showCheckmark;
+  window.hideCheckmark = hideCheckmark;
+}

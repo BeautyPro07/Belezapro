@@ -718,6 +718,70 @@ function safeStringify(obj, maxBytes) {
 }
 if (typeof window !== 'undefined') window.safeStringify = safeStringify;
 
+
+/** Etapa 1 — overlay checkmark / offline após boot */
+function showCheckmark(opts) {
+  opts = opts || {};
+  var mode = opts.mode || 'ok'; // ok | offline
+  var duration = opts.duration != null ? opts.duration : 1000;
+  return new Promise(function (resolve) {
+    var el = document.getElementById('bp-checkmark-overlay');
+    if (!el) { resolve(); return; }
+    var text = document.getElementById('bp-checkmark-text');
+    var icon = el.querySelector('.bp-checkmark-icon');
+    el.classList.remove('is-offline', 'is-animating', 'is-open');
+    if (mode === 'offline') {
+      el.classList.add('is-offline');
+      if (text) text.textContent = 'Offline';
+      if (icon) {
+        icon.innerHTML =
+          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<path d="M16 30a10 10 0 0 1 16-6 7 7 0 0 1 2 14H16a7 7 0 0 1 0-14z"/>' +
+          '<line x1="18" y1="18" x2="30" y2="30"/><line x1="30" y1="18" x2="18" y2="30"/>' +
+          '</svg>';
+      }
+    } else {
+      if (text) text.textContent = opts.label || 'Sincronizado';
+      if (icon) {
+        icon.innerHTML =
+          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<circle class="bp-checkmark-circle" cx="24" cy="24" r="20"></circle>' +
+          '<polyline class="bp-checkmark-poly" points="14,24 22,32 34,18"></polyline>' +
+          '</svg>';
+      }
+    }
+    el.hidden = false;
+    try { el.removeAttribute('hidden'); } catch (_) {}
+    el.setAttribute('aria-hidden', 'false');
+    el.style.display = 'flex';
+    requestAnimationFrame(function () {
+      el.classList.add('is-open', 'is-animating');
+    });
+    clearTimeout(showCheckmark._t);
+    showCheckmark._t = setTimeout(function () {
+      hideCheckmark().then(resolve);
+    }, duration);
+  });
+}
+function hideCheckmark() {
+  return new Promise(function (resolve) {
+    var el = document.getElementById('bp-checkmark-overlay');
+    if (!el) { resolve(); return; }
+    el.classList.remove('is-open', 'is-animating');
+    setTimeout(function () {
+      el.hidden = true;
+      try { el.setAttribute('hidden', ''); } catch (_) {}
+      el.setAttribute('aria-hidden', 'true');
+      el.style.display = 'none';
+      resolve();
+    }, 280);
+  });
+}
+if (typeof window !== 'undefined') {
+  window.showCheckmark = showCheckmark;
+  window.hideCheckmark = hideCheckmark;
+}
+
 /* ===== FILE: tests-pure.js ===== */
 /**
  * Testes unitários das funções puras — executar no browser:
@@ -1684,8 +1748,11 @@ document.getElementById('login-btn').addEventListener('click', async function() 
       // ============================================================
       // CORREÇÃO: remover splash manualmente
       // ============================================================
-      const splash = document.getElementById('splash-screen');
-      if (splash) { splash.style.display = 'none'; }
+      try { if (typeof hideSplash === 'function') hideSplash();
+      else {
+        var splash = document.getElementById('splash-screen');
+        if (splash) { splash.style.display = 'none'; splash.style.opacity = '0'; }
+      } } catch (_) {}
       const onbEl = document.getElementById('onboarding-screen');
       onbEl.style.display = 'flex';
       // Bloqueia toques nos primeiros 500ms
@@ -5647,10 +5714,14 @@ function atualizarVisibilidadeAtalhos() {
 function renderPlanoInfo() {
   const plano = getPlanoAtual();
   const info = PLANOS[plano];
-  const badge = document.getElementById('plano-badge');
+    const badge = document.getElementById('plano-badge');
+  if (!badge) return;
   const label = plano === 'trial' ? 'Plano Gratuito' : info.label.toUpperCase();
   badge.textContent = label;
   badge.className = 'plano-badge ' + info.badgeClass;
+  badge.setAttribute('data-bp-plano-ready', '1');
+  badge.style.visibility = 'visible';
+  badge.setAttribute('aria-hidden', 'false');
   const countdown = document.getElementById('trial-countdown');
   if (plano === 'trial' && isTrialAtivo()) {
     const dias = getDiasTrialRestantes();
@@ -14935,8 +15006,34 @@ function hideSplash() {
   const splash = document.getElementById('splash-screen');
   if (!splash) return;
   splash.style.opacity = '0';
-  setTimeout(() => { splash.style.display = 'none'; }, 600);
+  setTimeout(function () { splash.style.display = 'none'; }, 600);
+  try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
 }
+
+/** Etapa 1 — splash só na 1ª execução (bp_splash_seen). */
+function bpControlSplashOnBoot() {
+  var splash = document.getElementById('splash-screen');
+  if (!splash) return;
+  var seen = false;
+  try { seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
+  if (seen) {
+    splash.style.opacity = '0';
+    splash.style.display = 'none';
+    splash.setAttribute('aria-hidden', 'true');
+    return;
+  }
+  // Primeira vez: manter visível; marcar após breve exposição
+  splash.style.display = 'flex';
+  setTimeout(function () {
+    try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
+    hideSplash();
+  }, 1400);
+}
+if (typeof window !== 'undefined') {
+  window.bpControlSplashOnBoot = bpControlSplashOnBoot;
+  window.hideSplash = hideSplash;
+}
+
 
 // Testes automatizados
 function runTests() {
@@ -14987,14 +15084,35 @@ window.runBeautyProTests = runTests;
 //  esta lista.
 // ====================================================================
 document.addEventListener('DOMContentLoaded', async function init() {
+  /* Etapa 1 — splash só na 1ª execução */
+  try {
+    if (typeof bpControlSplashOnBoot === 'function') bpControlSplashOnBoot();
+    else {
+      var _sp = document.getElementById('splash-screen');
+      var _seen = false;
+      try { _seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
+      if (_sp && _seen) { _sp.style.display = 'none'; _sp.style.opacity = '0'; }
+    }
+  } catch (_) {}
   /* Overlay o mais cedo possível (<1s): antes de checkSession/UI */
   try {
     var loggedOut = false;
     try { loggedOut = localStorage.getItem('bp_logged_out') === '1'; } catch (_) {}
     var hasSalao = false;
     try { hasSalao = !!localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
-    if (!loggedOut && hasSalao && navigator.onLine && typeof bpShowBootOverlay === 'function') {
-      bpShowBootOverlay();
+    if (!loggedOut && hasSalao) {
+      if (navigator.onLine && typeof bpShowBootOverlay === 'function') {
+        bpShowBootOverlay();
+      } else if (!navigator.onLine && typeof bpShowBootOverlay === 'function') {
+        /* Offline: spinner com texto de modo offline */
+        try {
+          bpShowBootOverlay();
+          var t = document.getElementById('bp-boot-title');
+          var d = document.getElementById('bp-boot-desc');
+          if (t) t.textContent = 'Modo offline';
+          if (d) d.textContent = 'Dados disponíveis no dispositivo…';
+        } catch (_) {}
+      }
     }
   } catch (_) {}
   // Garantir estado inicial da UI
@@ -15256,7 +15374,8 @@ if ('serviceWorker' in navigator) {
     }, BOOT_MS);
   }
 
-  function closeBoot() {
+  function closeBoot(opts) {
+    opts = opts || {};
     active = false;
     clearTimeout(timer);
     timer = null;
@@ -15267,6 +15386,17 @@ if ('serviceWorker' in navigator) {
     o.classList.remove('is-open');
     o.style.display = 'none';
     o.setAttribute('aria-hidden', 'true');
+    /* Etapa 1 — checkmark após boot (online ok); offline → ícone nuvem */
+    if (opts.skipCheckmark) return;
+    try {
+      if (typeof showCheckmark === 'function') {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          showCheckmark({ mode: 'offline', duration: 900 });
+        } else if (opts.success !== false) {
+          showCheckmark({ mode: 'ok', duration: 1000, label: 'Sincronizado' });
+        }
+      }
+    } catch (_) {}
   }
 
   function retry() {
@@ -15290,7 +15420,10 @@ if ('serviceWorker' in navigator) {
   }
 
   function continueOffline() {
-    closeBoot();
+    closeBoot({ skipCheckmark: true });
+    try {
+      if (typeof showCheckmark === 'function') showCheckmark({ mode: 'offline', duration: 900 });
+    } catch (_) {}
     if (typeof flushSyncQueue === 'function' && navigator.onLine) {
       try { flushSyncQueue(); } catch (_) {}
     }
@@ -15323,7 +15456,7 @@ if ('serviceWorker' in navigator) {
 
   window.addEventListener('offline', function () {
     /* Offline-first: não prender o utilizador no overlay */
-    closeBoot();
+    closeBoot({ skipCheckmark: true });
   });
 
   if (document.readyState === 'loading') {

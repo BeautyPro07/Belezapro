@@ -90,10 +90,14 @@ function atualizarVisibilidadeAtalhos() {
 function renderPlanoInfo() {
   const plano = getPlanoAtual();
   const info = PLANOS[plano];
-  const badge = document.getElementById('plano-badge');
+    const badge = document.getElementById('plano-badge');
+  if (!badge) return;
   const label = plano === 'trial' ? 'Plano Gratuito' : info.label.toUpperCase();
   badge.textContent = label;
   badge.className = 'plano-badge ' + info.badgeClass;
+  badge.setAttribute('data-bp-plano-ready', '1');
+  badge.style.visibility = 'visible';
+  badge.setAttribute('aria-hidden', 'false');
   const countdown = document.getElementById('trial-countdown');
   if (plano === 'trial' && isTrialAtivo()) {
     const dias = getDiasTrialRestantes();
