@@ -1092,3 +1092,14 @@ Correcção: overlay envolve `bpSilentPull` / `carregarDoSupabase` nos dois cami
 - Abre no `DOMContentLoaded` (se online + salão em cache) e no início de `checkSession`.
 - Removido `setTimeout(300/400)` antes do pull.
 - Fecha só após `bpSilentPull` / falha / Continuar offline / ir para login.
+
+
+## Isolamento multi-tenant — IA e planos (2026-08-12)
+
+- Cache de plano: `bp_plano_cache_<salaoId>` (chave global `bp_plano_cache` removida).
+- Contador IA local: `ia_perguntas_<salaoId>_<data>`.
+- Histórico de chat: `bp_ia_chat_<salaoId>` (+ IDB namespaced).
+- Troca de salão / logout: purga caches de plano, contadores IA e histórico do salão anterior.
+- Chamada Edge `ia-query`: **só JWT de utilizador**; body **sem** `salaoId`/`plano` (resolvidos no servidor). Ver `EDGE_IA_SEGURANCA.md`.
+- Push de uso IA valida `response.ok`.
+

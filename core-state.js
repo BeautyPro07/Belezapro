@@ -6,7 +6,16 @@ let state = {
   config: {
     storeName: 'Glamour Beauty',
     fundo: 0,
-    plano: (function () { try { return localStorage.getItem('bp_plano_cache') || 'trial'; } catch (_) { return 'trial'; } })(),
+    plano: (function () {
+    try {
+      var sid = localStorage.getItem('bp_salao_id_cache');
+      if (sid) {
+        var ns = localStorage.getItem('bp_plano_cache_' + sid);
+        if (ns) return ns;
+      }
+      return 'trial';
+    } catch (_) { return 'trial'; }
+  })(),
     trialInicio: null,
     salaoId: null,
     userRole: null,

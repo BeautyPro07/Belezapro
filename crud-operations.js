@@ -36,15 +36,69 @@ async function loadState(trocouDeSalao = false) {
   state.config.storeName = cfg ? cfg.value : 'Glamour Beauty';
   state.config.fundo = fund ? Number(fund.value) : 0;
   state.config.plano = plano ? plano.value : (function () {
-    try { return localStorage.getItem('bp_plano_cache') || 'trial'; } catch (_) { return 'trial'; }
+    try {
+      var sid = null;
+      try {
+        var row = (configs || []).find(function (c) { return c && (c.key === 'salaoId' || c.id === 'salaoId'); });
+        sid = row && row.value;
+      } catch (_) {}
+      if (!sid) {
+        try { sid = localStorage.getItem('bp_salao_id_cache'); } catch (_) {}
+      }
+      if (sid) {
+        var ns = localStorage.getItem('bp_plano_cache_' + sid);
+        if (ns) return ns;
+      }
+      // legacy fallback só se ainda existir
+      return localStorage.getItem('bp_plano_cache') || 'trial';
+    } catch (_) { return 'trial'; }
   })();
   state.config.trialInicio = trialInicio ? trialInicio.value : null;
 
   let clientes, agendamentos, movimentos, profs, servicos, fechos;
   if (trocouDeSalao) {
+    var anteriorSalaoId = null;
+    try {
+      var _sidRow = (configs || []).find(function (c) { return c && (c.key === 'salaoId' || c.id === 'salaoId'); });
+      anteriorSalaoId = _sidRow ? _sidRow.value : null;
+    } catch (_) {}
     await Promise.all(['clientes', 'agendamentos', 'movimentos', 'profissionais', 'servicos', 'fechos_caixa'].map(dbClear));
     localStorage.removeItem(SYNC_QUEUE_KEY);
     try { localStorage.removeItem('bp_deleted_items'); } catch (_) {}
+    // Isolamento multi-tenant: plano, contadores IA, histórico do salão anterior
+    try {
+      localStorage.removeItem('bp_plano_cache');
+      if (anteriorSalaoId) {
+        localStorage.removeItem('bp_plano_cache_' + anteriorSalaoId);
+        localStorage.removeItem('bp_ia_historico_' + anteriorSalaoId);
+        localStorage.removeItem('bp_ia_chat_' + anteriorSalaoId);
+        var _rm = [];
+        for (var _i = 0; _i < localStorage.length; _i++) {
+          var _k = localStorage.key(_i);
+          if (_k && _k.indexOf('ia_perguntas_' + anteriorSalaoId + '_') === 0) _rm.push(_k);
+        }
+        _rm.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+      } else {
+        // Sem id anterior: limpar todos os namespaces de plano/IA conhecidos
+        var _rm2 = [];
+        for (var _j = 0; _j < localStorage.length; _j++) {
+          var _k2 = localStorage.key(_j);
+          if (_k2 && (
+            _k2.indexOf('bp_plano_cache_') === 0 ||
+            _k2.indexOf('bp_ia_historico_') === 0 ||
+            _k2.indexOf('bp_ia_chat_') === 0 ||
+            _k2.indexOf('ia_perguntas_') === 0
+          )) _rm2.push(_k2);
+        }
+        _rm2.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+      }
+    } catch (_) {}
+    try {
+      if (typeof window !== 'undefined') {
+        if (typeof iaHistorico !== 'undefined') iaHistorico = [];
+        window.iaHistorico = [];
+      }
+    } catch (_) {}
     // Preferências e resíduos do salão anterior (P2)
     ['bp_filtro_clientes','bp_chart_periodo','bp_chart_offset','bp_chart_mostrar_valores',
      'bp_hist_periodo','bp_caixa_data_exata','bp_carrinho','bp_last_venda_id','bp_cart_items'].forEach(k => {
@@ -65,6 +119,29 @@ async function loadState(trocouDeSalao = false) {
     state.chartPeriodo = 'semana';
     state.chartOffset = 0;
     clientes = []; agendamentos = []; movimentos = []; profs = []; servicos = []; fechos = [];
+    // Purity: não herdar plano do IDB do salão anterior
+    try {
+      var _novoSid = state.config && state.config.salaoId;
+      var _planoNovo = 'trial';
+      if (_novoSid) {
+        var _nsP = localStorage.getItem('bp_plano_cache_' + _novoSid);
+        if (_nsP) _planoNovo = _nsP;
+      }
+      state.config.plano = _planoNovo;
+      if (typeof dbPut === 'function') {
+        Promise.resolve(dbPut('config', { id: 'plano', key: 'plano', value: _planoNovo })).catch(function () {});
+      }
+    } catch (_) {
+      state.config.plano = 'trial';
+    }
+    try {
+      if (typeof bpResetIaHistorico === 'function') bpResetIaHistorico();
+      else {
+        if (typeof iaHistorico !== 'undefined') iaHistorico = [];
+        if (typeof window !== 'undefined') window.iaHistorico = [];
+      }
+      if (typeof carregarHistoricoIA === 'function') carregarHistoricoIA();
+    } catch (_) {}
     console.warn('[BeautyPro] Troca de salão detetada — dados locais, fila e preferências limpos.');
   } else {
     const [clientesData, agendamentosData, movimentosData, profsData, servicosData, fechosData] = await Promise.all([
@@ -133,7 +210,12 @@ async function saveConfig() {
   await dbPut('config', { id: 'storeName', key: 'storeName', value: state.config.storeName });
   await dbPut('config', { id: 'fundo', key: 'fundo', value: state.config.fundo });
   await dbPut('config', { id: 'plano', key: 'plano', value: state.config.plano });
-  try { if (state.config.plano) localStorage.setItem('bp_plano_cache', state.config.plano); } catch (_) {}
+  try {
+    if (state.config.plano && state.config.salaoId) {
+      localStorage.setItem('bp_plano_cache_' + state.config.salaoId, state.config.plano);
+    }
+    localStorage.removeItem('bp_plano_cache');
+  } catch (_) {}
   await dbPut('config', { id: 'trialInicio', key: 'trialInicio', value: state.config.trialInicio });
   if (state.config.salaoId) {
     await dbPut('config', { id: 'salaoId', key: 'salaoId', value: state.config.salaoId });

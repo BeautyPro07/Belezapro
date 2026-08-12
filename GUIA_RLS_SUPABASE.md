@@ -154,3 +154,34 @@ CREATE POLICY fechos_delete ON fechos_caixa FOR DELETE
 ## Nota sobre modelo de membros
 Se não tiver `salao_membros`, use apenas:
 `SELECT id FROM saloes WHERE owner_id = auth.uid()`
+
+---
+
+## Verificação obrigatória — IA e planos (isolamento multi-tenant)
+
+Após aplicar `SUPABASE_ETAPA4_6_COMPLETO.sql`, confirme no **SQL Editor**:
+
+```sql
+-- RLS activo?
+SELECT relname, relrowsecurity
+FROM pg_class
+WHERE relname IN ('ia_uso_diario', 'salao_config');
+
+-- Policies
+SELECT tablename, policyname, cmd, roles
+FROM pg_policies
+WHERE tablename IN ('ia_uso_diario', 'salao_config');
+```
+
+**Critério de aceitação:**
+
+1. `relrowsecurity = true` em ambas as tabelas.
+2. Policies `ia_uso_*` e `salao_config_*` presentes, filtrando por  
+   `salao_id IN (SELECT salao_id FROM profiles WHERE user_id = auth.uid())`.
+3. Com JWT de utilizador do salão A, um `SELECT` com `salao_id` do salão B deve devolver **0 linhas**.
+
+Se RLS estiver desactivado, o frontend **não** garante isolamento de contadores/planos no servidor.
+
+### Edge Function `ia-query`
+
+Ver `EDGE_IA_SEGURANCA.md`. A Edge **deve** rejeitar pedidos sem JWT de utilizador e **nunca** confiar em `plano` / `salaoId` do body.

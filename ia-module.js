@@ -166,6 +166,22 @@ function buildContextoIA() {
 //  IA – perguntarIA, nome, histórico
 // ====================================================================
 let iaHistorico = [];
+function bpResetIaHistorico() {
+  iaHistorico = [];
+  try {
+    if (typeof window !== 'undefined') window.iaHistorico = iaHistorico;
+  } catch (_) {}
+  try {
+    var chat = document.getElementById('ia-chat');
+    if (chat) chat.innerHTML = '';
+    if (typeof atualizarEstadoVazioIA === 'function') atualizarEstadoVazioIA();
+  } catch (_) {}
+}
+if (typeof window !== 'undefined') {
+  window.bpResetIaHistorico = bpResetIaHistorico;
+  window.iaHistorico = iaHistorico;
+}
+
 
 function _bpIaDataOffset(dias) {
   /* Data local YYYY-MM-DD relativa a hoje() — evita UTC de toISOString */
@@ -575,7 +591,15 @@ function setUsoIAHoje(n) {
   // ET4.6: propagar contador para Supabase (salao_config + tabela ia_uso_diario se existir)
   try {
     if (typeof bpPushIAUsoToSupabase === 'function') {
-      Promise.resolve(bpPushIAUsoToSupabase(Math.max(0, n | 0))).catch(function () {});
+      Promise.resolve(bpPushIAUsoToSupabase(Math.max(0, n | 0))).then(function (ok) {
+        if (ok === false && navigator.onLine && typeof toast === 'function') {
+          if (!window.__bpIaPushFailToast) {
+            window.__bpIaPushFailToast = true;
+            toast('Falha ao sincronizar uso da IA. Tente novamente mais tarde.', 'warning');
+            setTimeout(function () { window.__bpIaPushFailToast = false; }, 60000);
+          }
+        }
+      }).catch(function () {});
     }
   } catch (_) {}
 }
@@ -646,9 +670,10 @@ async function bpPushIAUsoToSupabase(n) {
       'Content-Type': 'application/json',
       'Prefer': 'resolution=merge-duplicates,return=minimal'
     };
+    var okAny = false;
     // Tabela ia_uso_diario (PK salao_id+dia)
     try {
-      await fetch(SUPABASE_URL + '/rest/v1/ia_uso_diario', {
+      var r1 = await fetch(SUPABASE_URL + '/rest/v1/ia_uso_diario', {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
@@ -658,10 +683,19 @@ async function bpPushIAUsoToSupabase(n) {
           updated_at: new Date().toISOString()
         })
       });
-    } catch (_) {}
+      if (!r1.ok) {
+        var t1 = '';
+        try { t1 = await r1.text(); } catch (_) {}
+        console.error('[IA Push] ia_uso_diario', r1.status, t1);
+      } else {
+        okAny = true;
+      }
+    } catch (e1) {
+      console.error('[IA Push] ia_uso_diario exception', e1);
+    }
     // Espelho em salao_config
     try {
-      await fetch(
+      var r2 = await fetch(
         SUPABASE_URL + '/rest/v1/salao_config?salao_id=eq.' + encodeURIComponent(state.config.salaoId),
         {
           method: 'PATCH',
@@ -673,9 +707,19 @@ async function bpPushIAUsoToSupabase(n) {
           })
         }
       );
-    } catch (_) {}
-    return true;
+      if (!r2.ok) {
+        var t2 = '';
+        try { t2 = await r2.text(); } catch (_) {}
+        console.error('[IA Push] salao_config', r2.status, t2);
+      } else {
+        okAny = true;
+      }
+    } catch (e2) {
+      console.error('[IA Push] salao_config exception', e2);
+    }
+    return okAny;
   } catch (e) {
+    console.error('[IA Push] falha', e);
     return false;
   }
 }
@@ -924,38 +968,30 @@ async function perguntarIA(pergunta) {
   window.__bpIaLastMeta = { fonte: null };
   try { _bpIaSetHeaderStatus('busy', 'A contactar o agente…'); _bpIaSetComposerStatus('A processar…'); } catch (_) {}
   try {
-    // ET4-P0-02: preferir JWT de sessão (least privilege); ANON só como fallback controlado
+    // Fail-closed: só JWT de utilizador (nunca ANON). Plano/salao_id resolvidos na Edge via JWT.
     var iaHeaders = { 'Content-Type': 'application/json' };
-    var iaAuthMode = 'anon-fallback';
+    var iaAuthMode = 'none';
     try {
-      if (typeof getAuthHeaders === 'function') {
-        var authH = await getAuthHeaders();
-        if (authH && authH.Authorization) {
-          iaHeaders['Authorization'] = authH.Authorization;
-          if (authH.apikey) iaHeaders['apikey'] = authH.apikey;
-          else if (typeof SUPABASE_ANON_KEY !== 'undefined') iaHeaders['apikey'] = SUPABASE_ANON_KEY;
-          iaAuthMode = 'user-jwt';
-        }
+      if (typeof getAuthHeaders !== 'function') {
+        if (typeof toast === 'function') toast('Sessão inválida. Faça login novamente.', 'error');
+        return null;
       }
+      var authH = await getAuthHeaders();
+      if (!authH || !authH.Authorization) {
+        if (typeof toast === 'function') toast('Sessão inválida. Faça login novamente.', 'error');
+        return null;
+      }
+      iaHeaders['Authorization'] = authH.Authorization;
+      if (authH.apikey) iaHeaders['apikey'] = authH.apikey;
+      else if (typeof SUPABASE_ANON_KEY !== 'undefined') iaHeaders['apikey'] = SUPABASE_ANON_KEY;
+      iaAuthMode = 'user-jwt';
     } catch (eAuth) {
       if (eAuth && eAuth.message === 'SESSION_EXPIRED') {
-        console.warn('[IA] sessão expirada — fallback local sem consumir cota remota');
-        var fbSess = typeof responderIALocal === 'function' ? responderIALocal(q) : null;
-        if (fbSess) {
-          iaHistorico.push({ pergunta: q, resposta: fbSess, fonte: 'local' });
-          if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
-          window.__bpIaLastMeta = { fonte: 'local', auth: 'session-expired' };
-          return fbSess;
-        }
-        return 'Sessão expirada. Inicie sessão novamente para usar o agente IA online.';
+        if (typeof toast === 'function') toast('Sessão expirada. Faça login novamente.', 'error');
+        return null;
       }
-    }
-    if (iaAuthMode !== 'user-jwt') {
-      if (typeof SUPABASE_ANON_KEY !== 'undefined') {
-        iaHeaders['Authorization'] = 'Bearer ' + SUPABASE_ANON_KEY;
-        iaHeaders['apikey'] = SUPABASE_ANON_KEY;
-      }
-      console.warn('[IA] sem JWT de utilizador — a usar ANON (Edge deve validar salaoId/plano)');
+      if (typeof toast === 'function') toast('Não foi possível autenticar o agente IA.', 'error');
+      return null;
     }
     window.__bpIaLastMeta = { fonte: null, auth: iaAuthMode };
 
@@ -965,8 +1001,6 @@ async function perguntarIA(pergunta) {
       body: JSON.stringify({
         pergunta: q,
         contexto: contexto,
-        plano: plano,
-        salaoId: (state.config && state.config.salaoId) || 'local',
         historico: historicoEnvio,
         instrucoes: 'Responde em português de Angola, de forma clara e completa. Não cortes frases a meio. Se precisares de ser breve, termina sempre a última frase.'
       })
@@ -1583,8 +1617,11 @@ function carregarHistoricoIA() {
   if (typeof dbGetAll === 'function') {
     Promise.resolve(dbGetAll('config')).then(function (rows) {
       try {
+        var sidH = (state && state.config && state.config.salaoId) ? state.config.salaoId : 'local';
+        var histId = 'ia_chat_hist_' + sidH;
         var row = (rows || []).find(function (c) {
-          return c && (c.id === 'ia_chat_hist' || c.key === 'ia_chat_hist');
+          return c && (c.id === histId || c.key === histId ||
+            ((c.id === 'ia_chat_hist' || c.key === 'ia_chat_hist') && (!c.salao_id || c.salao_id === sidH)));
         });
         var fromDb = row && row.value != null ? row.value : null;
         if (typeof fromDb === 'string') {
@@ -1611,13 +1648,14 @@ function guardarHistoricoIA() {
   } catch (e) {}
   try {
     if (typeof dbPut === 'function') {
+      var sid = (state && state.config && state.config.salaoId) ? state.config.salaoId : 'local';
       var payload = {
-        id: 'ia_chat_hist',
-        key: 'ia_chat_hist',
+        id: 'ia_chat_hist_' + sid,
+        key: 'ia_chat_hist_' + sid,
         value: iaHistorico,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        salao_id: sid
       };
-      if (state && state.config && state.config.salaoId) payload.salao_id = state.config.salaoId;
       Promise.resolve(dbPut('config', payload)).catch(function () {});
     }
   } catch (e5) {}

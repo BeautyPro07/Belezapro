@@ -30,6 +30,14 @@ function bpClearSessionLocal() {
     localStorage.removeItem('bp_session_active');
     localStorage.removeItem('bp_salao_id_cache');
     localStorage.removeItem('bp_user_role');
+    localStorage.removeItem('bp_plano_cache'); // legacy
+    // Limpar caches de plano namespaced
+    var toRm = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && (k.indexOf('bp_plano_cache_') === 0 || k.indexOf('bp_ia_historico_') === 0 || k.indexOf('bp_ia_chat_') === 0 || k.indexOf('ia_perguntas_') === 0)) toRm.push(k);
+    }
+    toRm.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
   } catch (_) {}
 }
 function bpHasLocalSession() {
@@ -384,7 +392,12 @@ async function sincronizarConfigDoServidor() {
     if (rows.length > 0) {
       state.config.plano       = rows[0].plano || 'trial';
       state.config.trialInicio = rows[0].trial_inicio || state.config.trialInicio;
-      try { localStorage.setItem('bp_plano_cache', state.config.plano); } catch (_) {}
+      try {
+        if (state.config.salaoId) {
+          localStorage.setItem('bp_plano_cache_' + state.config.salaoId, state.config.plano);
+        }
+        localStorage.removeItem('bp_plano_cache'); // legacy global
+      } catch (_) {}
       await saveConfig();
       if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
       // ET4.5: reconciliar contador de recibos com servidor + movimentos
