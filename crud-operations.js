@@ -605,6 +605,20 @@ async function updateAgendamento(id, data) {
     }
   }
 
+  // Etapa 2: data/hora alterada → reset alerta "visto"
+  try {
+    if (data && (Object.prototype.hasOwnProperty.call(data, 'data') || Object.prototype.hasOwnProperty.call(data, 'hora'))) {
+      var dataMudou = data.data != null && String(data.data) !== String(actual.data || '');
+      var horaMudou = data.hora != null && String(data.hora).slice(0, 5) !== String(actual.hora || '').slice(0, 5);
+      if (dataMudou || horaMudou) {
+        if (typeof bpClearAlertVisto === 'function') bpClearAlertVisto(id);
+        else {
+          try { localStorage.removeItem('bp_alert_visto_' + id); } catch (_) {}
+        }
+      }
+    }
+  } catch (_) {}
+
   merged.updated_at = new Date().toISOString();
   if (window.BeautyStore && window.BeautyStore.updateInList) {
     window.BeautyStore.updateInList('agendamentos', id, merged);

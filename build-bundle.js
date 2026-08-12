@@ -44,6 +44,7 @@ const ORDER = [
   'eventos-caixa-vendas.js',
   'eventos-globais.js',
   'ia-module.js',
+  'expirar-agendamento.js',
   'main.js',
   // --- Features domínio (deps: state, crud, utils) ---
   'finance-comissoes.js',       // helpers comissão/meta

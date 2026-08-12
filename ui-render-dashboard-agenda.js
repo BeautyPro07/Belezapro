@@ -855,6 +855,10 @@ if (label) {
       if (id) abrirFinalizarAtendimento(id);
     });
   });
+
+  try {
+    if (typeof bpCheckExpiringAppointments === 'function') bpCheckExpiringAppointments();
+  } catch (_) {}
 }
 
 function renderAgendaItem(a, opts) {

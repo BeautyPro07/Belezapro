@@ -145,6 +145,12 @@ document.addEventListener('DOMContentLoaded', async function init() {
 
   console.log('BeautyPro inicializado com sucesso!');
 
+  // Etapa 2 — alerta 5 min antes de expirar agendamento
+  try {
+    if (typeof bpStartExpiringWatcher === 'function') bpStartExpiringWatcher();
+  } catch (_) {}
+
+
   // ================================================================
   // CORREÇÃO (sync lento sem reload): existiam DOIS throttles de 90s
   // (este, e outro em security-hardening.js/bpSilentPull) que limitavam

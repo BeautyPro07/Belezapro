@@ -548,3 +548,83 @@ textarea.input-field:focus-visible,
 .plano-badge[data-bp-plano-ready="1"] {
   visibility: visible !important;
 }
+
+
+/* ===== Etapa 2 — Modal expiração de agendamento ===== */
+.bp-modal-expirar {
+  border-top: 3px solid var(--red, #B33A4A);
+  box-shadow: var(--shadow-floating, 0 8px 28px rgba(0,0,0,.12));
+  background: var(--card-white, #fff);
+  max-width: 360px;
+  width: calc(100% - 32px);
+  padding: 20px 20px 16px;
+}
+.bp-expirar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bp-expirar-title {
+  color: var(--red, #B33A4A);
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+.bp-expirar-msg {
+  margin-top: 10px;
+  margin-bottom: 18px;
+  color: var(--text-secondary, #5C564E);
+  font-size: var(--text-sm, 0.85rem);
+  line-height: 1.45;
+}
+.bp-expirar-msg strong {
+  color: var(--text-primary, #17140F);
+  font-weight: 600;
+}
+.bp-expirar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bp-expirar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--border-soft, #DCD5C9);
+  background: var(--card-white, #fff);
+  color: var(--text-primary, #17140F);
+  font-size: var(--text-sm, 0.85rem);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.bp-expirar-btn:disabled,
+.bp-expirar-btn.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.bp-expirar-call {
+  background: var(--ink, #14110F);
+  color: #fff;
+  border-color: var(--ink, #14110F);
+}
+.bp-expirar-wa {
+  background: #128C7E;
+  color: #fff;
+  border-color: #128C7E;
+}
+.bp-expirar-ignore {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted, #6B6560);
+  font-weight: 500;
+}
+.bp-expirar-ignore:hover {
+  color: var(--text-secondary, #5C564E);
+}
