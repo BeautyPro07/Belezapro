@@ -470,145 +470,6 @@ textarea.input-field:focus-visible,
 }
 
 
-/* ===== Confirmação de sincronização — verde profissional (design system)
-   Tokens: --green #2C7A4D, --green-50 #E6F4EC (editorial, tipo Notion success #0a8754)
-   Padrão: checkmark.circle.fill (HIG) — círculo preenchido + traço branco
-   Não usar verde neon/chartreuse genérico. */
-.bp-checkmark-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(20, 17, 15, 0.22);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.bp-checkmark-overlay.is-open {
-  opacity: 1;
-  pointer-events: none;
-}
-.bp-checkmark-overlay[hidden] { display: none !important; }
-
-.bp-checkmark-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 28px 32px 24px;
-  background: var(--card-white, #fff);
-  border-radius: 16px;
-  border: 1px solid var(--border-soft, #DCD5C9);
-  box-shadow: var(--shadow-floating, 0 12px 40px rgba(20, 17, 15, 0.14));
-  transform: translateY(8px) scale(0.94);
-  opacity: 0;
-  transition:
-    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
-    transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.bp-checkmark-overlay.is-open .bp-checkmark-card {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.bp-checkmark-icon {
-  position: relative;
-  width: 64px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.bp-checkmark-icon::before {
-  content: '';
-  position: absolute;
-  inset: -10px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(44, 122, 77, 0.18) 0%,
-    rgba(44, 122, 77, 0.05) 50%,
-    transparent 72%
-  );
-  opacity: 0;
-  transform: scale(0.8);
-  transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.bp-checkmark-overlay.is-open .bp-checkmark-icon::before {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.bp-checkmark-svg {
-  width: 56px;
-  height: 56px;
-  display: block;
-}
-
-/* Círculo preenchido — --green do sistema */
-.bp-checkmark-circle {
-  fill: var(--green, #2C7A4D);
-  stroke: none;
-  transform-origin: 24px 24px;
-  transform: scale(0);
-  opacity: 0;
-}
-.bp-checkmark-poly {
-  fill: none;
-  stroke: #FFFFFF;
-  stroke-width: 2.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 40;
-  stroke-dashoffset: 40;
-}
-
-.bp-checkmark-overlay.is-animating .bp-checkmark-circle {
-  animation: bp-sync-fill 0.42s cubic-bezier(0.34, 1.3, 0.64, 1) forwards;
-}
-.bp-checkmark-overlay.is-animating .bp-checkmark-poly {
-  animation: bp-sync-tick 0.36s cubic-bezier(0.33, 1, 0.68, 1) 0.28s forwards;
-}
-
-@keyframes bp-sync-fill {
-  0% { transform: scale(0); opacity: 0; }
-  60% { opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-@keyframes bp-sync-tick {
-  to { stroke-dashoffset: 0; }
-}
-
-.bp-checkmark-text {
-  margin: 0;
-  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--green, #2C7A4D);
-  text-align: center;
-}
-
-/* Offline — neutro, sem verde de sucesso */
-.bp-checkmark-overlay.is-offline .bp-checkmark-card {
-  border-color: var(--border-soft, #DCD5C9);
-}
-.bp-checkmark-overlay.is-offline .bp-checkmark-icon::before {
-  background: radial-gradient(
-    circle,
-    rgba(92, 86, 78, 0.12) 0%,
-    transparent 70%
-  );
-}
-.bp-checkmark-overlay.is-offline .bp-checkmark-text {
-  color: var(--text-muted, #6B6560);
-  font-weight: 500;
-}
-
 .plano-badge[data-bp-plano-ready="0"] {
   visibility: hidden !important;
   min-width: 3.5rem;
@@ -617,82 +478,160 @@ textarea.input-field:focus-visible,
   visibility: visible !important;
 }
 
-
-/* ===== Etapa 2 — Modal expiração de agendamento ===== */
+/* ===== Modal expiração agendamento — alinhado à plataforma ===== */
 .bp-modal-expirar {
-  border-top: 3px solid var(--red, #B33A4A);
-  box-shadow: var(--shadow-floating, 0 8px 28px rgba(0,0,0,.12));
   background: var(--card-white, #fff);
+  border-top: none;
+  box-shadow: var(--shadow-floating, 0 12px 40px rgba(20, 17, 15, 0.14));
   max-width: 360px;
   width: calc(100% - 32px);
-  padding: 20px 20px 16px;
+  padding: 22px 20px 16px;
+  border-radius: var(--radius-md, 12px);
 }
 .bp-expirar-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-bottom: 4px;
 }
 .bp-expirar-title {
-  color: var(--red, #B33A4A);
+  color: var(--ink, #14110F);
   font-weight: 700;
-  font-size: 1.05rem;
-  line-height: 1.3;
+  font-size: 1.12rem;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+.bp-expirar-subtitle {
+  color: var(--text-muted, #6B6560);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
 }
 .bp-expirar-msg {
-  margin-top: 10px;
-  margin-bottom: 18px;
+  margin: 10px 0 18px;
   color: var(--text-secondary, #5C564E);
   font-size: var(--text-sm, 0.85rem);
   line-height: 1.45;
 }
 .bp-expirar-msg strong {
-  color: var(--text-primary, #17140F);
+  color: var(--ink, #14110F);
   font-weight: 600;
 }
 .bp-expirar-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.bp-expirar-btn {
+.bp-expirar-actions-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.bp-expirar-actions-row .bp-btn-call,
+.bp-expirar-actions-row .bp-btn-whatsapp {
+  flex: 1 1 0;
+}
+.bp-expirar-ignore {
+  width: 100%;
+  background: #fff !important;
+  border: 1px solid var(--border-soft, #DCD5C9) !important;
+  color: var(--text-muted, #6B6560) !important;
+  font-weight: 500 !important;
+  min-height: 40px;
+}
+.bp-expirar-ignore:active {
+  background: var(--bg-soft, #F3F2EF) !important;
+}
+#modal-expirar .bp-btn-call.is-disabled,
+#modal-expirar .bp-btn-whatsapp.is-disabled,
+#modal-expirar .bp-btn-call:disabled,
+#modal-expirar .bp-btn-whatsapp:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+
+/* Splash BeautyPro banido — override absoluto */
+#splash-screen { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+#bp-checkmark-overlay { display: none !important; }
+
+/* Boot overlay: nunca preso após sessão estabelecida */
+html:not(.bp-booting) #bp-boot-overlay {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+.bp-expirar-cliente {
+  color: var(--gold-dark, #B8962E);
+  font-weight: 600;
+}
+.bp-expirar-tempo {
+  color: var(--red, #C45C4A);
+  font-weight: 600;
+}
+.bp-expirar-actions-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.bp-expirar-actions-row .bp-btn-whatsapp,
+.bp-expirar-actions-row .bp-btn-call {
+  flex: 1 1 0;
+}
+
+html.bp-has-session #login-view,
+html.bp-has-session #login-view.view,
+html.bp-has-session #login-view.view.active {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Ondas no ícone Ligar (modal expirar) */
+.bp-call-icon-wrap {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 40px;
-  padding: 8px 14px;
-  border-radius: var(--radius-md, 10px);
-  border: 1px solid var(--border-soft, #DCD5C9);
-  background: var(--card-white, #fff);
-  color: var(--text-primary, #17140F);
-  font-size: var(--text-sm, 0.85rem);
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
-.bp-expirar-btn:disabled,
-.bp-expirar-btn.is-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.bp-call-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--gold-dark, #B8962E);
+  opacity: 0;
   pointer-events: none;
 }
-.bp-expirar-call {
-  background: var(--ink, #14110F);
-  color: #fff;
-  border-color: var(--ink, #14110F);
+#expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple {
+  animation: bp-call-wave 2s ease-out infinite;
 }
-.bp-expirar-wa {
-  background: #128C7E;
-  color: #fff;
-  border-color: #128C7E;
+#expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple:nth-child(2) {
+  animation-delay: 0.65s;
 }
-.bp-expirar-ignore {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-muted, #6B6560);
-  font-weight: 500;
+#expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple:nth-child(3) {
+  animation-delay: 1.3s;
 }
-.bp-expirar-ignore:hover {
-  color: var(--text-secondary, #5C564E);
+@keyframes bp-call-wave {
+  0% { transform: scale(0.6); opacity: 0.55; }
+  70% { transform: scale(2.1); opacity: 0; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+.bp-expirar-title {
+  color: var(--ink, #14110F);
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+/* anti-flash final — vence .view.active de layout-nav-tabs.css */
+html.bp-has-session #login-view,
+html.bp-has-session #login-view.view.active {
+  display: none !important;
+  visibility: hidden !important;
 }

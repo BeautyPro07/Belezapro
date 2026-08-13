@@ -1,13 +1,16 @@
 // ====================================================================
-//  expirar-agendamento.js — Etapa 2: alerta 5 min antes de expirar
+//  expirar-agendamento.js — alerta com minutos exactos (≤ 5 min)
 // ====================================================================
 
 var BP_ALERT_VISTO_PREFIX = 'bp_alert_visto_';
 var BP_EXPIRING_WINDOW_MS = 5 * 60 * 1000;
-var BP_EXPIRING_INTERVAL_MS = 30000;
+var BP_EXPIRING_INTERVAL_MS = 15000; // 15s — leitura contínua, não só no reload
 var _bpExpiringTimer = null;
 var _bpExpiringBusy = false;
 var _bpExpiringCurrentId = null;
+var _bpExpiringLastShowAt = 0;
+var _bpExpiringTick = null;
+var BP_EXPIRING_MIN_GAP_MS = 1500;
 
 function bpAlertVistoKey(id) {
   return BP_ALERT_VISTO_PREFIX + String(id || '');
@@ -25,16 +28,12 @@ function bpIsAlertVisto(id) {
 
 function bpMarkAlertVisto(id) {
   if (!id) return;
-  try {
-    localStorage.setItem(bpAlertVistoKey(id), 'true');
-  } catch (_) {}
+  try { localStorage.setItem(bpAlertVistoKey(id), 'true'); } catch (_) {}
 }
 
 function bpClearAlertVisto(id) {
   if (!id) return;
-  try {
-    localStorage.removeItem(bpAlertVistoKey(id));
-  } catch (_) {}
+  try { localStorage.removeItem(bpAlertVistoKey(id)); } catch (_) {}
 }
 
 function bpGetClienteTelefoneFromAg(ag) {
@@ -65,15 +64,37 @@ function bpNormTelWa(digits) {
 }
 
 function bpParseAgDtLocal(data, hora) {
-  if (typeof _parseAgDateTime === 'function') return _parseAgDateTime(data, hora);
-  var hh = String(hora || '00:00').slice(0, 5);
-  var dt = new Date(String(data) + 'T' + hh + ':00');
+  if (typeof _parseAgDateTime === 'function') {
+    var dt0 = _parseAgDateTime(data, hora);
+    if (dt0) return dt0;
+  }
+  var d = String(data || '').trim();
+  var h = String(hora || '00:00').trim().slice(0, 5);
+  if (!d) return null;
+  // Garantir HH:MM com 2 dígitos
+  var parts = h.split(':');
+  var hh = String(parts[0] || '0').padStart(2, '0');
+  var mm = String(parts[1] || '0').padStart(2, '0');
+  var iso = d + 'T' + hh + ':' + mm + ':00';
+  var dt = new Date(iso);
+  if (isNaN(dt.getTime())) {
+    // fallback local components
+    var dp = d.split('-');
+    if (dp.length === 3) {
+      dt = new Date(
+        parseInt(dp[0], 10),
+        parseInt(dp[1], 10) - 1,
+        parseInt(dp[2], 10),
+        parseInt(hh, 10),
+        parseInt(mm, 10),
+        0
+      );
+    }
+  }
   return isNaN(dt.getTime()) ? null : dt;
 }
 
-/**
- * ms restantes até data+hora. null = inválido/não aplicável; <=0 = já passou.
- */
+/** ms restantes. null = N/A; <=0 = já passou. */
 function bpIsAppointmentExpiring(ag, nowMs) {
   if (!ag) return null;
   var st = String(ag.status || ag.estado || 'agendado').toLowerCase();
@@ -82,6 +103,43 @@ function bpIsAppointmentExpiring(ag, nowMs) {
   if (!dt) return null;
   var now = nowMs != null ? nowMs : Date.now();
   return dt.getTime() - now;
+}
+
+function bpFormatRemainText(remainMs) {
+  if (remainMs == null || remainMs <= 0) return '0 segundos';
+  var totalSec = Math.max(1, Math.ceil(remainMs / 1000));
+  var mins = Math.floor(totalSec / 60);
+  var secs = totalSec % 60;
+  var timeText = '';
+  if (mins > 0) {
+    timeText = mins + ' minuto' + (mins > 1 ? 's' : '');
+    if (secs > 0) {
+      timeText += ' e ' + secs + ' segundo' + (secs > 1 ? 's' : '');
+    }
+  } else {
+    timeText = secs + ' segundo' + (secs > 1 ? 's' : '');
+  }
+  return timeText;
+}
+
+function bpEscHtmlLite(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Actualiza a frase completa do modal (countdown fluido). */
+function bpUpdateExpiryMessage(remainMs, clienteNome) {
+  var msgEl = document.getElementById('expirar-message');
+  if (!msgEl) return;
+  var nome = bpEscHtmlLite(clienteNome || 'Cliente');
+  var timeText = bpEscHtmlLite(bpFormatRemainText(remainMs));
+  msgEl.innerHTML =
+    'O agendamento com <strong class="bp-expirar-cliente" id="expirar-cliente-nome">' + nome + '</strong> ' +
+    'está prestes a ser marcado como não realizado em <strong class="bp-expirar-tempo" id="expirar-tempo">' + timeText + '</strong>. ' +
+    'Entre em contacto agora para tentar recuperar o atendimento ou combinar um novo horário com a cliente.';
 }
 
 function bpGetClosestExpiring() {
@@ -102,7 +160,7 @@ function bpGetClosestExpiring() {
       best = ag;
     }
   }
-  return best;
+  return best ? { ag: best, remain: bestRemain } : null;
 }
 
 function bpIsExpirarModalOpen() {
@@ -125,48 +183,83 @@ function bpAnyBlockingModalOpen() {
 function bpAppShellVisible() {
   try {
     var app = document.getElementById('app-view');
-    if (!app) return true;
-    var d = app.style.display;
-    if (d === 'none') return false;
+    if (!app) return false;
+    if (app.style.display === 'none') return false;
   } catch (_) {}
   return true;
 }
 
+function bpStopRemainTick() {
+  if (_bpExpiringTick) {
+    clearInterval(_bpExpiringTick);
+    _bpExpiringTick = null;
+  }
+}
+
+function bpStartRemainTick() {
+  bpStopRemainTick();
+  _bpExpiringTick = setInterval(function () {
+    if (!bpIsExpirarModalOpen() || !_bpExpiringCurrentId) {
+      bpStopRemainTick();
+      return;
+    }
+    if (typeof state === 'undefined' || !state.agendamentos) return;
+    var cur = null;
+    for (var i = 0; i < state.agendamentos.length; i++) {
+      var a = state.agendamentos[i];
+      if (a && String(a.id) === String(_bpExpiringCurrentId)) { cur = a; break; }
+    }
+    var rem = cur ? bpIsAppointmentExpiring(cur) : null;
+    if (rem == null || rem <= 0) {
+      bpStopRemainTick();
+      bpCloseExpirarModal();
+      return;
+    }
+    var nome = cur.cliente || 'Cliente';
+    bpUpdateExpiryMessage(rem, nome);
+  }, 1000);
+}
+
 function bpCloseExpirarModal() {
+  bpStopRemainTick();
   _bpExpiringCurrentId = null;
-  if (typeof closeModal === 'function') {
-    closeModal('modal-expirar');
-  } else {
+  if (typeof closeModal === 'function') closeModal('modal-expirar');
+  else {
     var m = document.getElementById('modal-expirar');
     if (m) {
       m.classList.remove('open', 'is-open');
       m.style.display = '';
       m.setAttribute('aria-hidden', 'true');
+      try { m.setAttribute('hidden', ''); } catch (_) {}
     }
   }
 }
 
-function bpShowExpirarModal(ag) {
+function bpShowExpirarModal(ag, remainMs) {
   if (!ag || !ag.id) return;
   if (!bpAppShellVisible()) return;
   if (bpAnyBlockingModalOpen()) return;
-
-  var remain = bpIsAppointmentExpiring(ag);
-  if (remain == null || remain <= 0 || remain > BP_EXPIRING_WINDOW_MS) return;
   if (bpIsAlertVisto(ag.id)) return;
+  var remain = remainMs != null ? remainMs : bpIsAppointmentExpiring(ag);
+  if (remain == null || remain <= 0 || remain > BP_EXPIRING_WINDOW_MS) return;
 
   var modal = document.getElementById('modal-expirar');
   if (!modal) return;
 
+  var nowShow = Date.now();
+  if (bpIsExpirarModalOpen() && _bpExpiringCurrentId === ag.id) {
+    bpUpdateExpiryMessage(remain, ag.cliente || 'Cliente');
+    return;
+  }
+  if (nowShow - _bpExpiringLastShowAt < BP_EXPIRING_MIN_GAP_MS && bpIsExpirarModalOpen()) return;
+  _bpExpiringLastShowAt = nowShow;
   _bpExpiringCurrentId = ag.id;
-  var nome = ag.cliente || 'Cliente';
-  var nomeEl = document.getElementById('expirar-cliente-nome');
-  if (nomeEl) nomeEl.textContent = nome;
+
+  bpUpdateExpiryMessage(remain, ag.cliente || 'Cliente');
 
   var tel = bpGetClienteTelefoneFromAg(ag);
   var btnLigar = document.getElementById('expirar-ligar');
   var btnWa = document.getElementById('expirar-whatsapp');
-
   function setTelBtn(btn, ok) {
     if (!btn) return;
     if (ok) {
@@ -175,24 +268,27 @@ function bpShowExpirarModal(ag) {
       btn.style.opacity = '';
       btn.removeAttribute('aria-disabled');
       btn.dataset.tel = tel;
+      if (btn.id === 'expirar-ligar') btn.classList.add('bp-call-anim');
     } else {
       btn.disabled = true;
       btn.classList.add('is-disabled');
       btn.style.opacity = '0.4';
       btn.setAttribute('aria-disabled', 'true');
       delete btn.dataset.tel;
+      if (btn.id === 'expirar-ligar') btn.classList.remove('bp-call-anim');
     }
   }
   setTelBtn(btnLigar, !!tel);
   setTelBtn(btnWa, !!tel);
 
-  if (typeof openModal === 'function') {
-    openModal('modal-expirar');
-  } else {
+  try { modal.removeAttribute('hidden'); } catch (_) {}
+  if (typeof openModal === 'function') openModal('modal-expirar');
+  else {
     modal.style.display = 'flex';
     modal.classList.add('open', 'is-open');
-    modal.setAttribute('aria-hidden', 'false');
   }
+  try { modal.setAttribute('aria-hidden', 'false'); } catch (_) {}
+  bpStartRemainTick();
 }
 
 function bpCheckExpiringAppointments() {
@@ -200,39 +296,28 @@ function bpCheckExpiringAppointments() {
   _bpExpiringBusy = true;
   try {
     if (!bpAppShellVisible()) return;
-    if (bpIsExpirarModalOpen()) {
-      // Modal aberto: se o agendamento actual já não é válido, fechar
-      if (_bpExpiringCurrentId) {
-        var cur = null;
-        if (typeof state !== 'undefined' && state.agendamentos) {
-          cur = state.agendamentos.find(function (a) {
-            return a && String(a.id) === String(_bpExpiringCurrentId);
-          });
-        }
-        var rem = cur ? bpIsAppointmentExpiring(cur) : null;
-        if (!cur || rem == null || rem <= 0 || bpIsAlertVisto(_bpExpiringCurrentId)) {
-          bpCloseExpirarModal();
-        } else {
-          return;
-        }
-      } else {
+    if (typeof state === 'undefined' || !state.agendamentos) return;
+
+    if (bpIsExpirarModalOpen() && _bpExpiringCurrentId) {
+      var cur = state.agendamentos.find(function (a) {
+        return a && String(a.id) === String(_bpExpiringCurrentId);
+      });
+      var rem = cur ? bpIsAppointmentExpiring(cur) : null;
+      if (!cur || rem == null || rem <= 0 || bpIsAlertVisto(_bpExpiringCurrentId)) {
+        bpCloseExpirarModal();
+      } else if (rem <= BP_EXPIRING_WINDOW_MS) {
+        bpUpdateExpiryMessage(rem, cur.cliente || 'Cliente');
         return;
       }
     }
+
     if (bpAnyBlockingModalOpen()) return;
 
-    requestAnimationFrame(function () {
-      try {
-        var ag = bpGetClosestExpiring();
-        if (ag) bpShowExpirarModal(ag);
-      } catch (e) {
-        console.warn('[expirar] check', e);
-      } finally {
-        _bpExpiringBusy = false;
-      }
-    });
-  } catch (e2) {
-    console.warn('[expirar] check outer', e2);
+    var hit = bpGetClosestExpiring();
+    if (hit) bpShowExpirarModal(hit.ag, hit.remain);
+  } catch (e) {
+    console.warn('[expirar] check', e);
+  } finally {
     _bpExpiringBusy = false;
   }
 }
@@ -244,20 +329,17 @@ function bpBindExpirarModalOnce() {
 
   var ligar = document.getElementById('expirar-ligar');
   var wa = document.getElementById('expirar-whatsapp');
-  var ignorar = document.getElementById('expirar-ignorar');
+  var ignorar = document.getElementById('expirar-visto') || document.getElementById('expirar-ignorar');
 
   if (ligar && !ligar.dataset.bpBound) {
     ligar.dataset.bpBound = '1';
     ligar.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if (ligar.disabled || ligar.classList.contains('is-disabled')) return;
+      if (ligar.disabled) return;
       var tel = ligar.dataset.tel || '';
       if (!tel) return;
-      // Spec: abrir telefone; modal permanece para permitir Ignorar ou novo check após fecho
-      try {
-        window.location.href = 'tel:' + tel;
-      } catch (_) {}
+      window.location.href = 'tel:' + tel;
     });
   }
   if (wa && !wa.dataset.bpBound) {
@@ -265,12 +347,10 @@ function bpBindExpirarModalOnce() {
     wa.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if (wa.disabled || wa.classList.contains('is-disabled')) return;
+      if (wa.disabled) return;
       var tel = bpNormTelWa(wa.dataset.tel || '');
       if (!tel) return;
-      try {
-        window.open('https://wa.me/' + tel, '_blank', 'noopener,noreferrer');
-      } catch (_) {}
+      window.open('https://wa.me/' + tel, '_blank', 'noopener,noreferrer');
     });
   }
   if (ignorar && !ignorar.dataset.bpBound) {
@@ -280,11 +360,20 @@ function bpBindExpirarModalOnce() {
       e.stopPropagation();
       if (_bpExpiringCurrentId) bpMarkAlertVisto(_bpExpiringCurrentId);
       bpCloseExpirarModal();
-      setTimeout(function () {
-        bpCheckExpiringAppointments();
-      }, 400);
+      setTimeout(bpCheckExpiringAppointments, 400);
     });
   }
+
+  try {
+    if (typeof MutationObserver !== 'undefined') {
+      var obs = new MutationObserver(function () {
+        if (!bpIsExpirarModalOpen() && _bpExpiringCurrentId) {
+          _bpExpiringCurrentId = null;
+        }
+      });
+      obs.observe(modal, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+    }
+  } catch (_) {}
 }
 
 function bpStartExpiringWatcher() {
@@ -293,12 +382,19 @@ function bpStartExpiringWatcher() {
     clearInterval(_bpExpiringTimer);
     _bpExpiringTimer = null;
   }
-  _bpExpiringTimer = setInterval(function () {
-    bpCheckExpiringAppointments();
-  }, BP_EXPIRING_INTERVAL_MS);
-  setTimeout(function () {
-    bpCheckExpiringAppointments();
-  }, 2500);
+  _bpExpiringTimer = setInterval(bpCheckExpiringAppointments, BP_EXPIRING_INTERVAL_MS);
+  // Checks iniciais escalonados (dados podem chegar após loadState)
+  setTimeout(bpCheckExpiringAppointments, 800);
+  setTimeout(bpCheckExpiringAppointments, 3000);
+  setTimeout(bpCheckExpiringAppointments, 8000);
+  if (!window._bpExpiringVisBound) {
+    window._bpExpiringVisBound = true;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        setTimeout(bpCheckExpiringAppointments, 400);
+      }
+    });
+  }
 }
 
 if (typeof window !== 'undefined') {

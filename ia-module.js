@@ -2013,37 +2013,23 @@ if (nextBtn) {
 }
 if (skipBtn) skipBtn.addEventListener('click', closeOnboarding);
 
+/** Splash BeautyPro BANIDO — nunca mostrar. */
 function hideSplash() {
-  const splash = document.getElementById('splash-screen');
-  if (!splash) return;
-  splash.style.opacity = '0';
-  setTimeout(function () { splash.style.display = 'none'; }, 600);
-  try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
-}
-
-/** Etapa 1 — splash só na 1ª execução (bp_splash_seen). */
-function bpControlSplashOnBoot() {
   var splash = document.getElementById('splash-screen');
   if (!splash) return;
-  var seen = false;
-  try { seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
-  if (seen) {
-    splash.style.opacity = '0';
-    splash.style.display = 'none';
-    splash.setAttribute('aria-hidden', 'true');
-    return;
-  }
-  // Primeira vez: manter visível; marcar após breve exposição
-  splash.style.display = 'flex';
-  setTimeout(function () {
-    try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
-    hideSplash();
-  }, 1400);
+  splash.style.cssText = 'display:none!important;opacity:0;visibility:hidden;pointer-events:none;';
+  splash.setAttribute('hidden', '');
+  splash.setAttribute('aria-hidden', 'true');
+  try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
+}
+function bpControlSplashOnBoot() {
+  hideSplash();
 }
 if (typeof window !== 'undefined') {
   window.bpControlSplashOnBoot = bpControlSplashOnBoot;
   window.hideSplash = hideSplash;
 }
+
 
 
 // Testes automatizados

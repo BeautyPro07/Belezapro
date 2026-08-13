@@ -20,14 +20,22 @@
 //  esta lista.
 // ====================================================================
 document.addEventListener('DOMContentLoaded', async function init() {
-  /* Etapa 1 — splash só na 1ª execução */
+  /* Splash BeautyPro banido */
   try {
-    if (typeof bpControlSplashOnBoot === 'function') bpControlSplashOnBoot();
-    else {
-      var _sp = document.getElementById('splash-screen');
-      var _seen = false;
-      try { _seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
-      if (_sp && _seen) { _sp.style.display = 'none'; _sp.style.opacity = '0'; }
+    var _sp = document.getElementById('splash-screen');
+    if (_sp) {
+      _sp.style.cssText = 'display:none!important;opacity:0;visibility:hidden;pointer-events:none;';
+      _sp.setAttribute('hidden', '');
+      _sp.setAttribute('aria-hidden', 'true');
+    }
+    if (typeof hideSplash === 'function') hideSplash();
+  } catch (_) {}
+  /* Anti-flash login: reforço imediato se sessão local */
+  try {
+    if (localStorage.getItem('bp_session_active') === '1' && localStorage.getItem('bp_salao_id_cache')) {
+      document.documentElement.classList.add('bp-has-session');
+      var _lv = document.getElementById('login-view');
+      if (_lv) { _lv.style.display = 'none'; _lv.classList.remove('active'); }
     }
   } catch (_) {}
   /* Overlay o mais cedo possível (<1s): antes de checkSession/UI */
@@ -51,9 +59,18 @@ document.addEventListener('DOMContentLoaded', async function init() {
       }
     }
   } catch (_) {}
-  // Garantir estado inicial da UI
-  document.getElementById('login-view').style.display = 'flex';
-  document.getElementById('app-view').style.display = 'none';
+  // Estado inicial: classes no <html> (gate CSS). Sem forçar display:flex no login.
+  try {
+    if (!document.documentElement.classList.contains('bp-has-session')) {
+      var _lv0 = document.getElementById('login-view');
+      var _av0 = document.getElementById('app-view');
+      if (_lv0) _lv0.style.display = '';
+      if (_av0) _av0.style.display = 'none';
+    } else {
+      var _lv1 = document.getElementById('login-view');
+      if (_lv1) { _lv1.style.display = 'none'; _lv1.classList.remove('active'); }
+    }
+  } catch (_) {}
 
   // Ponto 1 — indicador Online/Offline atualizado já aqui, ANTES de
   // qualquer chamada de rede (openDB/checkSession). atualizarIndicadorSync()
@@ -113,7 +130,27 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // Verificar sessão Supabase — se existir, entra directamente
   // (se a base de dados local não abriu, ainda tentamos: sem sessão,
   // o utilizador fica no ecrã de login, que não depende do IndexedDB)
-  await checkSession();
+  try {
+    if (typeof bpProbePersistence === 'function') {
+      bpProbePersistence().then(function (p) {
+        if (p && !p.idb && !p.ls) {
+          console.warn('[persist] armazenamento local indisponível — modo degradado');
+        }
+      });
+    }
+  } catch (_) {}
+  try {
+    await checkSession();
+  } catch (errBoot) {
+    console.error('[Boot] Erro:', errBoot);
+  } finally {
+    /* Garantir fecho do overlay em todos os caminhos */
+    try {
+      if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay();
+    } catch (_) {}
+    try { document.documentElement.classList.remove('bp-booting'); } catch (_) {}
+  }
+  try { if (typeof bpTouchSessionLocal === 'function' && typeof bpHasLocalSession === 'function' && bpHasLocalSession()) bpTouchSessionLocal(); } catch (_) {}
   if (!dbDisponivel) {
     // Reforça a mensagem já dada acima, para o caso de o toast anterior
     // ter sido perdido durante a transição de ecrãs.
@@ -145,10 +182,12 @@ document.addEventListener('DOMContentLoaded', async function init() {
 
   console.log('BeautyPro inicializado com sucesso!');
 
-  // Etapa 2 — alerta 5 min antes de expirar agendamento
+  // Etapa 2 — alerta de expiração (intervalo + check imediato)
   try {
     if (typeof bpStartExpiringWatcher === 'function') bpStartExpiringWatcher();
   } catch (_) {}
+  // Boot quiet: evitar “vibração” de KPIs no 1.º updateUI pós-pull
+  try { window.__bpQuietUI = true; setTimeout(function () { window.__bpQuietUI = false; }, 2500); } catch (_) {}
 
 
   // ================================================================
@@ -303,6 +342,7 @@ if ('serviceWorker' in navigator) {
     var o = el();
     if (!o) return;
     active = true;
+    try { document.documentElement.classList.add('bp-booting'); } catch (_) {}
     o.hidden = false;
     try { o.removeAttribute('hidden'); } catch (_) {}
     o.classList.add('is-open');
@@ -321,24 +361,16 @@ if ('serviceWorker' in navigator) {
     active = false;
     clearTimeout(timer);
     timer = null;
+    /* CRÍTICO: remover bp-booting para o CSS deixar de forçar o overlay */
+    try { document.documentElement.classList.remove('bp-booting'); } catch (_) {}
     var o = el();
     if (!o) return;
     o.hidden = true;
     try { o.setAttribute('hidden', ''); } catch (_) {}
     o.classList.remove('is-open');
     o.style.display = 'none';
+    o.style.pointerEvents = 'none';
     o.setAttribute('aria-hidden', 'true');
-    /* Etapa 1 — checkmark após boot (online ok); offline → ícone nuvem */
-    if (opts.skipCheckmark) return;
-    try {
-      if (typeof showCheckmark === 'function') {
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          showCheckmark({ mode: 'offline', duration: 900 });
-        } else if (opts.success !== false) {
-          showCheckmark({ mode: 'ok', duration: 1000, label: 'Sincronizado' });
-        }
-      }
-    } catch (_) {}
   }
 
   function retry() {
@@ -351,8 +383,11 @@ if ('serviceWorker' in navigator) {
     if (typeof carregarDoSupabase === 'function' && navigator.onLine) {
       carregarDoSupabase().then(function () {
         closeBoot();
+        try { window.__bpQuietUI = true; } catch (_) {}
         if (typeof updateUI === 'function') updateUI();
+        try { setTimeout(function () { window.__bpQuietUI = false; }, 1500); } catch (_) {}
         if (typeof flushSyncQueue === 'function') flushSyncQueue();
+        try { if (typeof bpCheckExpiringAppointments === 'function') bpCheckExpiringAppointments(); } catch (_) {}
       }).catch(function () {
         showFailState();
       });
@@ -363,9 +398,6 @@ if ('serviceWorker' in navigator) {
 
   function continueOffline() {
     closeBoot({ skipCheckmark: true });
-    try {
-      if (typeof showCheckmark === 'function') showCheckmark({ mode: 'offline', duration: 900 });
-    } catch (_) {}
     if (typeof flushSyncQueue === 'function' && navigator.onLine) {
       try { flushSyncQueue(); } catch (_) {}
     }
@@ -385,6 +417,15 @@ if ('serviceWorker' in navigator) {
   }
 
   window.bpShowBootOverlay = openBoot;
+  /* Safety net: nunca deixar bp-booting > 20s */
+  setTimeout(function () {
+    try {
+      if (document.documentElement.classList.contains('bp-booting')) {
+        console.warn('[boot] safety: a forçar fecho do overlay após 20s');
+        closeBoot({ skipCheckmark: true });
+      }
+    } catch (_) {}
+  }, 20000);
   // Se for para login, nunca deixar overlay preso
   var _bpShowLoginOrig = typeof window.bpShowLoginShell === 'function' ? window.bpShowLoginShell : null;
   // patch applied after functions exist — see end of IIFE

@@ -17,75 +17,176 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let logoutVoluntarioEmCurso = false;
 
 /** Sessão local persistente — entrada offline sem re-login. */
+/**
+ * Sessão local robusta (OWASP Session Mgmt + offline-first SaaS)
+ * - Flags legadas mantidas para o gate no <head>
+ * - Meta JSON dual-write (localStorage + sessionStorage)
+ * - Integridade: salao_id obrigatório, logout explícito (bp_logged_out)
+ * - Renovação em TOKEN_REFRESHED / operações
+ * Referências: OWASP Session Management Cheat Sheet, NIST SP 800-63B
+ */
+var BP_SESSION_META_KEY = 'bp_session_meta';
+var BP_SESSION_META_SS = 'bp_session_meta_ss';
+
+function _bpSessionUaHint() {
+  try {
+    var ua = String(navigator.userAgent || '');
+    var h = 0;
+    for (var i = 0; i < ua.length; i++) h = ((h << 5) - h + ua.charCodeAt(i)) | 0;
+    return String(h);
+  } catch (_) {
+    return '0';
+  }
+}
+
+function _bpWriteSessionMeta(meta) {
+  var raw = JSON.stringify(meta);
+  try { localStorage.setItem(BP_SESSION_META_KEY, raw); } catch (_) {}
+  try { sessionStorage.setItem(BP_SESSION_META_SS, raw); } catch (_) {}
+}
+
+function _bpReadSessionMeta() {
+  var raw = null;
+  try { raw = localStorage.getItem(BP_SESSION_META_KEY); } catch (_) {}
+  if (!raw) {
+    try { raw = sessionStorage.getItem(BP_SESSION_META_SS); } catch (_) {}
+  }
+  if (!raw) return null;
+  try {
+    var o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function bpMarkSessionLocal(salaoId) {
   try {
-    if (salaoId) localStorage.setItem('bp_salao_id_cache', String(salaoId));
+    var sid = salaoId != null ? String(salaoId).trim() : '';
+    if (!sid) {
+      try { sid = String(localStorage.getItem('bp_salao_id_cache') || '').trim(); } catch (_) {}
+    }
+    if (!sid) {
+      // Sem salão não há sessão local válida (evita bp-has-session órfão)
+      return;
+    }
+    localStorage.setItem('bp_salao_id_cache', sid);
     localStorage.setItem('bp_session_active', '1');
     localStorage.removeItem('bp_logged_out');
+    var role = '';
+    try { role = localStorage.getItem('bp_user_role') || ''; } catch (_) {}
+    var meta = {
+      v: 1,
+      salaoId: sid,
+      role: role,
+      markedAt: Date.now(),
+      ua: _bpSessionUaHint()
+    };
+    _bpWriteSessionMeta(meta);
+    try { document.documentElement.classList.add('bp-has-session'); } catch (_) {}
   } catch (_) {}
 }
+
+function bpTouchSessionLocal() {
+  try {
+    if (!bpHasLocalSession()) return;
+    var meta = _bpReadSessionMeta() || {};
+    meta.v = 1;
+    meta.markedAt = Date.now();
+    try { meta.salaoId = meta.salaoId || localStorage.getItem('bp_salao_id_cache') || ''; } catch (_) {}
+    try { meta.role = meta.role || localStorage.getItem('bp_user_role') || ''; } catch (_) {}
+    meta.ua = _bpSessionUaHint();
+    _bpWriteSessionMeta(meta);
+    localStorage.setItem('bp_session_active', '1');
+  } catch (_) {}
+}
+
 function bpClearSessionLocal() {
   try {
     localStorage.setItem('bp_logged_out', '1');
     localStorage.removeItem('bp_session_active');
     localStorage.removeItem('bp_salao_id_cache');
     localStorage.removeItem('bp_user_role');
-    localStorage.removeItem('bp_plano_cache'); // legacy
-    // Limpar caches de plano namespaced
+    localStorage.removeItem('bp_plano_cache');
+    localStorage.removeItem(BP_SESSION_META_KEY);
+    try { sessionStorage.removeItem(BP_SESSION_META_SS); } catch (_) {}
     var toRm = [];
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
-      if (k && (k.indexOf('bp_plano_cache_') === 0 || k.indexOf('bp_ia_historico_') === 0 || k.indexOf('bp_ia_chat_') === 0 || k.indexOf('ia_perguntas_') === 0)) toRm.push(k);
+      if (k && (k.indexOf('bp_plano_cache_') === 0 || k.indexOf('bp_ia_historico_') === 0 || k.indexOf('bp_ia_chat_') === 0 || k.indexOf('ia_perguntas_') === 0 || k.indexOf('bp_ia_perguntas_') === 0)) toRm.push(k);
     }
     toRm.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+    try { document.documentElement.classList.remove('bp-has-session'); } catch (_) {}
   } catch (_) {}
 }
+
 function bpHasLocalSession() {
   try {
     if (localStorage.getItem('bp_logged_out') === '1') return false;
-    if (localStorage.getItem('bp_session_active') === '1' && localStorage.getItem('bp_salao_id_cache')) return true;
+    var active = localStorage.getItem('bp_session_active') === '1';
+    var salao = localStorage.getItem('bp_salao_id_cache');
+    if (active && salao) return true;
+    // Recuperação: meta dual-write (se flags parciais falharam)
+    var meta = _bpReadSessionMeta();
+    if (meta && meta.salaoId) {
+      try {
+        localStorage.setItem('bp_salao_id_cache', String(meta.salaoId));
+        localStorage.setItem('bp_session_active', '1');
+        if (meta.role) localStorage.setItem('bp_user_role', String(meta.role));
+      } catch (_) {}
+      return true;
+    }
   } catch (_) {}
   return false;
 }
+
 function bpShowAppShell() {
   try {
+    document.documentElement.classList.add('bp-has-session');
     var login = document.getElementById('login-view');
     var app = document.getElementById('app-view');
-    if (login) login.style.display = 'none';
+    if (login) {
+      login.style.display = 'none';
+      login.classList.remove('active');
+    }
     if (app) app.style.display = 'flex';
   } catch (_) {}
   bpHideSplashNow();
 }
+
 function bpShowLoginShell() {
   try {
+    document.documentElement.classList.remove('bp-has-session');
     var login = document.getElementById('login-view');
     var app = document.getElementById('app-view');
     if (app) app.style.display = 'none';
-    if (login) login.style.display = 'flex';
+    if (login) {
+      login.style.display = 'flex';
+      login.classList.add('active');
+    }
   } catch (_) {}
   bpHideSplashNow();
 }
 
 supabaseClient.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT' && !logoutVoluntarioEmCurso) {
-    // Offline: token pode "expirar" na lib — NÃO expulsar se há sessão local
-    if (!navigator.onLine && bpHasLocalSession()) {
-      console.warn('[auth] SIGNED_OUT offline ignorado — manter app local');
+    // Offline OU ainda com sessão local válida: não expulsar (offline-first)
+    if (bpHasLocalSession()) {
+      console.warn('[auth] SIGNED_OUT ignorado — sessão local válida');
+      try { if (typeof bpTouchSessionLocal === 'function') bpTouchSessionLocal(); } catch (_) {}
       return;
     }
-    // Online sem sessão local explícita: pedir login
-    if (!bpHasLocalSession()) {
-      document.querySelectorAll('.modal-overlay.active, .modal-overlay.open').forEach(function (m) {
-        m.classList.remove('active');
-        m.classList.remove('open');
-      });
-      bpShowLoginShell();
-      if (typeof toast === 'function') toast('A sessão expirou. Inicia sessão novamente.', 'error');
-    }
+    document.querySelectorAll('.modal-overlay.active, .modal-overlay.open').forEach(function (m) {
+      m.classList.remove('active');
+      m.classList.remove('open');
+    });
+    bpShowLoginShell();
+    if (typeof toast === 'function') toast('A sessão expirou. Inicia sessão novamente.', 'error');
   }
   // ET4.2-P0-auth: refrescar permissões quando a sessão muda (sem expulsar offline-first)
   if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'SIGNED_IN') {
     try {
+      if (typeof bpTouchSessionLocal === 'function') bpTouchSessionLocal();
       if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
       if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
     } catch (_) {}
@@ -214,13 +315,27 @@ async function checkSession() {
         })
         .then(function () {
           try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
+          try { window.__bpQuietUI = true; } catch (_) {}
           if (typeof updateUI === 'function') updateUI();
           if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+          try { setTimeout(function () { window.__bpQuietUI = false; }, 1500); } catch (_) {}
+          try { if (typeof bpCheckExpiringAppointments === 'function') bpCheckExpiringAppointments(); } catch (_) {}
         })
         .catch(function (err) {
           console.warn('[boot] sync online', err && err.message);
           try { if (typeof bpBootShowFail === 'function') bpBootShowFail(); } catch (_) {}
+          /* Mesmo em falha: não deixar overlay eterno — fail UI ou fechar em 2s */
+          setTimeout(function () {
+            try {
+              if (document.documentElement.classList.contains('bp-booting')) {
+                if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay();
+              }
+            } catch (_) {}
+          }, 2000);
         });
+    } else {
+      /* Offline com cache: fechar overlay imediatamente após dados locais */
+      try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
     }
 
     return;
@@ -470,8 +585,7 @@ document.getElementById('login-btn').addEventListener('click', async function() 
       // ============================================================
       // CORREÇÃO: remover splash manualmente
       // ============================================================
-      const splash = document.getElementById('splash-screen');
-      if (splash) { splash.style.display = 'none'; }
+      try { if (typeof hideSplash === 'function') hideSplash(); } catch (_) {}
       const onbEl = document.getElementById('onboarding-screen');
       onbEl.style.display = 'flex';
       // Bloqueia toques nos primeiros 500ms
@@ -489,3 +603,9 @@ document.getElementById('login-btn').addEventListener('click', async function() 
     setButtonLoading(this, false);
   }
 });
+if (typeof window !== 'undefined') {
+  window.bpMarkSessionLocal = bpMarkSessionLocal;
+  window.bpClearSessionLocal = bpClearSessionLocal;
+  window.bpHasLocalSession = bpHasLocalSession;
+  window.bpTouchSessionLocal = bpTouchSessionLocal;
+}

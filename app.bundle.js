@@ -332,6 +332,12 @@ if (typeof window !== 'undefined') {
 }
 
 function animateKpi(id, txt) {
+  if (typeof window !== 'undefined' && window.__bpQuietUI) {
+    var elQ = document.getElementById(id);
+    if (elQ) elQ.textContent = txt;
+    return;
+  }
+
   const el = document.getElementById(id);
   if (!el) { return; }
   if (el.textContent === txt) { return; }
@@ -351,9 +357,12 @@ function addRipple(el, e) {
 function closeModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.remove('open');
+  el.classList.remove('open', 'is-open');
   el.style.display = '';
   el.style.pointerEvents = '';
+  try { el.hidden = true; } catch (_) {}
+  try { el.setAttribute('hidden', ''); } catch (_) {}
+  try { el.setAttribute('aria-hidden', 'true'); } catch (_) {}
   document.body.classList.remove('bp-modal-open');
 }
 
@@ -361,6 +370,8 @@ function openModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
   try { el.hidden = false; } catch (_) {}
+  try { el.removeAttribute('hidden'); } catch (_) {}
+  try { el.setAttribute('aria-hidden', 'false'); } catch (_) {}
   el.classList.add('open');
   el.style.display = 'flex';
   document.body.classList.add('bp-modal-open');
@@ -721,69 +732,23 @@ if (typeof window !== 'undefined') window.safeStringify = safeStringify;
 
 /** Etapa 1 — overlay checkmark / offline após boot */
 function showCheckmark(opts) {
-  opts = opts || {};
-  var mode = opts.mode || 'ok';
-  var duration = opts.duration != null ? opts.duration : 900;
-  return new Promise(function (resolve) {
-    var el = document.getElementById('bp-checkmark-overlay');
-    if (!el) { resolve(); return; }
-    var text = document.getElementById('bp-checkmark-text');
-    var icon = el.querySelector('.bp-checkmark-icon');
-    el.classList.remove('is-offline', 'is-animating', 'is-open');
-    if (mode === 'offline') {
-      el.classList.add('is-offline');
-      if (text) text.textContent = opts.label || 'Offline';
-      if (icon) {
-        icon.innerHTML =
-          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--neutral-600,#5C564E)">' +
-          '<circle cx="24" cy="24" r="20" fill="var(--neutral-50,#F3F2EF)" stroke="var(--neutral-300,#ADA090)"/>' +
-          '<path d="M14 29a10 10 0 0 1 16-6.5 7 7 0 0 1 2 13.5H14.5A6.5 6.5 0 0 1 14 29z" fill="none"/>' +
-          '</svg>';
-      }
-    } else {
-      if (text) text.textContent = opts.label || 'Sincronizado';
-      if (icon) {
-        /* Padrão profissional: círculo --green preenchido + check branco */
-        icon.innerHTML =
-          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">' +
-          '<circle class="bp-checkmark-circle" cx="24" cy="24" r="22"></circle>' +
-          '<polyline class="bp-checkmark-poly" points="14.5,24.5 21,31 34,16.5"></polyline>' +
-          '</svg>';
-      }
-    }
-    el.hidden = false;
-    try { el.removeAttribute('hidden'); } catch (_) {}
-    el.setAttribute('aria-hidden', 'false');
-    el.style.display = 'flex';
-    void el.offsetWidth;
-    requestAnimationFrame(function () {
-      el.classList.add('is-open', 'is-animating');
-    });
-    clearTimeout(showCheckmark._t);
-    showCheckmark._t = setTimeout(function () {
-      hideCheckmark().then(resolve);
-    }, duration);
-  });
+  /* Funcionalidade eliminada — sem modal de sucesso */
+  return Promise.resolve();
+}
+function hideCheckmark() {
+  var el = document.getElementById('bp-checkmark-overlay');
+  if (el) {
+    el.hidden = true;
+    el.style.display = 'none';
+  }
+  return Promise.resolve();
 }
 
-function hideCheckmark() {
-  return new Promise(function (resolve) {
-    var el = document.getElementById('bp-checkmark-overlay');
-    if (!el) { resolve(); return; }
-    el.classList.remove('is-open', 'is-animating');
-    setTimeout(function () {
-      el.hidden = true;
-      try { el.setAttribute('hidden', ''); } catch (_) {}
-      el.setAttribute('aria-hidden', 'true');
-      el.style.display = 'none';
-      resolve();
-    }, 280);
-  });
-}
 if (typeof window !== 'undefined') {
   window.showCheckmark = showCheckmark;
   window.hideCheckmark = hideCheckmark;
 }
+
 
 /* ===== FILE: tests-pure.js ===== */
 /**
@@ -1278,6 +1243,40 @@ if (typeof window !== 'undefined') {
   };
 }
 
+
+/** Health-check de persistência (IndexedDB + mirror LS) — NIST/PWA offline-first */
+function bpProbePersistence() {
+  return new Promise(function (resolve) {
+    var result = { idb: false, ls: false, mirrors: 0 };
+    try {
+      localStorage.setItem('bp_persist_probe', '1');
+      result.ls = localStorage.getItem('bp_persist_probe') === '1';
+      localStorage.removeItem('bp_persist_probe');
+    } catch (_) { result.ls = false; }
+    try {
+      var keys = ['config', 'clientes', 'agendamentos', 'movimentos', 'profissionais', 'servicos'];
+      for (var i = 0; i < keys.length; i++) {
+        if (localStorage.getItem('bp_' + keys[i])) result.mirrors++;
+      }
+    } catch (_) {}
+    try {
+      if (typeof openDB === 'function') {
+        Promise.resolve(openDB()).then(function () {
+          result.idb = true;
+          resolve(result);
+        }).catch(function () { resolve(result); });
+      } else {
+        resolve(result);
+      }
+    } catch (_) {
+      resolve(result);
+    }
+  });
+}
+if (typeof window !== 'undefined') {
+  window.bpProbePersistence = bpProbePersistence;
+}
+
 /* ===== FILE: auth-supabase.js ===== */
 // ====================================================================
 //  SUPABASE — CONFIGURAÇÃO (SUPABASE_URL/ANON_KEY movidas para core-constants.js)
@@ -1298,75 +1297,176 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let logoutVoluntarioEmCurso = false;
 
 /** Sessão local persistente — entrada offline sem re-login. */
+/**
+ * Sessão local robusta (OWASP Session Mgmt + offline-first SaaS)
+ * - Flags legadas mantidas para o gate no <head>
+ * - Meta JSON dual-write (localStorage + sessionStorage)
+ * - Integridade: salao_id obrigatório, logout explícito (bp_logged_out)
+ * - Renovação em TOKEN_REFRESHED / operações
+ * Referências: OWASP Session Management Cheat Sheet, NIST SP 800-63B
+ */
+var BP_SESSION_META_KEY = 'bp_session_meta';
+var BP_SESSION_META_SS = 'bp_session_meta_ss';
+
+function _bpSessionUaHint() {
+  try {
+    var ua = String(navigator.userAgent || '');
+    var h = 0;
+    for (var i = 0; i < ua.length; i++) h = ((h << 5) - h + ua.charCodeAt(i)) | 0;
+    return String(h);
+  } catch (_) {
+    return '0';
+  }
+}
+
+function _bpWriteSessionMeta(meta) {
+  var raw = JSON.stringify(meta);
+  try { localStorage.setItem(BP_SESSION_META_KEY, raw); } catch (_) {}
+  try { sessionStorage.setItem(BP_SESSION_META_SS, raw); } catch (_) {}
+}
+
+function _bpReadSessionMeta() {
+  var raw = null;
+  try { raw = localStorage.getItem(BP_SESSION_META_KEY); } catch (_) {}
+  if (!raw) {
+    try { raw = sessionStorage.getItem(BP_SESSION_META_SS); } catch (_) {}
+  }
+  if (!raw) return null;
+  try {
+    var o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function bpMarkSessionLocal(salaoId) {
   try {
-    if (salaoId) localStorage.setItem('bp_salao_id_cache', String(salaoId));
+    var sid = salaoId != null ? String(salaoId).trim() : '';
+    if (!sid) {
+      try { sid = String(localStorage.getItem('bp_salao_id_cache') || '').trim(); } catch (_) {}
+    }
+    if (!sid) {
+      // Sem salão não há sessão local válida (evita bp-has-session órfão)
+      return;
+    }
+    localStorage.setItem('bp_salao_id_cache', sid);
     localStorage.setItem('bp_session_active', '1');
     localStorage.removeItem('bp_logged_out');
+    var role = '';
+    try { role = localStorage.getItem('bp_user_role') || ''; } catch (_) {}
+    var meta = {
+      v: 1,
+      salaoId: sid,
+      role: role,
+      markedAt: Date.now(),
+      ua: _bpSessionUaHint()
+    };
+    _bpWriteSessionMeta(meta);
+    try { document.documentElement.classList.add('bp-has-session'); } catch (_) {}
   } catch (_) {}
 }
+
+function bpTouchSessionLocal() {
+  try {
+    if (!bpHasLocalSession()) return;
+    var meta = _bpReadSessionMeta() || {};
+    meta.v = 1;
+    meta.markedAt = Date.now();
+    try { meta.salaoId = meta.salaoId || localStorage.getItem('bp_salao_id_cache') || ''; } catch (_) {}
+    try { meta.role = meta.role || localStorage.getItem('bp_user_role') || ''; } catch (_) {}
+    meta.ua = _bpSessionUaHint();
+    _bpWriteSessionMeta(meta);
+    localStorage.setItem('bp_session_active', '1');
+  } catch (_) {}
+}
+
 function bpClearSessionLocal() {
   try {
     localStorage.setItem('bp_logged_out', '1');
     localStorage.removeItem('bp_session_active');
     localStorage.removeItem('bp_salao_id_cache');
     localStorage.removeItem('bp_user_role');
-    localStorage.removeItem('bp_plano_cache'); // legacy
-    // Limpar caches de plano namespaced
+    localStorage.removeItem('bp_plano_cache');
+    localStorage.removeItem(BP_SESSION_META_KEY);
+    try { sessionStorage.removeItem(BP_SESSION_META_SS); } catch (_) {}
     var toRm = [];
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
-      if (k && (k.indexOf('bp_plano_cache_') === 0 || k.indexOf('bp_ia_historico_') === 0 || k.indexOf('bp_ia_chat_') === 0 || k.indexOf('ia_perguntas_') === 0)) toRm.push(k);
+      if (k && (k.indexOf('bp_plano_cache_') === 0 || k.indexOf('bp_ia_historico_') === 0 || k.indexOf('bp_ia_chat_') === 0 || k.indexOf('ia_perguntas_') === 0 || k.indexOf('bp_ia_perguntas_') === 0)) toRm.push(k);
     }
     toRm.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+    try { document.documentElement.classList.remove('bp-has-session'); } catch (_) {}
   } catch (_) {}
 }
+
 function bpHasLocalSession() {
   try {
     if (localStorage.getItem('bp_logged_out') === '1') return false;
-    if (localStorage.getItem('bp_session_active') === '1' && localStorage.getItem('bp_salao_id_cache')) return true;
+    var active = localStorage.getItem('bp_session_active') === '1';
+    var salao = localStorage.getItem('bp_salao_id_cache');
+    if (active && salao) return true;
+    // Recuperação: meta dual-write (se flags parciais falharam)
+    var meta = _bpReadSessionMeta();
+    if (meta && meta.salaoId) {
+      try {
+        localStorage.setItem('bp_salao_id_cache', String(meta.salaoId));
+        localStorage.setItem('bp_session_active', '1');
+        if (meta.role) localStorage.setItem('bp_user_role', String(meta.role));
+      } catch (_) {}
+      return true;
+    }
   } catch (_) {}
   return false;
 }
+
 function bpShowAppShell() {
   try {
+    document.documentElement.classList.add('bp-has-session');
     var login = document.getElementById('login-view');
     var app = document.getElementById('app-view');
-    if (login) login.style.display = 'none';
+    if (login) {
+      login.style.display = 'none';
+      login.classList.remove('active');
+    }
     if (app) app.style.display = 'flex';
   } catch (_) {}
   bpHideSplashNow();
 }
+
 function bpShowLoginShell() {
   try {
+    document.documentElement.classList.remove('bp-has-session');
     var login = document.getElementById('login-view');
     var app = document.getElementById('app-view');
     if (app) app.style.display = 'none';
-    if (login) login.style.display = 'flex';
+    if (login) {
+      login.style.display = 'flex';
+      login.classList.add('active');
+    }
   } catch (_) {}
   bpHideSplashNow();
 }
 
 supabaseClient.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_OUT' && !logoutVoluntarioEmCurso) {
-    // Offline: token pode "expirar" na lib — NÃO expulsar se há sessão local
-    if (!navigator.onLine && bpHasLocalSession()) {
-      console.warn('[auth] SIGNED_OUT offline ignorado — manter app local');
+    // Offline OU ainda com sessão local válida: não expulsar (offline-first)
+    if (bpHasLocalSession()) {
+      console.warn('[auth] SIGNED_OUT ignorado — sessão local válida');
+      try { if (typeof bpTouchSessionLocal === 'function') bpTouchSessionLocal(); } catch (_) {}
       return;
     }
-    // Online sem sessão local explícita: pedir login
-    if (!bpHasLocalSession()) {
-      document.querySelectorAll('.modal-overlay.active, .modal-overlay.open').forEach(function (m) {
-        m.classList.remove('active');
-        m.classList.remove('open');
-      });
-      bpShowLoginShell();
-      if (typeof toast === 'function') toast('A sessão expirou. Inicia sessão novamente.', 'error');
-    }
+    document.querySelectorAll('.modal-overlay.active, .modal-overlay.open').forEach(function (m) {
+      m.classList.remove('active');
+      m.classList.remove('open');
+    });
+    bpShowLoginShell();
+    if (typeof toast === 'function') toast('A sessão expirou. Inicia sessão novamente.', 'error');
   }
   // ET4.2-P0-auth: refrescar permissões quando a sessão muda (sem expulsar offline-first)
   if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'SIGNED_IN') {
     try {
+      if (typeof bpTouchSessionLocal === 'function') bpTouchSessionLocal();
       if (typeof aplicarPermissoes === 'function') aplicarPermissoes();
       if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
     } catch (_) {}
@@ -1495,13 +1595,27 @@ async function checkSession() {
         })
         .then(function () {
           try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
+          try { window.__bpQuietUI = true; } catch (_) {}
           if (typeof updateUI === 'function') updateUI();
           if (typeof atualizarIndicadorSync === 'function') atualizarIndicadorSync();
+          try { setTimeout(function () { window.__bpQuietUI = false; }, 1500); } catch (_) {}
+          try { if (typeof bpCheckExpiringAppointments === 'function') bpCheckExpiringAppointments(); } catch (_) {}
         })
         .catch(function (err) {
           console.warn('[boot] sync online', err && err.message);
           try { if (typeof bpBootShowFail === 'function') bpBootShowFail(); } catch (_) {}
+          /* Mesmo em falha: não deixar overlay eterno — fail UI ou fechar em 2s */
+          setTimeout(function () {
+            try {
+              if (document.documentElement.classList.contains('bp-booting')) {
+                if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay();
+              }
+            } catch (_) {}
+          }, 2000);
         });
+    } else {
+      /* Offline com cache: fechar overlay imediatamente após dados locais */
+      try { if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay(); } catch (_) {}
     }
 
     return;
@@ -1751,11 +1865,7 @@ document.getElementById('login-btn').addEventListener('click', async function() 
       // ============================================================
       // CORREÇÃO: remover splash manualmente
       // ============================================================
-      try { if (typeof hideSplash === 'function') hideSplash();
-      else {
-        var splash = document.getElementById('splash-screen');
-        if (splash) { splash.style.display = 'none'; splash.style.opacity = '0'; }
-      } } catch (_) {}
+      try { if (typeof hideSplash === 'function') hideSplash(); } catch (_) {}
       const onbEl = document.getElementById('onboarding-screen');
       onbEl.style.display = 'flex';
       // Bloqueia toques nos primeiros 500ms
@@ -1773,6 +1883,12 @@ document.getElementById('login-btn').addEventListener('click', async function() 
     setButtonLoading(this, false);
   }
 });
+if (typeof window !== 'undefined') {
+  window.bpMarkSessionLocal = bpMarkSessionLocal;
+  window.bpClearSessionLocal = bpClearSessionLocal;
+  window.bpHasLocalSession = bpHasLocalSession;
+  window.bpTouchSessionLocal = bpTouchSessionLocal;
+}
 
 /* ===== FILE: supabase-resilience.js ===== */
 /**
@@ -4129,6 +4245,11 @@ async function loadState(trocouDeSalao = false) {
   const safe = (arr) => Array.isArray(arr) ? arr : [];
   state.clientes = safe(clientes);
   state.agendamentos = safe(agendamentos);
+  try {
+    if (typeof bpCheckExpiringAppointments === 'function') {
+      setTimeout(function () { bpCheckExpiringAppointments(); }, 600);
+    }
+  } catch (_) {}
   state.movimentos = safe(movimentos);
   state.profissionais = safe(profs);
   state.servicos = safe(servicos);
@@ -15023,37 +15144,23 @@ if (nextBtn) {
 }
 if (skipBtn) skipBtn.addEventListener('click', closeOnboarding);
 
+/** Splash BeautyPro BANIDO — nunca mostrar. */
 function hideSplash() {
-  const splash = document.getElementById('splash-screen');
-  if (!splash) return;
-  splash.style.opacity = '0';
-  setTimeout(function () { splash.style.display = 'none'; }, 600);
-  try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
-}
-
-/** Etapa 1 — splash só na 1ª execução (bp_splash_seen). */
-function bpControlSplashOnBoot() {
   var splash = document.getElementById('splash-screen');
   if (!splash) return;
-  var seen = false;
-  try { seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
-  if (seen) {
-    splash.style.opacity = '0';
-    splash.style.display = 'none';
-    splash.setAttribute('aria-hidden', 'true');
-    return;
-  }
-  // Primeira vez: manter visível; marcar após breve exposição
-  splash.style.display = 'flex';
-  setTimeout(function () {
-    try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
-    hideSplash();
-  }, 1400);
+  splash.style.cssText = 'display:none!important;opacity:0;visibility:hidden;pointer-events:none;';
+  splash.setAttribute('hidden', '');
+  splash.setAttribute('aria-hidden', 'true');
+  try { localStorage.setItem('bp_splash_seen', '1'); } catch (_) {}
+}
+function bpControlSplashOnBoot() {
+  hideSplash();
 }
 if (typeof window !== 'undefined') {
   window.bpControlSplashOnBoot = bpControlSplashOnBoot;
   window.hideSplash = hideSplash;
 }
+
 
 
 // Testes automatizados
@@ -15084,15 +15191,18 @@ window.runBeautyProTests = runTests;
 
 /* ===== FILE: expirar-agendamento.js ===== */
 // ====================================================================
-//  expirar-agendamento.js — Etapa 2: alerta 5 min antes de expirar
+//  expirar-agendamento.js — alerta com minutos exactos (≤ 5 min)
 // ====================================================================
 
 var BP_ALERT_VISTO_PREFIX = 'bp_alert_visto_';
 var BP_EXPIRING_WINDOW_MS = 5 * 60 * 1000;
-var BP_EXPIRING_INTERVAL_MS = 30000;
+var BP_EXPIRING_INTERVAL_MS = 15000; // 15s — leitura contínua, não só no reload
 var _bpExpiringTimer = null;
 var _bpExpiringBusy = false;
 var _bpExpiringCurrentId = null;
+var _bpExpiringLastShowAt = 0;
+var _bpExpiringTick = null;
+var BP_EXPIRING_MIN_GAP_MS = 1500;
 
 function bpAlertVistoKey(id) {
   return BP_ALERT_VISTO_PREFIX + String(id || '');
@@ -15110,16 +15220,12 @@ function bpIsAlertVisto(id) {
 
 function bpMarkAlertVisto(id) {
   if (!id) return;
-  try {
-    localStorage.setItem(bpAlertVistoKey(id), 'true');
-  } catch (_) {}
+  try { localStorage.setItem(bpAlertVistoKey(id), 'true'); } catch (_) {}
 }
 
 function bpClearAlertVisto(id) {
   if (!id) return;
-  try {
-    localStorage.removeItem(bpAlertVistoKey(id));
-  } catch (_) {}
+  try { localStorage.removeItem(bpAlertVistoKey(id)); } catch (_) {}
 }
 
 function bpGetClienteTelefoneFromAg(ag) {
@@ -15150,15 +15256,37 @@ function bpNormTelWa(digits) {
 }
 
 function bpParseAgDtLocal(data, hora) {
-  if (typeof _parseAgDateTime === 'function') return _parseAgDateTime(data, hora);
-  var hh = String(hora || '00:00').slice(0, 5);
-  var dt = new Date(String(data) + 'T' + hh + ':00');
+  if (typeof _parseAgDateTime === 'function') {
+    var dt0 = _parseAgDateTime(data, hora);
+    if (dt0) return dt0;
+  }
+  var d = String(data || '').trim();
+  var h = String(hora || '00:00').trim().slice(0, 5);
+  if (!d) return null;
+  // Garantir HH:MM com 2 dígitos
+  var parts = h.split(':');
+  var hh = String(parts[0] || '0').padStart(2, '0');
+  var mm = String(parts[1] || '0').padStart(2, '0');
+  var iso = d + 'T' + hh + ':' + mm + ':00';
+  var dt = new Date(iso);
+  if (isNaN(dt.getTime())) {
+    // fallback local components
+    var dp = d.split('-');
+    if (dp.length === 3) {
+      dt = new Date(
+        parseInt(dp[0], 10),
+        parseInt(dp[1], 10) - 1,
+        parseInt(dp[2], 10),
+        parseInt(hh, 10),
+        parseInt(mm, 10),
+        0
+      );
+    }
+  }
   return isNaN(dt.getTime()) ? null : dt;
 }
 
-/**
- * ms restantes até data+hora. null = inválido/não aplicável; <=0 = já passou.
- */
+/** ms restantes. null = N/A; <=0 = já passou. */
 function bpIsAppointmentExpiring(ag, nowMs) {
   if (!ag) return null;
   var st = String(ag.status || ag.estado || 'agendado').toLowerCase();
@@ -15167,6 +15295,43 @@ function bpIsAppointmentExpiring(ag, nowMs) {
   if (!dt) return null;
   var now = nowMs != null ? nowMs : Date.now();
   return dt.getTime() - now;
+}
+
+function bpFormatRemainText(remainMs) {
+  if (remainMs == null || remainMs <= 0) return '0 segundos';
+  var totalSec = Math.max(1, Math.ceil(remainMs / 1000));
+  var mins = Math.floor(totalSec / 60);
+  var secs = totalSec % 60;
+  var timeText = '';
+  if (mins > 0) {
+    timeText = mins + ' minuto' + (mins > 1 ? 's' : '');
+    if (secs > 0) {
+      timeText += ' e ' + secs + ' segundo' + (secs > 1 ? 's' : '');
+    }
+  } else {
+    timeText = secs + ' segundo' + (secs > 1 ? 's' : '');
+  }
+  return timeText;
+}
+
+function bpEscHtmlLite(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Actualiza a frase completa do modal (countdown fluido). */
+function bpUpdateExpiryMessage(remainMs, clienteNome) {
+  var msgEl = document.getElementById('expirar-message');
+  if (!msgEl) return;
+  var nome = bpEscHtmlLite(clienteNome || 'Cliente');
+  var timeText = bpEscHtmlLite(bpFormatRemainText(remainMs));
+  msgEl.innerHTML =
+    'O agendamento com <strong class="bp-expirar-cliente" id="expirar-cliente-nome">' + nome + '</strong> ' +
+    'está prestes a ser marcado como não realizado em <strong class="bp-expirar-tempo" id="expirar-tempo">' + timeText + '</strong>. ' +
+    'Entre em contacto agora para tentar recuperar o atendimento ou combinar um novo horário com a cliente.';
 }
 
 function bpGetClosestExpiring() {
@@ -15187,7 +15352,7 @@ function bpGetClosestExpiring() {
       best = ag;
     }
   }
-  return best;
+  return best ? { ag: best, remain: bestRemain } : null;
 }
 
 function bpIsExpirarModalOpen() {
@@ -15210,48 +15375,83 @@ function bpAnyBlockingModalOpen() {
 function bpAppShellVisible() {
   try {
     var app = document.getElementById('app-view');
-    if (!app) return true;
-    var d = app.style.display;
-    if (d === 'none') return false;
+    if (!app) return false;
+    if (app.style.display === 'none') return false;
   } catch (_) {}
   return true;
 }
 
+function bpStopRemainTick() {
+  if (_bpExpiringTick) {
+    clearInterval(_bpExpiringTick);
+    _bpExpiringTick = null;
+  }
+}
+
+function bpStartRemainTick() {
+  bpStopRemainTick();
+  _bpExpiringTick = setInterval(function () {
+    if (!bpIsExpirarModalOpen() || !_bpExpiringCurrentId) {
+      bpStopRemainTick();
+      return;
+    }
+    if (typeof state === 'undefined' || !state.agendamentos) return;
+    var cur = null;
+    for (var i = 0; i < state.agendamentos.length; i++) {
+      var a = state.agendamentos[i];
+      if (a && String(a.id) === String(_bpExpiringCurrentId)) { cur = a; break; }
+    }
+    var rem = cur ? bpIsAppointmentExpiring(cur) : null;
+    if (rem == null || rem <= 0) {
+      bpStopRemainTick();
+      bpCloseExpirarModal();
+      return;
+    }
+    var nome = cur.cliente || 'Cliente';
+    bpUpdateExpiryMessage(rem, nome);
+  }, 1000);
+}
+
 function bpCloseExpirarModal() {
+  bpStopRemainTick();
   _bpExpiringCurrentId = null;
-  if (typeof closeModal === 'function') {
-    closeModal('modal-expirar');
-  } else {
+  if (typeof closeModal === 'function') closeModal('modal-expirar');
+  else {
     var m = document.getElementById('modal-expirar');
     if (m) {
       m.classList.remove('open', 'is-open');
       m.style.display = '';
       m.setAttribute('aria-hidden', 'true');
+      try { m.setAttribute('hidden', ''); } catch (_) {}
     }
   }
 }
 
-function bpShowExpirarModal(ag) {
+function bpShowExpirarModal(ag, remainMs) {
   if (!ag || !ag.id) return;
   if (!bpAppShellVisible()) return;
   if (bpAnyBlockingModalOpen()) return;
-
-  var remain = bpIsAppointmentExpiring(ag);
-  if (remain == null || remain <= 0 || remain > BP_EXPIRING_WINDOW_MS) return;
   if (bpIsAlertVisto(ag.id)) return;
+  var remain = remainMs != null ? remainMs : bpIsAppointmentExpiring(ag);
+  if (remain == null || remain <= 0 || remain > BP_EXPIRING_WINDOW_MS) return;
 
   var modal = document.getElementById('modal-expirar');
   if (!modal) return;
 
+  var nowShow = Date.now();
+  if (bpIsExpirarModalOpen() && _bpExpiringCurrentId === ag.id) {
+    bpUpdateExpiryMessage(remain, ag.cliente || 'Cliente');
+    return;
+  }
+  if (nowShow - _bpExpiringLastShowAt < BP_EXPIRING_MIN_GAP_MS && bpIsExpirarModalOpen()) return;
+  _bpExpiringLastShowAt = nowShow;
   _bpExpiringCurrentId = ag.id;
-  var nome = ag.cliente || 'Cliente';
-  var nomeEl = document.getElementById('expirar-cliente-nome');
-  if (nomeEl) nomeEl.textContent = nome;
+
+  bpUpdateExpiryMessage(remain, ag.cliente || 'Cliente');
 
   var tel = bpGetClienteTelefoneFromAg(ag);
   var btnLigar = document.getElementById('expirar-ligar');
   var btnWa = document.getElementById('expirar-whatsapp');
-
   function setTelBtn(btn, ok) {
     if (!btn) return;
     if (ok) {
@@ -15260,24 +15460,27 @@ function bpShowExpirarModal(ag) {
       btn.style.opacity = '';
       btn.removeAttribute('aria-disabled');
       btn.dataset.tel = tel;
+      if (btn.id === 'expirar-ligar') btn.classList.add('bp-call-anim');
     } else {
       btn.disabled = true;
       btn.classList.add('is-disabled');
       btn.style.opacity = '0.4';
       btn.setAttribute('aria-disabled', 'true');
       delete btn.dataset.tel;
+      if (btn.id === 'expirar-ligar') btn.classList.remove('bp-call-anim');
     }
   }
   setTelBtn(btnLigar, !!tel);
   setTelBtn(btnWa, !!tel);
 
-  if (typeof openModal === 'function') {
-    openModal('modal-expirar');
-  } else {
+  try { modal.removeAttribute('hidden'); } catch (_) {}
+  if (typeof openModal === 'function') openModal('modal-expirar');
+  else {
     modal.style.display = 'flex';
     modal.classList.add('open', 'is-open');
-    modal.setAttribute('aria-hidden', 'false');
   }
+  try { modal.setAttribute('aria-hidden', 'false'); } catch (_) {}
+  bpStartRemainTick();
 }
 
 function bpCheckExpiringAppointments() {
@@ -15285,39 +15488,28 @@ function bpCheckExpiringAppointments() {
   _bpExpiringBusy = true;
   try {
     if (!bpAppShellVisible()) return;
-    if (bpIsExpirarModalOpen()) {
-      // Modal aberto: se o agendamento actual já não é válido, fechar
-      if (_bpExpiringCurrentId) {
-        var cur = null;
-        if (typeof state !== 'undefined' && state.agendamentos) {
-          cur = state.agendamentos.find(function (a) {
-            return a && String(a.id) === String(_bpExpiringCurrentId);
-          });
-        }
-        var rem = cur ? bpIsAppointmentExpiring(cur) : null;
-        if (!cur || rem == null || rem <= 0 || bpIsAlertVisto(_bpExpiringCurrentId)) {
-          bpCloseExpirarModal();
-        } else {
-          return;
-        }
-      } else {
+    if (typeof state === 'undefined' || !state.agendamentos) return;
+
+    if (bpIsExpirarModalOpen() && _bpExpiringCurrentId) {
+      var cur = state.agendamentos.find(function (a) {
+        return a && String(a.id) === String(_bpExpiringCurrentId);
+      });
+      var rem = cur ? bpIsAppointmentExpiring(cur) : null;
+      if (!cur || rem == null || rem <= 0 || bpIsAlertVisto(_bpExpiringCurrentId)) {
+        bpCloseExpirarModal();
+      } else if (rem <= BP_EXPIRING_WINDOW_MS) {
+        bpUpdateExpiryMessage(rem, cur.cliente || 'Cliente');
         return;
       }
     }
+
     if (bpAnyBlockingModalOpen()) return;
 
-    requestAnimationFrame(function () {
-      try {
-        var ag = bpGetClosestExpiring();
-        if (ag) bpShowExpirarModal(ag);
-      } catch (e) {
-        console.warn('[expirar] check', e);
-      } finally {
-        _bpExpiringBusy = false;
-      }
-    });
-  } catch (e2) {
-    console.warn('[expirar] check outer', e2);
+    var hit = bpGetClosestExpiring();
+    if (hit) bpShowExpirarModal(hit.ag, hit.remain);
+  } catch (e) {
+    console.warn('[expirar] check', e);
+  } finally {
     _bpExpiringBusy = false;
   }
 }
@@ -15329,20 +15521,17 @@ function bpBindExpirarModalOnce() {
 
   var ligar = document.getElementById('expirar-ligar');
   var wa = document.getElementById('expirar-whatsapp');
-  var ignorar = document.getElementById('expirar-ignorar');
+  var ignorar = document.getElementById('expirar-visto') || document.getElementById('expirar-ignorar');
 
   if (ligar && !ligar.dataset.bpBound) {
     ligar.dataset.bpBound = '1';
     ligar.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if (ligar.disabled || ligar.classList.contains('is-disabled')) return;
+      if (ligar.disabled) return;
       var tel = ligar.dataset.tel || '';
       if (!tel) return;
-      // Spec: abrir telefone; modal permanece para permitir Ignorar ou novo check após fecho
-      try {
-        window.location.href = 'tel:' + tel;
-      } catch (_) {}
+      window.location.href = 'tel:' + tel;
     });
   }
   if (wa && !wa.dataset.bpBound) {
@@ -15350,12 +15539,10 @@ function bpBindExpirarModalOnce() {
     wa.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if (wa.disabled || wa.classList.contains('is-disabled')) return;
+      if (wa.disabled) return;
       var tel = bpNormTelWa(wa.dataset.tel || '');
       if (!tel) return;
-      try {
-        window.open('https://wa.me/' + tel, '_blank', 'noopener,noreferrer');
-      } catch (_) {}
+      window.open('https://wa.me/' + tel, '_blank', 'noopener,noreferrer');
     });
   }
   if (ignorar && !ignorar.dataset.bpBound) {
@@ -15365,11 +15552,20 @@ function bpBindExpirarModalOnce() {
       e.stopPropagation();
       if (_bpExpiringCurrentId) bpMarkAlertVisto(_bpExpiringCurrentId);
       bpCloseExpirarModal();
-      setTimeout(function () {
-        bpCheckExpiringAppointments();
-      }, 400);
+      setTimeout(bpCheckExpiringAppointments, 400);
     });
   }
+
+  try {
+    if (typeof MutationObserver !== 'undefined') {
+      var obs = new MutationObserver(function () {
+        if (!bpIsExpirarModalOpen() && _bpExpiringCurrentId) {
+          _bpExpiringCurrentId = null;
+        }
+      });
+      obs.observe(modal, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+    }
+  } catch (_) {}
 }
 
 function bpStartExpiringWatcher() {
@@ -15378,12 +15574,19 @@ function bpStartExpiringWatcher() {
     clearInterval(_bpExpiringTimer);
     _bpExpiringTimer = null;
   }
-  _bpExpiringTimer = setInterval(function () {
-    bpCheckExpiringAppointments();
-  }, BP_EXPIRING_INTERVAL_MS);
-  setTimeout(function () {
-    bpCheckExpiringAppointments();
-  }, 2500);
+  _bpExpiringTimer = setInterval(bpCheckExpiringAppointments, BP_EXPIRING_INTERVAL_MS);
+  // Checks iniciais escalonados (dados podem chegar após loadState)
+  setTimeout(bpCheckExpiringAppointments, 800);
+  setTimeout(bpCheckExpiringAppointments, 3000);
+  setTimeout(bpCheckExpiringAppointments, 8000);
+  if (!window._bpExpiringVisBound) {
+    window._bpExpiringVisBound = true;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        setTimeout(bpCheckExpiringAppointments, 400);
+      }
+    });
+  }
 }
 
 if (typeof window !== 'undefined') {
@@ -15418,14 +15621,22 @@ if (typeof window !== 'undefined') {
 //  esta lista.
 // ====================================================================
 document.addEventListener('DOMContentLoaded', async function init() {
-  /* Etapa 1 — splash só na 1ª execução */
+  /* Splash BeautyPro banido */
   try {
-    if (typeof bpControlSplashOnBoot === 'function') bpControlSplashOnBoot();
-    else {
-      var _sp = document.getElementById('splash-screen');
-      var _seen = false;
-      try { _seen = localStorage.getItem('bp_splash_seen') === '1'; } catch (_) {}
-      if (_sp && _seen) { _sp.style.display = 'none'; _sp.style.opacity = '0'; }
+    var _sp = document.getElementById('splash-screen');
+    if (_sp) {
+      _sp.style.cssText = 'display:none!important;opacity:0;visibility:hidden;pointer-events:none;';
+      _sp.setAttribute('hidden', '');
+      _sp.setAttribute('aria-hidden', 'true');
+    }
+    if (typeof hideSplash === 'function') hideSplash();
+  } catch (_) {}
+  /* Anti-flash login: reforço imediato se sessão local */
+  try {
+    if (localStorage.getItem('bp_session_active') === '1' && localStorage.getItem('bp_salao_id_cache')) {
+      document.documentElement.classList.add('bp-has-session');
+      var _lv = document.getElementById('login-view');
+      if (_lv) { _lv.style.display = 'none'; _lv.classList.remove('active'); }
     }
   } catch (_) {}
   /* Overlay o mais cedo possível (<1s): antes de checkSession/UI */
@@ -15449,9 +15660,18 @@ document.addEventListener('DOMContentLoaded', async function init() {
       }
     }
   } catch (_) {}
-  // Garantir estado inicial da UI
-  document.getElementById('login-view').style.display = 'flex';
-  document.getElementById('app-view').style.display = 'none';
+  // Estado inicial: classes no <html> (gate CSS). Sem forçar display:flex no login.
+  try {
+    if (!document.documentElement.classList.contains('bp-has-session')) {
+      var _lv0 = document.getElementById('login-view');
+      var _av0 = document.getElementById('app-view');
+      if (_lv0) _lv0.style.display = '';
+      if (_av0) _av0.style.display = 'none';
+    } else {
+      var _lv1 = document.getElementById('login-view');
+      if (_lv1) { _lv1.style.display = 'none'; _lv1.classList.remove('active'); }
+    }
+  } catch (_) {}
 
   // Ponto 1 — indicador Online/Offline atualizado já aqui, ANTES de
   // qualquer chamada de rede (openDB/checkSession). atualizarIndicadorSync()
@@ -15511,7 +15731,27 @@ document.addEventListener('DOMContentLoaded', async function init() {
   // Verificar sessão Supabase — se existir, entra directamente
   // (se a base de dados local não abriu, ainda tentamos: sem sessão,
   // o utilizador fica no ecrã de login, que não depende do IndexedDB)
-  await checkSession();
+  try {
+    if (typeof bpProbePersistence === 'function') {
+      bpProbePersistence().then(function (p) {
+        if (p && !p.idb && !p.ls) {
+          console.warn('[persist] armazenamento local indisponível — modo degradado');
+        }
+      });
+    }
+  } catch (_) {}
+  try {
+    await checkSession();
+  } catch (errBoot) {
+    console.error('[Boot] Erro:', errBoot);
+  } finally {
+    /* Garantir fecho do overlay em todos os caminhos */
+    try {
+      if (typeof bpHideBootOverlay === 'function') bpHideBootOverlay();
+    } catch (_) {}
+    try { document.documentElement.classList.remove('bp-booting'); } catch (_) {}
+  }
+  try { if (typeof bpTouchSessionLocal === 'function' && typeof bpHasLocalSession === 'function' && bpHasLocalSession()) bpTouchSessionLocal(); } catch (_) {}
   if (!dbDisponivel) {
     // Reforça a mensagem já dada acima, para o caso de o toast anterior
     // ter sido perdido durante a transição de ecrãs.
@@ -15543,10 +15783,12 @@ document.addEventListener('DOMContentLoaded', async function init() {
 
   console.log('BeautyPro inicializado com sucesso!');
 
-  // Etapa 2 — alerta 5 min antes de expirar agendamento
+  // Etapa 2 — alerta de expiração (intervalo + check imediato)
   try {
     if (typeof bpStartExpiringWatcher === 'function') bpStartExpiringWatcher();
   } catch (_) {}
+  // Boot quiet: evitar “vibração” de KPIs no 1.º updateUI pós-pull
+  try { window.__bpQuietUI = true; setTimeout(function () { window.__bpQuietUI = false; }, 2500); } catch (_) {}
 
 
   // ================================================================
@@ -15701,6 +15943,7 @@ if ('serviceWorker' in navigator) {
     var o = el();
     if (!o) return;
     active = true;
+    try { document.documentElement.classList.add('bp-booting'); } catch (_) {}
     o.hidden = false;
     try { o.removeAttribute('hidden'); } catch (_) {}
     o.classList.add('is-open');
@@ -15719,24 +15962,16 @@ if ('serviceWorker' in navigator) {
     active = false;
     clearTimeout(timer);
     timer = null;
+    /* CRÍTICO: remover bp-booting para o CSS deixar de forçar o overlay */
+    try { document.documentElement.classList.remove('bp-booting'); } catch (_) {}
     var o = el();
     if (!o) return;
     o.hidden = true;
     try { o.setAttribute('hidden', ''); } catch (_) {}
     o.classList.remove('is-open');
     o.style.display = 'none';
+    o.style.pointerEvents = 'none';
     o.setAttribute('aria-hidden', 'true');
-    /* Etapa 1 — checkmark após boot (online ok); offline → ícone nuvem */
-    if (opts.skipCheckmark) return;
-    try {
-      if (typeof showCheckmark === 'function') {
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          showCheckmark({ mode: 'offline', duration: 850 });
-        } else if (opts.success !== false) {
-          showCheckmark({ mode: 'ok', duration: 850, label: 'Sincronizado' });
-        }
-      }
-    } catch (_) {}
   }
 
   function retry() {
@@ -15749,8 +15984,11 @@ if ('serviceWorker' in navigator) {
     if (typeof carregarDoSupabase === 'function' && navigator.onLine) {
       carregarDoSupabase().then(function () {
         closeBoot();
+        try { window.__bpQuietUI = true; } catch (_) {}
         if (typeof updateUI === 'function') updateUI();
+        try { setTimeout(function () { window.__bpQuietUI = false; }, 1500); } catch (_) {}
         if (typeof flushSyncQueue === 'function') flushSyncQueue();
+        try { if (typeof bpCheckExpiringAppointments === 'function') bpCheckExpiringAppointments(); } catch (_) {}
       }).catch(function () {
         showFailState();
       });
@@ -15761,9 +15999,6 @@ if ('serviceWorker' in navigator) {
 
   function continueOffline() {
     closeBoot({ skipCheckmark: true });
-    try {
-      if (typeof showCheckmark === 'function') showCheckmark({ mode: 'offline', duration: 850 });
-    } catch (_) {}
     if (typeof flushSyncQueue === 'function' && navigator.onLine) {
       try { flushSyncQueue(); } catch (_) {}
     }
@@ -15783,6 +16018,15 @@ if ('serviceWorker' in navigator) {
   }
 
   window.bpShowBootOverlay = openBoot;
+  /* Safety net: nunca deixar bp-booting > 20s */
+  setTimeout(function () {
+    try {
+      if (document.documentElement.classList.contains('bp-booting')) {
+        console.warn('[boot] safety: a forçar fecho do overlay após 20s');
+        closeBoot({ skipCheckmark: true });
+      }
+    } catch (_) {}
+  }, 20000);
   // Se for para login, nunca deixar overlay preso
   var _bpShowLoginOrig = typeof window.bpShowLoginShell === 'function' ? window.bpShowLoginShell : null;
   // patch applied after functions exist — see end of IIFE

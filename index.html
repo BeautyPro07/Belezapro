@@ -1,6 +1,66 @@
 <!DOCTYPE html>
 <html lang="pt">
 <head>
+
+  <!-- CRITICAL: gate ANTES de CSS/CDN -->
+  <script>
+  (function () {
+    try {
+      if (localStorage.getItem('bp_logged_out') === '1') return;
+      var ok = localStorage.getItem('bp_session_active') === '1' && !!localStorage.getItem('bp_salao_id_cache');
+      if (!ok) {
+        try {
+          var raw = localStorage.getItem('bp_session_meta') || sessionStorage.getItem('bp_session_meta_ss');
+          if (raw) {
+            var m = JSON.parse(raw);
+            if (m && m.salaoId) {
+              localStorage.setItem('bp_salao_id_cache', String(m.salaoId));
+              localStorage.setItem('bp_session_active', '1');
+              ok = true;
+            }
+          }
+        } catch (e2) {}
+      }
+      if (ok) {
+        document.documentElement.classList.add('bp-has-session', 'bp-booting');
+      }
+    } catch (e) {}
+  })();
+  </script>
+  <style id="bp-session-gate-css">
+    html.bp-has-session #login-view,
+    html.bp-has-session #login-view.view,
+    html.bp-has-session #login-view.view.active {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+      opacity: 0 !important;
+      position: fixed !important;
+      left: -9999px !important;
+      width: 0 !important;
+      height: 0 !important;
+      overflow: hidden !important;
+    }
+    html.bp-booting #bp-boot-overlay,
+    html.bp-booting #bp-boot-overlay[hidden] {
+      display: flex !important;
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 10001 !important;
+      align-items: center !important;
+      justify-content: center !important;
+      background: rgba(20, 17, 15, 0.28) !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+    }
+    html:not(.bp-booting) #bp-boot-overlay {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+  </style>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes, viewport-fit=cover">
   <meta name="theme-color" content="#D4AF37">
@@ -47,7 +107,7 @@
 </head>
 <body>
   <!-- ===== SPLASH ===== -->
-  <div id="splash-screen" data-bp-splash="1" style="position:fixed;inset:0;z-index:9999;background:linear-gradient(145deg, var(--gold-dark), var(--gold), var(--gold-dark));display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.6s ease;opacity:1;">
+  <div id="splash-screen" hidden aria-hidden="true" style="display:none!important;opacity:0;visibility:hidden;pointer-events:none;position:fixed;inset:0;z-index:-1;">
     <div style="font-family:var(--font-serif);font-size:2.8rem;color:#fff;letter-spacing:-0.02em;opacity:0;animation:splashLogo 0.9s cubic-bezier(0.34,1.56,0.64,1) forwards, splashGlow 1.6s ease-in-out 0.9s infinite;">
       Beauty<span style="font-weight:800;">Pro</span>
     </div>
@@ -126,18 +186,44 @@
       </div>
     </div>
   </div>
-  <!-- Etapa 1 — verificação concluída (checkmark) -->
-  <div id="bp-checkmark-overlay" class="bp-checkmark-overlay" hidden aria-hidden="true" role="status" aria-live="polite">
-    <div class="bp-checkmark-card">
-      <div class="bp-checkmark-icon" aria-hidden="true">
-        <svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
-          <circle class="bp-checkmark-circle" cx="24" cy="24" r="22"></circle>
-          <polyline class="bp-checkmark-poly" points="14.5,24.5 21,31 34,16.5"></polyline>
-        </svg>
-      </div>
-      <p class="bp-checkmark-text" id="bp-checkmark-text">Sincronizado</p>
-    </div>
-  </div>
+
+  <div id="app-view" class="view" style="display:none;">
+    <div class="app-container">
+
+      <!-- HEADER -->
+      <header class="app-header">
+        <div class="app-header-inner">
+          <div style="display:flex;flex-direction:column;gap:3px;padding-right:44px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <div class="logo" style="flex-shrink:0;display:flex;align-items:center;gap:8px;">
+                <img src="logo.png" alt="BeautyPro" style="height:27px;width:auto;">
+                Beauty<span>Pro</span>
+              </div>
+              <div class="store-name" id="store-name-display" title="Duplo clique para gerir profissionais" style="max-width:42vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.82rem;line-height:1.2;">&nbsp;</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="plano-badge" id="plano-badge" style="flex-shrink:0;visibility:hidden;" data-bp-plano-ready="0" aria-hidden="true">—</span>
+              <span class="trial-countdown" id="trial-countdown" style="display:none;flex-shrink:0;"></span>
+            </div>
+          </div>
+          <div class="header-actions">
+            <div id="sync-status-container" class="sync-status" title="Estado de sincronização" role="status" aria-live="polite">
+              <span id="sync-dot" class="sync-dot" aria-hidden="true"></span>
+              <span id="sync-text">…</span>
+            </div>
+            <div style="position:relative;">
+              <button id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false" style="width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:6px;color:var(--text-secondary);cursor:pointer;transition:background .15s ease;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+              </button>
+              <div id="menu-dropdown" style="display:none">
+                <button type="button" id="logout-btn">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  <span>Sair</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </header>
 
       <div class="offline-banner" id="offline-banner" role="status" style="display:none!important" hidden aria-hidden="true"><span class="offline-banner-dot" aria-hidden="true"></span><span id="offline-banner-text">Sem ligação · Os dados continuam guardados neste dispositivo</span></div>
@@ -1333,32 +1419,31 @@
   <!-- Única entrada JS da app. NÃO carregar app.js (legado modularizado). -->
   
   <!-- Modal de expiração de agendamento (Etapa 2) -->
-  <div id="modal-expirar" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="expirar-title">
+      <div id="modal-expirar" class="modal-overlay modal-overlay--center" role="dialog" aria-modal="true" aria-labelledby="expirar-title" hidden>
     <div class="modal-confirm-sheet bp-modal-expirar">
       <div class="bp-expirar-header">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
         <span id="expirar-title" class="bp-expirar-title">Atenção: perdendo um cliente</span>
       </div>
       <p id="expirar-message" class="confirm-message bp-expirar-msg">
-        O agendamento com <strong id="expirar-cliente-nome">Cliente</strong> está prestes a expirar.
-        Em 5 minutos, será marcado como não realizado. Entre em contacto agora e tente recuperar o atendimento.
+        O agendamento com <strong id="expirar-cliente-nome" class="bp-expirar-cliente">Cliente</strong> está prestes a ser marcado como não realizado em <strong id="expirar-tempo" class="bp-expirar-tempo">poucos minutos</strong>. Entre em contacto agora para tentar recuperar o atendimento ou combinar um novo horário com a cliente.
       </p>
       <div class="bp-expirar-actions">
-        <button type="button" class="bp-expirar-btn bp-expirar-call" id="expirar-ligar">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-          <span>Ligar</span>
-        </button>
-        <button type="button" class="bp-expirar-btn bp-expirar-wa" id="expirar-whatsapp">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/></svg>
-          <span>WhatsApp</span>
-        </button>
-        <button type="button" class="bp-expirar-btn bp-expirar-ignore" id="expirar-ignorar">
-          <span>Ignorar</span>
-        </button>
+        <div class="bp-expirar-actions-row">
+          <button type="button" class="btn btn-sm bp-btn-whatsapp" id="expirar-whatsapp">
+            <svg class="bp-ic-wa" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.47 14.3c-.28-.14-1.64-.81-1.9-.9-.25-.1-.44-.14-.62.14-.18.28-.71.9-.87 1.08-.16.18-.32.2-.6.07-.28-.14-1.17-.43-2.23-1.37-.82-.73-1.38-1.64-1.54-1.92-.16-.28-.02-.43.12-.57.13-.13.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.35-.02-.49-.07-.14-.62-1.49-.85-2.04-.22-.53-.45-.46-.62-.47h-.53c-.18 0-.47.07-.71.35-.25.28-.93.91-.93 2.22s.96 2.58 1.09 2.76c.14.18 1.88 2.87 4.56 4.02 1.7.73 2.15.8 2.92.67.45-.08 1.64-.67 1.87-1.32.23-.65.23-1.2.16-1.32-.07-.11-.25-.18-.53-.32z"/><path fill="currentColor" d="M12.04 2C6.5 2 2.01 6.49 2.01 12.03c0 1.85.5 3.57 1.37 5.07L2 22l5.04-1.32A9.96 9.96 0 0 0 12.04 22C17.57 22 22 17.52 22 11.99 22 6.49 17.57 2 12.04 2zm0 18.15c-1.67 0-3.22-.48-4.54-1.32l-.33-.19-3.08.81.82-3-.21-.35a7.94 7.94 0 0 1-1.3-4.38c0-4.4 3.58-7.98 7.99-7.98 4.4 0 7.98 3.58 7.98 7.98 0 4.4-3.58 7.98-7.98 7.98z"/></svg>
+            <span>WhatsApp</span>
+          </button>
+          <button type="button" class="btn btn-sm bp-btn-call" id="expirar-ligar">
+            <span class="bp-call-icon-wrap" aria-hidden="true">
+              <span class="bp-call-ripple"></span>
+              <span class="bp-call-ripple"></span>
+              <span class="bp-call-ripple"></span>
+              <svg class="bp-ic-call" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            </span>
+            <span>Ligar</span>
+          </button>
+        </div>
+        <button type="button" class="btn btn-secondary bp-expirar-ignore" id="expirar-visto">Visto</button>
       </div>
     </div>
   </div>

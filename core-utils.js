@@ -266,6 +266,12 @@ if (typeof window !== 'undefined') {
 }
 
 function animateKpi(id, txt) {
+  if (typeof window !== 'undefined' && window.__bpQuietUI) {
+    var elQ = document.getElementById(id);
+    if (elQ) elQ.textContent = txt;
+    return;
+  }
+
   const el = document.getElementById(id);
   if (!el) { return; }
   if (el.textContent === txt) { return; }
@@ -285,9 +291,12 @@ function addRipple(el, e) {
 function closeModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.remove('open');
+  el.classList.remove('open', 'is-open');
   el.style.display = '';
   el.style.pointerEvents = '';
+  try { el.hidden = true; } catch (_) {}
+  try { el.setAttribute('hidden', ''); } catch (_) {}
+  try { el.setAttribute('aria-hidden', 'true'); } catch (_) {}
   document.body.classList.remove('bp-modal-open');
 }
 
@@ -295,6 +304,8 @@ function openModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
   try { el.hidden = false; } catch (_) {}
+  try { el.removeAttribute('hidden'); } catch (_) {}
+  try { el.setAttribute('aria-hidden', 'false'); } catch (_) {}
   el.classList.add('open');
   el.style.display = 'flex';
   document.body.classList.add('bp-modal-open');
@@ -655,66 +666,20 @@ if (typeof window !== 'undefined') window.safeStringify = safeStringify;
 
 /** Etapa 1 — overlay checkmark / offline após boot */
 function showCheckmark(opts) {
-  opts = opts || {};
-  var mode = opts.mode || 'ok';
-  var duration = opts.duration != null ? opts.duration : 900;
-  return new Promise(function (resolve) {
-    var el = document.getElementById('bp-checkmark-overlay');
-    if (!el) { resolve(); return; }
-    var text = document.getElementById('bp-checkmark-text');
-    var icon = el.querySelector('.bp-checkmark-icon');
-    el.classList.remove('is-offline', 'is-animating', 'is-open');
-    if (mode === 'offline') {
-      el.classList.add('is-offline');
-      if (text) text.textContent = opts.label || 'Offline';
-      if (icon) {
-        icon.innerHTML =
-          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--neutral-600,#5C564E)">' +
-          '<circle cx="24" cy="24" r="20" fill="var(--neutral-50,#F3F2EF)" stroke="var(--neutral-300,#ADA090)"/>' +
-          '<path d="M14 29a10 10 0 0 1 16-6.5 7 7 0 0 1 2 13.5H14.5A6.5 6.5 0 0 1 14 29z" fill="none"/>' +
-          '</svg>';
-      }
-    } else {
-      if (text) text.textContent = opts.label || 'Sincronizado';
-      if (icon) {
-        /* Padrão profissional: círculo --green preenchido + check branco */
-        icon.innerHTML =
-          '<svg class="bp-checkmark-svg" viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">' +
-          '<circle class="bp-checkmark-circle" cx="24" cy="24" r="22"></circle>' +
-          '<polyline class="bp-checkmark-poly" points="14.5,24.5 21,31 34,16.5"></polyline>' +
-          '</svg>';
-      }
-    }
-    el.hidden = false;
-    try { el.removeAttribute('hidden'); } catch (_) {}
-    el.setAttribute('aria-hidden', 'false');
-    el.style.display = 'flex';
-    void el.offsetWidth;
-    requestAnimationFrame(function () {
-      el.classList.add('is-open', 'is-animating');
-    });
-    clearTimeout(showCheckmark._t);
-    showCheckmark._t = setTimeout(function () {
-      hideCheckmark().then(resolve);
-    }, duration);
-  });
+  /* Funcionalidade eliminada — sem modal de sucesso */
+  return Promise.resolve();
+}
+function hideCheckmark() {
+  var el = document.getElementById('bp-checkmark-overlay');
+  if (el) {
+    el.hidden = true;
+    el.style.display = 'none';
+  }
+  return Promise.resolve();
 }
 
-function hideCheckmark() {
-  return new Promise(function (resolve) {
-    var el = document.getElementById('bp-checkmark-overlay');
-    if (!el) { resolve(); return; }
-    el.classList.remove('is-open', 'is-animating');
-    setTimeout(function () {
-      el.hidden = true;
-      try { el.setAttribute('hidden', ''); } catch (_) {}
-      el.setAttribute('aria-hidden', 'true');
-      el.style.display = 'none';
-      resolve();
-    }, 280);
-  });
-}
 if (typeof window !== 'undefined') {
   window.showCheckmark = showCheckmark;
   window.hideCheckmark = hideCheckmark;
 }
+

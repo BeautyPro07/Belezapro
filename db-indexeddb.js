@@ -265,3 +265,37 @@ if (typeof window !== 'undefined') {
     stores: STORES.slice()
   };
 }
+
+
+/** Health-check de persistência (IndexedDB + mirror LS) — NIST/PWA offline-first */
+function bpProbePersistence() {
+  return new Promise(function (resolve) {
+    var result = { idb: false, ls: false, mirrors: 0 };
+    try {
+      localStorage.setItem('bp_persist_probe', '1');
+      result.ls = localStorage.getItem('bp_persist_probe') === '1';
+      localStorage.removeItem('bp_persist_probe');
+    } catch (_) { result.ls = false; }
+    try {
+      var keys = ['config', 'clientes', 'agendamentos', 'movimentos', 'profissionais', 'servicos'];
+      for (var i = 0; i < keys.length; i++) {
+        if (localStorage.getItem('bp_' + keys[i])) result.mirrors++;
+      }
+    } catch (_) {}
+    try {
+      if (typeof openDB === 'function') {
+        Promise.resolve(openDB()).then(function () {
+          result.idb = true;
+          resolve(result);
+        }).catch(function () { resolve(result); });
+      } else {
+        resolve(result);
+      }
+    } catch (_) {
+      resolve(result);
+    }
+  });
+}
+if (typeof window !== 'undefined') {
+  window.bpProbePersistence = bpProbePersistence;
+}

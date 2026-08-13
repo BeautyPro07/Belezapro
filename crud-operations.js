@@ -163,6 +163,11 @@ async function loadState(trocouDeSalao = false) {
   const safe = (arr) => Array.isArray(arr) ? arr : [];
   state.clientes = safe(clientes);
   state.agendamentos = safe(agendamentos);
+  try {
+    if (typeof bpCheckExpiringAppointments === 'function') {
+      setTimeout(function () { bpCheckExpiringAppointments(); }, 600);
+    }
+  } catch (_) {}
   state.movimentos = safe(movimentos);
   state.profissionais = safe(profs);
   state.servicos = safe(servicos);
