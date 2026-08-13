@@ -496,11 +496,26 @@ textarea.input-field:focus-visible,
   margin-bottom: 4px;
 }
 .bp-expirar-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+.bp-expirar-title-main {
   color: var(--ink, #14110F);
   font-weight: 700;
   font-size: 1.12rem;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+/* Menor que «Atenção», maior que o corpo; cor cascata (não preto) */
+.bp-expirar-title-sub {
+  color: var(--gold-dark, #A7872B);
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
 }
 .bp-expirar-subtitle {
   color: var(--text-muted, #6B6560);
@@ -590,43 +605,76 @@ html.bp-has-session #login-view.view.active {
   pointer-events: none !important;
 }
 
-/* Ondas no ícone Ligar (modal expirar) */
+/* Ícone Ligar: vibração suave do telefone + 3 ondas do centro (pequenas) */
 .bp-call-icon-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
+  overflow: visible;
+}
+.bp-call-icon-wrap .bp-ic-call {
+  position: relative;
+  z-index: 2;
+  display: block;
 }
 .bp-call-ripple {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  margin-top: -3px;
   border-radius: 50%;
-  border: 1.5px solid var(--gold-dark, #B8962E);
+  border: 1.25px solid var(--green, #2C7A4D);
   opacity: 0;
   pointer-events: none;
+  z-index: 1;
+  box-sizing: border-box;
+}
+#expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-ic-call {
+  animation: bp-call-icon-shake 1.55s ease-in-out infinite;
+  transform-origin: 50% 50%;
 }
 #expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple {
-  animation: bp-call-wave 2s ease-out infinite;
+  animation: bp-call-wave-out 1.55s ease-out infinite;
+}
+#expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple:nth-child(1) {
+  animation-delay: 0s;
 }
 #expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple:nth-child(2) {
-  animation-delay: 0.65s;
+  animation-delay: 0.28s;
 }
 #expirar-ligar.bp-call-anim:not(.is-disabled):not(:disabled) .bp-call-ripple:nth-child(3) {
-  animation-delay: 1.3s;
+  animation-delay: 0.56s;
 }
-@keyframes bp-call-wave {
-  0% { transform: scale(0.6); opacity: 0.55; }
-  70% { transform: scale(2.1); opacity: 0; }
-  100% { transform: scale(2.1); opacity: 0; }
+/* Vibração só do ícone (não do botão inteiro) */
+@keyframes bp-call-icon-shake {
+  0%, 100% { transform: rotate(0deg) translateX(0); }
+  15% { transform: rotate(-11deg) translateX(-0.5px); }
+  30% { transform: rotate(10deg) translateX(0.5px); }
+  45% { transform: rotate(-8deg) translateX(-0.4px); }
+  60% { transform: rotate(7deg) translateX(0.3px); }
+  75% { transform: rotate(-4deg) translateX(-0.2px); }
+  90% { transform: rotate(2deg) translateX(0); }
 }
-.bp-expirar-title {
-  color: var(--ink, #14110F);
-  font-weight: 700;
-  font-size: 1.05rem;
-  line-height: 1.3;
+/* Ondas sequenciais a partir do centro: pequena → média → um pouco maior */
+@keyframes bp-call-wave-out {
+  0% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  55% {
+    opacity: 0.18;
+  }
+  100% {
+    transform: scale(2.55);
+    opacity: 0;
+  }
 }
 
 /* anti-flash final — vence .view.active de layout-nav-tabs.css */
