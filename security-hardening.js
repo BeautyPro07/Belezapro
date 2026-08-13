@@ -25,11 +25,16 @@
       if (typeof flushSyncQueue === "function") {
         await flushSyncQueue();
       }
+      var dadosMudaram = false;
       if (typeof carregarDoSupabase === "function") {
-        await carregarDoSupabase();
+        dadosMudaram = !!(await carregarDoSupabase());
       }
       lastPullAt = Date.now();
       if (typeof atualizarIndicadorSync === "function") atualizarIndicadorSync();
+      /* Badge de plano / limites: se o pull reportou mudança (incl. plano) */
+      if (dadosMudaram) {
+        try { if (typeof renderPlanoInfo === "function") renderPlanoInfo(); } catch (_) {}
+      }
       try {
         if (typeof bpFlushFotoUploadQueue === "function") await bpFlushFotoUploadQueue();
       } catch (_) {}

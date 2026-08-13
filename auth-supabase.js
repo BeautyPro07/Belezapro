@@ -505,6 +505,8 @@ async function sincronizarConfigDoServidor() {
     if (!resp.ok) return;
     const rows = await resp.json();
     if (rows.length > 0) {
+      var planoAnterior = state.config.plano;
+      var trialAnterior = state.config.trialInicio;
       state.config.plano       = rows[0].plano || 'trial';
       state.config.trialInicio = rows[0].trial_inicio || state.config.trialInicio;
       try {
@@ -514,7 +516,9 @@ async function sincronizarConfigDoServidor() {
         localStorage.removeItem('bp_plano_cache'); // legacy global
       } catch (_) {}
       await saveConfig();
-      if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+      if (state.config.plano !== planoAnterior || state.config.trialInicio !== trialAnterior) {
+        if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+      }
       // ET4.5: reconciliar contador de recibos com servidor + movimentos
       try {
         if (typeof bpSyncReciboCounter === 'function') await bpSyncReciboCounter();

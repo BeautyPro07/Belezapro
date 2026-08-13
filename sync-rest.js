@@ -840,8 +840,24 @@ async function carregarDoSupabase() {
     for (const p of state.profissionais) await dbPutLocal('profissionais', p);
     for (const s of state.servicos)      await dbPutLocal('servicos',      s);
 
-    window._bpDataFp = fpAfter;
-    return fpAfter !== fpBefore;
+    /* Plano em tempo quase real: salao_config NÃO estava no pull periódico.
+       Sem isto, state.config.plano só mudava no login/reload. */
+    var planoAntes = state.config && state.config.plano;
+    try {
+      if (typeof sincronizarConfigDoServidor === 'function') {
+        await sincronizarConfigDoServidor();
+      }
+    } catch (eCfg) {
+      try { console.warn('[carregarDoSupabase] salao_config', eCfg && eCfg.message); } catch (_) {}
+    }
+    var planoMudou = !!(state.config && state.config.plano !== planoAntes);
+    if (planoMudou) {
+      try { if (typeof renderPlanoInfo === 'function') renderPlanoInfo(); } catch (_) {}
+      try { if (typeof aplicarPermissoes === 'function') aplicarPermissoes(); } catch (_) {}
+    }
+
+    window._bpDataFp = fpAfter + '|plano:' + String((state.config && state.config.plano) || '');
+    return (fpAfter !== fpBefore) || planoMudou;
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') {
       console.warn('[carregarDoSupabase] Sessão expirada, a sincronização será retomada após login.');

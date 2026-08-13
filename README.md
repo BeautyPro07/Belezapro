@@ -1103,3 +1103,7 @@ Correcção: overlay envolve `bpSilentPull` / `carregarDoSupabase` nos dois cami
 - Chamada Edge `ia-query`: **só JWT de utilizador**; body **sem** `salaoId`/`plano` (resolvidos no servidor). Ver `EDGE_IA_SEGURANCA.md`.
 - Push de uso IA valida `response.ok`.
 
+## Correção — Plano em tempo quase real
+`carregarDoSupabase()` passa a chamar `sincronizarConfigDoServidor()` em cada pull.
+Assim `state.config.plano` e o badge actualizam no poll (~45s) e em `visibilitychange` / online, sem reload.
+Ficheiros: `sync-rest.js`, `auth-supabase.js`, `security-hardening.js`, `app.bundle.js`.

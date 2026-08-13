@@ -1785,6 +1785,8 @@ async function sincronizarConfigDoServidor() {
     if (!resp.ok) return;
     const rows = await resp.json();
     if (rows.length > 0) {
+      var planoAnterior = state.config.plano;
+      var trialAnterior = state.config.trialInicio;
       state.config.plano       = rows[0].plano || 'trial';
       state.config.trialInicio = rows[0].trial_inicio || state.config.trialInicio;
       try {
@@ -1794,7 +1796,9 @@ async function sincronizarConfigDoServidor() {
         localStorage.removeItem('bp_plano_cache'); // legacy global
       } catch (_) {}
       await saveConfig();
-      if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+      if (state.config.plano !== planoAnterior || state.config.trialInicio !== trialAnterior) {
+        if (typeof renderPlanoInfo === 'function') renderPlanoInfo();
+      }
       // ET4.5: reconciliar contador de recibos com servidor + movimentos
       try {
         if (typeof bpSyncReciboCounter === 'function') await bpSyncReciboCounter();
@@ -3877,8 +3881,24 @@ async function carregarDoSupabase() {
     for (const p of state.profissionais) await dbPutLocal('profissionais', p);
     for (const s of state.servicos)      await dbPutLocal('servicos',      s);
 
-    window._bpDataFp = fpAfter;
-    return fpAfter !== fpBefore;
+    /* Plano em tempo quase real: salao_config NÃO estava no pull periódico.
+       Sem isto, state.config.plano só mudava no login/reload. */
+    var planoAntes = state.config && state.config.plano;
+    try {
+      if (typeof sincronizarConfigDoServidor === 'function') {
+        await sincronizarConfigDoServidor();
+      }
+    } catch (eCfg) {
+      try { console.warn('[carregarDoSupabase] salao_config', eCfg && eCfg.message); } catch (_) {}
+    }
+    var planoMudou = !!(state.config && state.config.plano !== planoAntes);
+    if (planoMudou) {
+      try { if (typeof renderPlanoInfo === 'function') renderPlanoInfo(); } catch (_) {}
+      try { if (typeof aplicarPermissoes === 'function') aplicarPermissoes(); } catch (_) {}
+    }
+
+    window._bpDataFp = fpAfter + '|plano:' + String((state.config && state.config.plano) || '');
+    return (fpAfter !== fpBefore) || planoMudou;
   } catch (err) {
     if (err.message === 'SESSION_EXPIRED') {
       console.warn('[carregarDoSupabase] Sessão expirada, a sincronização será retomada após login.');
@@ -23422,11 +23442,16 @@ window.renderBarraMeta = renderBarraMeta;
       if (typeof flushSyncQueue === "function") {
         await flushSyncQueue();
       }
+      var dadosMudaram = false;
       if (typeof carregarDoSupabase === "function") {
-        await carregarDoSupabase();
+        dadosMudaram = !!(await carregarDoSupabase());
       }
       lastPullAt = Date.now();
       if (typeof atualizarIndicadorSync === "function") atualizarIndicadorSync();
+      /* Badge de plano / limites: se o pull reportou mudança (incl. plano) */
+      if (dadosMudaram) {
+        try { if (typeof renderPlanoInfo === "function") renderPlanoInfo(); } catch (_) {}
+      }
       try {
         if (typeof bpFlushFotoUploadQueue === "function") await bpFlushFotoUploadQueue();
       } catch (_) {}
