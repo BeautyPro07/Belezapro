@@ -447,7 +447,47 @@ async function checkSession() {
 
 
 async function getAuthHeaders() {
-  const { data: { session } } = await supabaseClient.auth.getSession();
+  // 1) Sessão actual
+  let session = null;
+  try {
+    const res = await supabaseClient.auth.getSession();
+    session = res && res.data ? res.data.session : null;
+  } catch (_) {
+    session = null;
+  }
+
+  // 2) Se não há token, tenta renovar (evita "sessão expirada" em cada pedido)
+  if (!session || !session.access_token) {
+    try {
+      const refreshed = await supabaseClient.auth.refreshSession();
+      session = refreshed && refreshed.data ? refreshed.data.session : null;
+      if (session && session.access_token) {
+        try {
+          if (typeof bpTouchSessionLocal === 'function') bpTouchSessionLocal();
+        } catch (_) {}
+      }
+    } catch (_) {
+      session = null;
+    }
+  }
+
+  // 3) Token próximo de expirar (< 60s) → renovar proactivamente
+  if (session && session.access_token && session.expires_at) {
+    var expiresAtMs = Number(session.expires_at) * 1000;
+    if (isFinite(expiresAtMs) && expiresAtMs - Date.now() < 60 * 1000) {
+      try {
+        const refreshed = await supabaseClient.auth.refreshSession();
+        var s2 = refreshed && refreshed.data ? refreshed.data.session : null;
+        if (s2 && s2.access_token) {
+          session = s2;
+          try {
+            if (typeof bpTouchSessionLocal === 'function') bpTouchSessionLocal();
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+  }
+
   if (!session || !session.access_token) {
     throw new Error('SESSION_EXPIRED');
   }

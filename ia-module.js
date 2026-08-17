@@ -968,7 +968,7 @@ async function perguntarIA(pergunta) {
   window.__bpIaLastMeta = { fonte: null };
   try { _bpIaSetHeaderStatus('busy', 'A contactar o agente…'); _bpIaSetComposerStatus('A processar…'); } catch (_) {}
   try {
-    // Fail-closed: só JWT de utilizador (nunca ANON). Plano/salao_id resolvidos na Edge via JWT.
+    // Auth resiliente: JWT de utilizador, com 1 retry após refresh se falhar.
     var iaHeaders = { 'Content-Type': 'application/json' };
     var iaAuthMode = 'none';
     try {
@@ -976,7 +976,26 @@ async function perguntarIA(pergunta) {
         if (typeof toast === 'function') toast('Sessão inválida. Faça login novamente.', 'error');
         return null;
       }
-      var authH = await getAuthHeaders();
+      var authH = null;
+      try {
+        authH = await getAuthHeaders();
+      } catch (e1) {
+        // Segunda tentativa após refresh explícito
+        try {
+          if (typeof supabaseClient !== 'undefined' && supabaseClient.auth) {
+            await supabaseClient.auth.refreshSession();
+          }
+        } catch (_) {}
+        try {
+          authH = await getAuthHeaders();
+        } catch (e2) {
+          if (e2 && e2.message === 'SESSION_EXPIRED') {
+            if (typeof toast === 'function') toast('Sessão expirada. Faça login novamente.', 'error');
+            return null;
+          }
+          throw e2;
+        }
+      }
       if (!authH || !authH.Authorization) {
         if (typeof toast === 'function') toast('Sessão inválida. Faça login novamente.', 'error');
         return null;
