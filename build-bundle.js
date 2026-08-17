@@ -44,6 +44,7 @@ const ORDER = [
   'eventos-caixa-vendas.js',
   'eventos-globais.js',
   'ia-module.js',
+  'benza-tools.js',              // Benza — tools seguras (deps: state + CRUD)
   'expirar-agendamento.js',
   'main.js',
   // --- Features domínio (deps: state, crud, utils) ---
