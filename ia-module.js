@@ -16,31 +16,31 @@ function _bpIaTrimTexto(s, max) {
   return cut.replace(/[\s,;:.-]+$/, '') + '…';
 }
 
-/** Histórico compacto para API — mais memória sem explodir tokens. */
+/** Histórico compacto para API (estilo contexto Grok: recente + curto). */
 function _bpIaHistoricoCompacto(hist, maxTurns, maxCharsEach) {
-  maxTurns = maxTurns || 8;
-  maxCharsEach = maxCharsEach || 900;
+  maxTurns = maxTurns || 4;
+  maxCharsEach = maxCharsEach || 320;
   var list = Array.isArray(hist) ? hist.slice(-maxTurns) : [];
   return list.map(function (t) {
     return {
-      pergunta: _bpIaTrimTexto(t && t.pergunta, 400),
+      pergunta: _bpIaTrimTexto(t && t.pergunta, 180),
       resposta: _bpIaTrimTexto(t && t.resposta, maxCharsEach),
       fonte: (t && t.fonte) || undefined
     };
   });
 }
 
-/** Contexto de salão — mais completo, ainda seguro contra payloads gigantes. */
+/** Contexto de salão compacto — evita payloads gigantes que truncam a resposta. */
 function _bpIaContextoCompacto(ctxRaw) {
   if (ctxRaw == null) return '';
   if (typeof ctxRaw === 'object' && ctxRaw.erro) return ctxRaw;
   var s = typeof ctxRaw === 'string' ? ctxRaw : String(ctxRaw);
   /* Preferir cabeçalho operacional; cortar listas longas de clientes */
-  if (s.length > 5200) {
-    s = s.replace(/Top clientes por valor gasto[\s\S]*?(?=\n\s*PROFISSIONAIS|$)/i, 'Top clientes: (lista longa omitida)\n\n');
+  if (s.length > 3500) {
+    s = s.replace(/Top clientes por valor gasto[\s\S]*?(?=\n\s*PROFISSIONAIS|$)/i, 'Top clientes: (omitido — lista longa)\n\n');
   }
-  if (s.length > 4800) {
-    s = _bpIaTrimTexto(s, 4800);
+  if (s.length > 2800) {
+    s = _bpIaTrimTexto(s, 2800);
   }
   return s;
 }
@@ -911,8 +911,8 @@ async function perguntarIA(pergunta) {
     toast('Escreva uma pergunta.', 'warning');
     return null;
   }
-  if (q.length > 2000) {
-    toast('Pergunta demasiado longa (máx. 2000 caracteres).', 'warning');
+  if (q.length > 500) {
+    toast('Pergunta demasiado longa (máx. 500 caracteres).', 'warning');
     return null;
   }
   if (_iaBusy) return null;
@@ -961,14 +961,14 @@ async function perguntarIA(pergunta) {
     ? _bpIaContextoCompacto(contextoRaw)
     : contextoRaw;
   const historicoEnvio = (typeof _bpIaHistoricoCompacto === 'function')
-    ? _bpIaHistoricoCompacto(iaHistorico, 8, 900)
-    : (iaHistorico || []).slice(-8);
+    ? _bpIaHistoricoCompacto(iaHistorico, 4, 320)
+    : (iaHistorico || []).slice(-4);
 
   _iaBusy = true;
   window.__bpIaLastMeta = { fonte: null };
   try { _bpIaSetHeaderStatus('busy', 'A contactar o agente…'); _bpIaSetComposerStatus('A processar…'); } catch (_) {}
   try {
-    // Auth resiliente: JWT de utilizador, com 1 retry após refresh se falhar.
+    // Fail-closed: só JWT de utilizador (nunca ANON). Plano/salao_id resolvidos na Edge via JWT.
     var iaHeaders = { 'Content-Type': 'application/json' };
     var iaAuthMode = 'none';
     try {
@@ -976,26 +976,7 @@ async function perguntarIA(pergunta) {
         if (typeof toast === 'function') toast('Sessão inválida. Faça login novamente.', 'error');
         return null;
       }
-      var authH = null;
-      try {
-        authH = await getAuthHeaders();
-      } catch (e1) {
-        // Segunda tentativa após refresh explícito
-        try {
-          if (typeof supabaseClient !== 'undefined' && supabaseClient.auth) {
-            await supabaseClient.auth.refreshSession();
-          }
-        } catch (_) {}
-        try {
-          authH = await getAuthHeaders();
-        } catch (e2) {
-          if (e2 && e2.message === 'SESSION_EXPIRED') {
-            if (typeof toast === 'function') toast('Sessão expirada. Faça login novamente.', 'error');
-            return null;
-          }
-          throw e2;
-        }
-      }
+      var authH = await getAuthHeaders();
       if (!authH || !authH.Authorization) {
         if (typeof toast === 'function') toast('Sessão inválida. Faça login novamente.', 'error');
         return null;
@@ -1021,10 +1002,7 @@ async function perguntarIA(pergunta) {
         pergunta: q,
         contexto: contexto,
         historico: historicoEnvio,
-        plano: plano || undefined,
-        instrucoes:
-          'Responde em português de Angola. Calibra o tamanho: pergunta simples → curto; análise → estruturado. ' +
-          'Nunca cortes frases a meio. Usa o histórico. Sê estratégico e prático.'
+        instrucoes: 'Responde em português de Angola, de forma clara e completa. Não cortes frases a meio. Se precisares de ser breve, termina sempre a última frase.'
       })
     });
 
