@@ -1,5 +1,6 @@
 // BeautyPro Service Worker — alinhado ao index.html (só app.bundle.js)
-const CACHE_NAME = 'belezapro-shell-v20260813-flashfix';
+// v20260819-benza-ficha: força actualização do shell após correcção da Benza (lista = aba Clientes)
+const CACHE_NAME = 'belezapro-shell-v20260819-benza-ficha';
 
 const APP_SHELL = [
   './',
@@ -41,34 +42,57 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((nomes) =>
       Promise.all(nomes.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
-    )
+    ).then(function () {
+      return self.clients.claim();
+    })
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = event.request.url || '';
+
   // Nunca cachear REST/Storage Supabase
   if (url.indexOf('supabase.co') !== -1) {
     event.respondWith(fetch(event.request));
     return;
   }
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((res) => {
-          if (res && res.status === 200 && (url.indexOf('app.bundle.js') !== -1 || url.indexOf('.css') !== -1 || url.indexOf('index.html') !== -1)) {
-            const clone = res.clone();
-            caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
+
+  // app.bundle.js + index.html: network-first, sem servir shell antiga
+  var isShellCritical =
+    url.indexOf('app.bundle.js') !== -1 ||
+    url.indexOf('index.html') !== -1 ||
+    url.indexOf('/sw.js') !== -1 ||
+    (event.request.mode === 'navigate');
+
+  if (isShellCritical) {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then(function (res) {
+          if (res && res.status === 200 && url.indexOf('app.bundle.js') !== -1) {
+            var clone = res.clone();
+            caches.open(CACHE_NAME).then(function (c) { c.put(event.request, clone); });
           }
           return res;
         })
-        .catch(() => cached);
-      // Network-first para JS/HTML (evita shell antiga); cache-first para assets estáticos
-      if (url.indexOf('app.bundle.js') !== -1 || url.indexOf('index.html') !== -1 || url.endsWith('/')) {
-        return network;
-      }
+        .catch(function () {
+          return caches.match(event.request);
+        })
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then(function (cached) {
+      var network = fetch(event.request)
+        .then(function (res) {
+          if (res && res.status === 200 && url.indexOf('.css') !== -1) {
+            var clone = res.clone();
+            caches.open(CACHE_NAME).then(function (c) { c.put(event.request, clone); });
+          }
+          return res;
+        })
+        .catch(function () { return cached; });
       return cached || network;
     })
   );

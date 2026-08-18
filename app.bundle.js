@@ -14182,82 +14182,112 @@ function normalizarPerguntaIA(q) {
  */
 function responderIALocal(pergunta) {
   var raw = String(pergunta || '').trim();
+  if (!raw || raw.length < 2) return null;
+
   var q = (typeof normalizarPerguntaIA === 'function')
     ? normalizarPerguntaIA(raw)
-    : raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    : raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
   if (!q || q.length < 3) return null;
-  if (!state || !state.clientes) return null;
 
-  /* ---- Ficha de clientes (determinístico — nunca LLM) ---- */
+  /* state.clientes = ficha da aba Clientes (fonte de verdade) */
+  var st = (typeof state !== 'undefined' && state) ? state : (typeof window !== 'undefined' ? window.state : null);
+  if (!st || !Array.isArray(st.clientes)) return null;
+
   var _isAct = function (x) {
-    return x && x.ativo !== false && x.ativo !== 0 && x.ativo !== 'false';
+    return x && x.nome && x.ativo !== false && x.ativo !== 0 && x.ativo !== 'false';
   };
-  var _activos = (state.clientes || []).filter(_isAct);
-  var _gasto = {};
-  (state.movimentos || []).forEach(function (m) {
-    if (!m || m.tipo !== 'venda' || !m.cliente) return;
-    var cn = String(m.cliente).trim();
-    if (!cn) return;
-    _gasto[cn] = (_gasto[cn] || 0) + (Number(m.valor) || 0);
-  });
-  var _semVenda = _activos.filter(function (c) {
-    var n = String(c.nome || '').trim();
-    return n && !(_gasto[n] > 0);
-  });
-  var _comVenda = _activos.filter(function (c) {
-    var n = String(c.nome || '').trim();
-    return n && (_gasto[n] > 0);
-  });
+  var _activos = st.clientes.filter(_isAct);
 
-  // Lista todos os clientes da ficha (sem inventar nomes de vendas)
-  if (
-    /(lista|listar|mostra|mostrar|quais|quem sao|quem são|todos).{0,40}clientes/.test(q) ||
-    /^(clientes|todos os clientes|lista de clientes)\b/.test(q) ||
-    /ficha de clientes|aba clientes/.test(q)
-  ) {
-    if (!_activos.length) return 'Não há clientes activos na ficha neste salão.';
-    // Se pede explicitamente sem venda
-    if (/(sem (nenhuma )?venda|sem compra|sem gasto|nunca compr|0 venda|nenhuma venda)/.test(q)) {
-      if (!_semVenda.length) {
-        return 'Na ficha há ' + _activos.length + ' cliente(s) activo(s) e todos já têm pelo menos uma venda registada.';
+  /* Gasto por nome E por cliente_id (evita falso "sem venda") */
+  var _gastoNome = {};
+  var _gastoId = {};
+  (st.movimentos || []).forEach(function (m) {
+    if (!m || m.tipo !== 'venda') return;
+    var val = Number(m.valor) || 0;
+    if (m.cliente_id) {
+      _gastoId[String(m.cliente_id)] = (_gastoId[String(m.cliente_id)] || 0) + val;
+    }
+    var cn = String(m.cliente || '').trim();
+    if (cn) _gastoNome[cn] = (_gastoNome[cn] || 0) + val;
+  });
+  var _gastoDe = function (c) {
+    var byId = c.id ? (_gastoId[String(c.id)] || 0) : 0;
+    var byNome = _gastoNome[String(c.nome || '').trim()] || 0;
+    return byId > 0 ? byId : byNome;
+  };
+
+  var _semVenda = _activos.filter(function (c) { return !(_gastoDe(c) > 0); });
+  var _comVenda = _activos.filter(function (c) { return _gastoDe(c) > 0; });
+
+  var pedeClientes =
+    /\bclientes?\b/.test(q) ||
+    /\bficha\b/.test(q) ||
+    /\baba\b/.test(q);
+  var pedeLista =
+    /\b(lista|listar|mostra|mostrar|quais|quem|todos|todas|elenca|nomeia|devolve|ver|mostra-me|me de|me dê|manda)\b/.test(q) ||
+    /\bsem (nenhuma )?venda\b/.test(q) ||
+    /\bsem compra\b/.test(q) ||
+    /\bcadastrad/.test(q);
+  var pedeSemVenda =
+    /\bsem (nenhuma )?venda\b/.test(q) ||
+    /\bsem compra\b/.test(q) ||
+    /\bsem gasto\b/.test(q) ||
+    /\bnunca compr/.test(q) ||
+    /\bnenhuma venda\b/.test(q) ||
+    /\b0 venda\b/.test(q) ||
+    /\bsem registo de venda\b/.test(q);
+
+  /* Interceptação forte: qualquer pedido de lista/ficha de clientes */
+  if (pedeClientes && (pedeLista || pedeSemVenda)) {
+    try {
+      if (typeof console !== 'undefined' && console.info) {
+        console.info('[Benza local] ficha clientes', {
+          activos: _activos.length,
+          semVenda: _semVenda.length,
+          comVenda: _comVenda.length,
+          pergunta: raw.slice(0, 120)
+        });
       }
-      var linhasS = _semVenda.map(function (c, i) {
-        return (i + 1) + '. ' + (c.nome || '—') + (c.telefone ? ' · ' + c.telefone : '');
+    } catch (_) {}
+
+    if (!_activos.length) {
+      return 'Na aba Clientes não há clientes activos neste salão.';
+    }
+
+    if (pedeSemVenda) {
+      if (!_semVenda.length) {
+        return 'Na aba Clientes há ' + _activos.length +
+          ' activo(s) e todos já têm pelo menos uma venda registada.';
+      }
+      var ls = _semVenda.map(function (c, i) {
+        return (i + 1) + '. ' + c.nome + (c.telefone ? ' · ' + c.telefone : '');
       });
-      return 'Clientes activos SEM nenhuma venda (' + _semVenda.length + ' de ' + _activos.length + '):\n' + linhasS.join('\n');
+      return 'Clientes da aba Clientes SEM nenhuma venda (' +
+        _semVenda.length + ' de ' + _activos.length + '):\n' + ls.join('\n');
     }
-    var linhasT = _activos.map(function (c, i) {
-      var n = String(c.nome || '').trim();
-      var flag = (_gasto[n] > 0) ? '' : ' · sem venda';
-      return (i + 1) + '. ' + (c.nome || '—') + (c.telefone ? ' · ' + c.telefone : '') + flag;
+
+    var lt = _activos.map(function (c, i) {
+      var g = _gastoDe(c);
+      return (i + 1) + '. ' + c.nome +
+        (c.telefone ? ' · ' + c.telefone : '') +
+        (g > 0 ? '' : ' · sem venda');
     });
-    return 'Clientes activos na ficha (' + _activos.length + '):\n' + linhasT.join('\n') +
-      (_semVenda.length ? ('\n\nDestes, ' + _semVenda.length + ' ainda não têm nenhuma venda.') : '');
+    return 'Clientes da aba Clientes (' + _activos.length + '):\n' + lt.join('\n') +
+      (_semVenda.length
+        ? ('\n\nSem nenhuma venda: ' + _semVenda.length +
+           ' (' + _semVenda.map(function (c) { return c.nome; }).join(', ') + ').')
+        : '');
   }
 
-  // Só clientes sem venda
-  if (/(clientes?).{0,30}(sem (nenhuma )?venda|sem compra|sem gasto)/.test(q) ||
-      /(sem (nenhuma )?venda|sem compra).{0,30}clientes?/.test(q)) {
-    if (!_semVenda.length) {
-      return 'Na ficha há ' + _activos.length + ' cliente(s) activo(s) e todos já têm pelo menos uma venda registada.';
-    }
-    var linhas2 = _semVenda.map(function (c, i) {
-      return (i + 1) + '. ' + (c.nome || '—') + (c.telefone ? ' · ' + c.telefone : '');
-    });
-    return 'Clientes activos SEM nenhuma venda (' + _semVenda.length + '):\n' + linhas2.join('\n');
-  }
+  if (!st.movimentos || !st.agendamentos) return null;
 
-  if (!state.movimentos || !state.agendamentos) return null;
-
-  /* ---- Portão inteligente ---- */
-  // Texto longo / várias frases → nunca local (manda para o modelo)
+  /* ---- Portão inteligente (métricas curtas) ---- */
   if (raw.length > 72) return null;
   if ((raw.match(/[.?!;]/g) || []).length >= 2) return null;
-  // Muitas palavras → intenção provavelmente complexa
   var palavras = q.split(/\s+/).filter(Boolean);
   if (palavras.length > 10) return null;
-  // Mistura de temas (ex.: agenda + estratégia + cliente) → modelo
+
   var temas = 0;
   if (/(fatur|receita|vendeu|venda|vendas)/.test(q)) temas++;
   if (/(despes|gastou)/.test(q)) temas++;
@@ -14268,24 +14298,23 @@ function responderIALocal(pergunta) {
 
   var hojeStr = typeof hoje === 'function' ? hoje() : '';
   var num = function (v) { return Number(v) || 0; };
-  var vendasHoje = (state.movimentos || []).filter(function (m) {
+  var vendasHoje = (st.movimentos || []).filter(function (m) {
     return m.data === hojeStr && m.tipo === 'venda';
   });
-  var despHoje = (state.movimentos || []).filter(function (m) {
+  var despHoje = (st.movimentos || []).filter(function (m) {
     return m.data === hojeStr && m.tipo === 'despesa';
   });
   var totalVendas = vendasHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
   var totalDesp = despHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
-  var fundo = num(state.config && state.config.fundo);
+  var fundo = num(st.config && st.config.fundo);
   var saldo = fundo + totalVendas - totalDesp;
-  var agHoje = (state.agendamentos || []).filter(function (a) { return a.data === hojeStr; });
+  var agHoje = (st.agendamentos || []).filter(function (a) { return a.data === hojeStr; });
   var pend = agHoje.filter(function (a) {
-    var st = String(a.status || a.estado || '').toLowerCase();
-    return st === 'agendado' || (!st);
+    var stt = String(a.status || a.estado || '').toLowerCase();
+    return stt === 'agendado' || (!stt);
   });
   var ticket = vendasHoje.length ? Math.round(totalVendas / vendasHoje.length) : 0;
 
-  // Padrões ANCORADOS: intenção clara de métrica de HOJE (não palavra solta no meio)
   var soHoje =
     /^(quanto|qual|como)\b/.test(q) ||
     /\bhoje\b/.test(q) ||
@@ -14295,7 +14324,6 @@ function responderIALocal(pergunta) {
     return null;
   }
 
-  // Faturamento / vendas hoje
   if (
     /^(quanto\s+(faturei|vendi|foi\s+o\s+faturamento)|faturamento(\s+de\s+hoje)?|vendas(\s+de\s+hoje)?|quanto\s+foi\s+hoje|receita\s+de\s+hoje)\b/.test(q) ||
     (/^(quanto|qual)\b/.test(q) && /(fatur|vendeu|vendas|receita)/.test(q) && /\bhoje\b/.test(q) && !/despes/.test(q))
@@ -14305,7 +14333,6 @@ function responderIALocal(pergunta) {
       (ticket ? ' · ticket médio ' + (typeof fmtKz === 'function' ? fmtKz(ticket) : ticket + ' Kz') + '.' : '.');
   }
 
-  // Despesas hoje
   if (
     /^(despesas(\s+de\s+hoje)?|quanto\s+(gastei|foi\s+de\s+despesa))\b/.test(q) ||
     (/^(quanto|qual)\b/.test(q) && /despes|gastei/.test(q))
@@ -14314,7 +14341,6 @@ function responderIALocal(pergunta) {
       (despHoje.length ? ' (' + despHoje.length + (despHoje.length === 1 ? ' registo).' : ' registos).') : '.');
   }
 
-  // Saldo / caixa
   if (/^(saldo|caixa|fundo)(\s+de\s+hoje)?\b/.test(q) || (/^(quanto|qual)\b/.test(q) && /(saldo|caixa|fundo)/.test(q))) {
     return 'Fundo ' + (typeof fmtKz === 'function' ? fmtKz(fundo) : fundo + ' Kz') +
       ' · vendas ' + (typeof fmtKz === 'function' ? fmtKz(totalVendas) : totalVendas + ' Kz') +
@@ -14322,7 +14348,6 @@ function responderIALocal(pergunta) {
       ' → saldo estimado ' + (typeof fmtKz === 'function' ? fmtKz(saldo) : saldo + ' Kz') + '.';
   }
 
-  // Agenda hoje
   if (
     /^(agenda(\s+de\s+hoje)?|marcacoes\s+de\s+hoje|o\s+que\s+tenho\s+hoje)\b/.test(q) ||
     (/^(quantos|como)\b/.test(q) && /agenda|marcac|pendente/.test(q) && (/\bhoje\b/.test(q) || palavras.length <= 6))
@@ -14330,25 +14355,22 @@ function responderIALocal(pergunta) {
     return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
   }
 
-  // Quantos clientes
   if (/^(quantos\s+clientes|numero\s+de\s+clientes|nº\s+de\s+clientes|total\s+de\s+clientes)\b/.test(q)) {
-    var nc = (state.clientes || []).filter(function (c) {
-      return c && c.ativo !== false && c.ativo !== 0 && c.ativo !== 'false';
-    }).length;
-    return 'Tem ' + nc + (nc === 1 ? ' cliente activo' : ' clientes activos') + ' na ficha.';
+    return 'Tem ' + _activos.length + (_activos.length === 1 ? ' cliente activo' : ' clientes activos') + ' na aba Clientes.';
   }
 
-  // Equipa
   if (/^(quantos\s+profissionais|tamanho\s+da\s+equipa|quantos\s+na\s+equipa)\b/.test(q)) {
-    var np = (state.profissionais || []).filter(function (p) {
-      return p && p.ativo !== false && p.ativo !== 0 && p.ativo !== 'false';
-    }).length;
+    var np = (st.profissionais || []).filter(_isAct).length;
     return 'Equipa: ' + np + (np === 1 ? ' profissional activo.' : ' profissionais activos.');
   }
 
   return null;
 }
 
+if (typeof window !== 'undefined') {
+  window.responderIALocal = responderIALocal;
+  window.buildContextoIA = buildContextoIA;
+}
 let _iaBusy = false;
 window.__bpIaLastMeta = { fonte: null };
 
