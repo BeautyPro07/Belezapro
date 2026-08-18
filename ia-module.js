@@ -35,12 +35,9 @@ function _bpIaContextoCompacto(ctxRaw) {
   if (ctxRaw == null) return '';
   if (typeof ctxRaw === 'object' && ctxRaw.erro) return ctxRaw;
   var s = typeof ctxRaw === 'string' ? ctxRaw : String(ctxRaw);
-  /* Preferir cabeçalho operacional; cortar listas longas de clientes */
-  if (s.length > 5200) {
-    s = s.replace(/Top clientes por valor gasto[\s\S]*?(?=\n\s*PROFISSIONAIS|$)/i, 'Top clientes: (lista longa omitida)\n\n');
-  }
-  if (s.length > 4800) {
-    s = _bpIaTrimTexto(s, 4800);
+  /* Teto alinhado com MAX_CONTEXT_CHARS da edge (60000). Não omitir clientes. */
+  if (s.length > 58000) {
+    s = _bpIaTrimTexto(s, 58000);
   }
   return s;
 }
@@ -49,117 +46,233 @@ function buildContextoIA() {
   if (!state.movimentos || !Array.isArray(state.movimentos) || !state.agendamentos || !Array.isArray(state.agendamentos)) {
     return { erro: 'Dados ainda não carregados. Tente novamente em instantes.' };
   }
-  const hojeStr = hoje();
-  const vendasHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'venda');
-  const despHoje = state.movimentos.filter(m => m.data === hojeStr && m.tipo === 'despesa');
-  const agHoje = state.agendamentos.filter(a => a.data === hojeStr);
-  const d30str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-29) : (function () {
+
+  var hojeStr = hoje();
+  var num = function (v) { return Number(v) || 0; };
+  var stAg = function (a) {
+    if (typeof _bpIaSt === 'function') return _bpIaSt(a);
+    return String((a && (a.status || a.estado)) || 'agendado').toLowerCase();
+  };
+  var isActivo = function (x) {
+    if (!x) return false;
+    return x.ativo !== false && x.ativo !== 0 && x.ativo !== 'false';
+  };
+
+  var vendasHoje = state.movimentos.filter(function (m) { return m.data === hojeStr && m.tipo === 'venda'; });
+  var despHoje = state.movimentos.filter(function (m) { return m.data === hojeStr && m.tipo === 'despesa'; });
+  var agHoje = state.agendamentos.filter(function (a) { return a.data === hojeStr; });
+
+  var d30str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-29) : (function () {
     var d = new Date(); d.setDate(d.getDate() - 29);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   })();
-  const vendas30 = state.movimentos.filter(m => m.data >= d30str && m.tipo === 'venda');
 
-  // CORRIGIDO: agrupa por profissional_id
-  const byProf = {};
-  vendas30.forEach(v => {
+  var vendas30 = state.movimentos.filter(function (m) { return m.data >= d30str && m.tipo === 'venda'; });
+
+  var byProf = {};
+  vendas30.forEach(function (v) {
     if (v.profissional_id) {
-      const nome = getProfissionalNome(v.profissional_id);
-      byProf[nome] = (byProf[nome] || 0) + (Number(v.valor) || 0);
+      var nome = (typeof getProfissionalNome === 'function') ? getProfissionalNome(v.profissional_id) : (v.profissional || '—');
+      byProf[nome] = (byProf[nome] || 0) + num(v.valor);
     }
   });
 
-  const byServ = {};
-  vendas30.forEach(v => { if (v.itens) v.itens.forEach(i => { byServ[i.nome] = (byServ[i.nome] || 0) + (i.quantidade || 1); }); });
-  const totalVendas30 = vendas30.reduce((s, v) => s + (Number(v.valor) || 0), 0);
-  const ticketMedio = vendas30.length > 0 ? Math.round(totalVendas30 / vendas30.length) : 0;
-  const totalVendasHoje = vendasHoje.reduce((s, v) => s + (Number(v.valor) || 0), 0);
-  const totalDespHoje = despHoje.reduce((s, d) => s + (Number(d.valor) || 0), 0);
-  const clientesUnicos = new Set(vendasHoje.map(v => v.cliente)).size;
-
-  const hojeD = new Date(hojeStr + 'T12:00:00');
-  const iniSemanaAtualStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-6) : hojeStr;
-  const iniSemanaAnteriorStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-13) : hojeStr;
-  const fimSemanaAnteriorStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-7) : hojeStr;
-  const vendasSemanaAtual = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= iniSemanaAtualStr && m.data <= hojeStr);
-  const vendasSemanaAnterior = state.movimentos.filter(m => m.tipo === 'venda' && m.data >= iniSemanaAnteriorStr && m.data <= fimSemanaAnteriorStr);
-  const totalSemanaAtual = vendasSemanaAtual.reduce((s, v) => s + _bpIaNum(v.valor), 0);
-  const totalSemanaAnterior = vendasSemanaAnterior.reduce((s, v) => s + _bpIaNum(v.valor), 0);
-
-  const fim7Str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(7) : hojeStr;
-  const ag7dias = state.agendamentos.filter(a => {
-    if (!(a.data >= hojeStr && a.data <= fim7Str)) return false;
-    var st = (typeof _bpIaSt === 'function') ? _bpIaSt(a) : String(a.status || a.estado || '').toLowerCase();
-    return st !== 'cancelado';
+  var byServ = {};
+  vendas30.forEach(function (v) {
+    if (v.itens) {
+      v.itens.forEach(function (i) {
+        if (!i || !i.nome) return;
+        byServ[i.nome] = (byServ[i.nome] || 0) + (num(i.quantidade) || 1);
+      });
+    }
   });
 
-  const ag30 = state.agendamentos.filter(a => a.data >= d30str && a.data <= hojeStr);
-  const ag30Cancelados = ag30.filter(a => {
-    var st = (typeof _bpIaSt === 'function') ? _bpIaSt(a) : String(a.status || a.estado || '').toLowerCase();
-    return st === 'cancelado';
-  }).length;
-  const taxaCancelamento = ag30.length > 0 ? Math.round((ag30Cancelados / ag30.length) * 100) : 0;
+  var totalVendas30 = vendas30.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  var ticketMedio = vendas30.length > 0 ? Math.round(totalVendas30 / vendas30.length) : 0;
+  var totalVendasHoje = vendasHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  var totalDespHoje = despHoje.reduce(function (s, d) { return s + num(d.valor); }, 0);
+  var clientesUnicos = new Set(vendasHoje.map(function (v) { return v.cliente; }).filter(Boolean)).size;
 
-  const servicosOrdenados = Object.entries(byServ).sort((a, b) => a[1] - b[1]);
-  const servicoMenosVendido = servicosOrdenados[0];
-
-  const gastoPorCliente = {};
-  const ultimaCompraPorCliente = {};
-  state.movimentos.filter(m => m.tipo === 'venda' && m.cliente).forEach(v => {
-    gastoPorCliente[v.cliente] = (gastoPorCliente[v.cliente] || 0) + v.valor;
-    if (!ultimaCompraPorCliente[v.cliente] || v.data > ultimaCompraPorCliente[v.cliente]) ultimaCompraPorCliente[v.cliente] = v.data;
+  var hojeD = new Date(hojeStr + 'T12:00:00');
+  var iniSemanaAtualStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-6) : hojeStr;
+  var iniSemanaAnteriorStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-13) : hojeStr;
+  var fimSemanaAnteriorStr = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-7) : hojeStr;
+  var vendasSemanaAtual = state.movimentos.filter(function (m) {
+    return m.tipo === 'venda' && m.data >= iniSemanaAtualStr && m.data <= hojeStr;
   });
-  const clientesOrdenados = Object.entries(gastoPorCliente).sort((a, b) => b[1] - a[1]);
-  const totalClientesComCompra = clientesOrdenados.length;
-  const top30Clientes = clientesOrdenados.slice(0, 30).map(([nome, total]) => {
-    const ultima = ultimaCompraPorCliente[nome];
-    const dias = ultima ? Math.floor((hojeD - new Date(ultima + 'T00:00:00')) / (1000 * 60 * 60 * 24)) : null;
-    return `- ${nome}: ${total} Kz gastos, última visita há ${dias !== null ? dias + ' dias' : 'desconhecido'}`;
+  var vendasSemanaAnterior = state.movimentos.filter(function (m) {
+    return m.tipo === 'venda' && m.data >= iniSemanaAnteriorStr && m.data <= fimSemanaAnteriorStr;
+  });
+  var totalSemanaAtual = vendasSemanaAtual.reduce(function (s, v) {
+    return s + (typeof _bpIaNum === 'function' ? _bpIaNum(v.valor) : num(v.valor));
+  }, 0);
+  var totalSemanaAnterior = vendasSemanaAnterior.reduce(function (s, v) {
+    return s + (typeof _bpIaNum === 'function' ? _bpIaNum(v.valor) : num(v.valor));
+  }, 0);
+
+  var fim14Str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(14) : hojeStr;
+  var ini14Str = (typeof _bpIaDataOffset === 'function') ? _bpIaDataOffset(-14) : hojeStr;
+
+  var agProximos = state.agendamentos.filter(function (a) {
+    if (!(a.data >= hojeStr && a.data <= fim14Str)) return false;
+    return stAg(a) !== 'cancelado';
+  });
+  var agHistorico = state.agendamentos.filter(function (a) {
+    return a.data >= ini14Str && a.data < hojeStr;
   });
 
-  const planoAtual = getPlanoAtual();
-  const diasTrial = planoAtual === 'trial' ? getDiasTrialRestantes() : null;
+  var ag30 = state.agendamentos.filter(function (a) { return a.data >= d30str && a.data <= hojeStr; });
+  var ag30Cancelados = ag30.filter(function (a) { return stAg(a) === 'cancelado'; }).length;
+  var taxaCancelamento = ag30.length > 0 ? Math.round((ag30Cancelados / ag30.length) * 100) : 0;
 
-  return `SALÃO: ${state.config.storeName}
-    DATA: ${hojeStr}
-    PLANO ATUAL: ${planoAtual}${diasTrial !== null ? ` (restam ${diasTrial} dias de teste gratuito)` : ''}
-    CONTACTO DO ADMINISTRADOR (WhatsApp, só oferecer se o cliente reportar um problema com a plataforma): ${WHATSAPP_NUMBER}
+  var servicosOrdenados = Object.keys(byServ).map(function (k) { return [k, byServ[k]]; }).sort(function (a, b) { return a[1] - b[1]; });
+  var servicoMenosVendido = servicosOrdenados[0];
 
-    HOJE:
-    - Faturamento: ${totalVendasHoje} Kz
-    - Vendas: ${vendasHoje.length}
-    - Despesas: ${totalDespHoje} Kz
-    - Agendamentos: ${agHoje.length} (${agHoje.filter(a => a.status === 'realizado').length} realizados)
-    - Clientes atendidos: ${clientesUnicos}
+  /* ---- Breakdown diário (todos os dias com movimento) ---- */
+  var porDia = {};
+  (state.movimentos || []).forEach(function (m) {
+    if (!m || !m.data) return;
+    if (!porDia[m.data]) porDia[m.data] = { vendas: 0, despesas: 0, nVendas: 0, nDespesas: 0 };
+    if (m.tipo === 'venda') {
+      porDia[m.data].vendas += num(m.valor);
+      porDia[m.data].nVendas += 1;
+    } else if (m.tipo === 'despesa') {
+      porDia[m.data].despesas += num(m.valor);
+      porDia[m.data].nDespesas += 1;
+    }
+  });
+  var diasOrdenados = Object.keys(porDia).sort();
+  var linhasDia = diasOrdenados.map(function (d) {
+    var x = porDia[d];
+    return '- ' + d + ': vendas ' + x.vendas + ' Kz (' + x.nVendas + ') · despesas ' + x.despesas + ' Kz (' + x.nDespesas + ')';
+  });
 
-    ÚLTIMOS 30 DIAS:
-    - Total faturado: ${totalVendas30} Kz
-    - Total vendas: ${vendas30.length}
-    - Ticket médio: ${ticketMedio} Kz
-    - Taxa de cancelamento de agendamentos: ${taxaCancelamento}%
+  /* ---- Clientes activos (sem limite) + eliminados ---- */
+  var clientesActivos = (state.clientes || []).filter(isActivo);
+  var clientesEliminados = (state.clientes || []).filter(function (c) { return c && !isActivo(c); });
 
-    ESTA SEMANA vs SEMANA ANTERIOR:
-    - Esta semana: ${totalSemanaAtual} Kz
-    - Semana anterior: ${totalSemanaAnterior} Kz
-    - Variação: ${totalSemanaAnterior > 0 ? Math.round(((totalSemanaAtual - totalSemanaAnterior) / totalSemanaAnterior) * 100) : 0}%
+  var gastoPorCliente = {};
+  var ultimaCompraPorCliente = {};
+  state.movimentos.filter(function (m) { return m.tipo === 'venda' && m.cliente; }).forEach(function (v) {
+    gastoPorCliente[v.cliente] = (gastoPorCliente[v.cliente] || 0) + num(v.valor);
+    if (!ultimaCompraPorCliente[v.cliente] || v.data > ultimaCompraPorCliente[v.cliente]) {
+      ultimaCompraPorCliente[v.cliente] = v.data;
+    }
+  });
 
-    PRÓXIMOS 7 DIAS:
-    - Agendamentos previstos: ${ag7dias.length}
+  var linhasClientes = clientesActivos.map(function (c) {
+    var nome = c.nome || '—';
+    var tel = c.telefone || 'sem telefone';
+    var gasto = gastoPorCliente[nome] || 0;
+    var ultima = ultimaCompraPorCliente[nome];
+    var dias = ultima ? Math.floor((hojeD - new Date(ultima + 'T12:00:00')) / 86400000) : null;
+    return '- ' + nome + ' | tel: ' + tel + ' | gasto: ' + gasto + ' Kz | última visita: ' +
+      (dias !== null ? 'há ' + dias + ' dias (' + ultima + ')' : 'sem compras registadas');
+  });
 
-    POR PROFISSIONAL (30 dias):
-    ${Object.entries(byProf).map(([k, v]) => `- ${k}: ${v} Kz`).join('\n') || '- Sem dados'}
+  var linhasEliminados = clientesEliminados.map(function (c) {
+    return '- ' + (c.nome || '—') + ' (eliminado)';
+  });
 
-    SERVIÇOS MAIS VENDIDOS (30 dias):
-    ${Object.entries(byServ).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `- ${k}: ${v}x`).join('\n') || '- Sem dados'}
+  /* ---- Serviços activos (catálogo completo) ---- */
+  var servicosActivos = (state.servicos || []).filter(isActivo);
+  var linhasServicos = servicosActivos.map(function (s) {
+    var preco = s.precoBase != null ? s.precoBase : (s.preco != null ? s.preco : '—');
+    return '- ' + (s.nome || '—') + ' | preço base: ' + preco + ' Kz';
+  });
 
-    SERVIÇO MENOS VENDIDO (30 dias): ${servicoMenosVendido ? `${servicoMenosVendido[0]} (${servicoMenosVendido[1]}x)` : 'Sem dados'}
+  /* ---- Profissionais activos ---- */
+  var profsActivos = (state.profissionais || []).filter(isActivo);
+  var linhasProfs = profsActivos.map(function (p) {
+    return '- ' + (p.nome || '—') +
+      (p.especialidade ? ' | especialidade: ' + p.especialidade : '') +
+      (p.taxa_comissao != null ? ' | comissão: ' + p.taxa_comissao + '%' : '');
+  });
 
-    CLIENTES:
-    - Total cadastrados: ${state.clientes.length}
-    - Com agendamento hoje: ${new Set(agHoje.map(a => a.cliente)).size}
-    - Top clientes por valor gasto (histórico completo)${totalClientesComCompra > 30 ? `, mostrando 30 de ${totalClientesComCompra}` : ''}:
-    ${top30Clientes.join('\n') || '- Sem dados de compras ainda'}
+  /* ---- Agenda detalhada ---- */
+  var linhasAgProx = agProximos
+    .slice()
+    .sort(function (a, b) { return String(a.data + a.hora).localeCompare(String(b.data + b.hora)); })
+    .map(function (a) {
+      return '- ' + a.data + ' ' + String(a.hora || '').slice(0, 5) +
+        ' | ' + (a.cliente || '—') + ' | ' + (a.servico || '—') +
+        ' | ' + (a.profissional || '—') + ' | status: ' + stAg(a);
+    });
 
-    PROFISSIONAIS ACTIVOS: ${state.profissionais.map(p => p.nome).join(', ') || 'Nenhum'}`;
+  var linhasAgHist = agHistorico
+    .slice()
+    .sort(function (a, b) { return String(b.data + b.hora).localeCompare(String(a.data + a.hora)); })
+    .slice(0, 80)
+    .map(function (a) {
+      return '- ' + a.data + ' ' + String(a.hora || '').slice(0, 5) +
+        ' | ' + (a.cliente || '—') + ' | ' + (a.servico || '—') +
+        ' | status: ' + stAg(a);
+    });
+
+  var planoAtual = (typeof getPlanoAtual === 'function') ? getPlanoAtual() : (state.config && state.config.plano) || 'trial';
+  var diasTrial = planoAtual === 'trial' && typeof getDiasTrialRestantes === 'function' ? getDiasTrialRestantes() : null;
+  var waPlataforma = (typeof WHATSAPP_NUMBER !== 'undefined' && WHATSAPP_NUMBER) ? WHATSAPP_NUMBER : '953980750';
+
+  return (
+    'SALÃO: ' + (state.config && state.config.storeName ? state.config.storeName : '—') + '\n' +
+    'DATA DE HOJE: ' + hojeStr + '\n' +
+    'PLANO ACTUAL: ' + planoAtual + (diasTrial !== null ? ' (restam ' + diasTrial + ' dias de teste)' : '') + '\n' +
+    '\n' +
+    'CONTACTO DE SUPORTE DA PLATAFORMA BELEZAPRO (WhatsApp):\n' +
+    '- Número: ' + waPlataforma + '\n' +
+    '- Este número é APENAS suporte técnico da plataforma BelezaPro.\n' +
+    '- NÃO é o telefone do dono nem do administrador deste salão.\n' +
+    '- Oferece este número SOMENTE se o utilizador reportar problema com a plataforma (login, plano, bug, cobrança).\n' +
+    '- Se perguntarem "número do administrador do salão" e não houver telefone do salão nos dados, diz que não tens o contacto do salão e oferece o suporte da plataforma se for questão técnica.\n' +
+    '\n' +
+    'HOJE:\n' +
+    '- Faturamento: ' + totalVendasHoje + ' Kz\n' +
+    '- Vendas: ' + vendasHoje.length + '\n' +
+    '- Despesas: ' + totalDespHoje + ' Kz\n' +
+    '- Agendamentos: ' + agHoje.length + ' (' + agHoje.filter(function (a) { return stAg(a) === 'realizado'; }).length + ' realizados)\n' +
+    '- Clientes atendidos (vendas): ' + clientesUnicos + '\n' +
+    '\n' +
+    'ÚLTIMOS 30 DIAS:\n' +
+    '- Total faturado: ' + totalVendas30 + ' Kz\n' +
+    '- Total vendas: ' + vendas30.length + '\n' +
+    '- Ticket médio: ' + ticketMedio + ' Kz\n' +
+    '- Taxa de cancelamento de agendamentos: ' + taxaCancelamento + '%\n' +
+    '\n' +
+    'ESTA SEMANA vs SEMANA ANTERIOR:\n' +
+    '- Esta semana: ' + totalSemanaAtual + ' Kz\n' +
+    '- Semana anterior: ' + totalSemanaAnterior + ' Kz\n' +
+    '- Variação: ' + (totalSemanaAnterior > 0 ? Math.round(((totalSemanaAtual - totalSemanaAnterior) / totalSemanaAnterior) * 100) : 0) + '%\n' +
+    '\n' +
+    'FATURAMENTO POR DIA (calendário completo com movimentos):\n' +
+    (linhasDia.length ? linhasDia.join('\n') : '- Sem movimentos registados') + '\n' +
+    '\n' +
+    'POR PROFISSIONAL (30 dias):\n' +
+    (Object.keys(byProf).length ? Object.keys(byProf).map(function (k) { return '- ' + k + ': ' + byProf[k] + ' Kz'; }).join('\n') : '- Sem dados') + '\n' +
+    '\n' +
+    'SERVIÇOS MAIS VENDIDOS (30 dias):\n' +
+    (Object.keys(byServ).length
+      ? Object.keys(byServ).sort(function (a, b) { return byServ[b] - byServ[a]; }).slice(0, 10).map(function (k) { return '- ' + k + ': ' + byServ[k] + 'x'; }).join('\n')
+      : '- Sem dados') + '\n' +
+    'SERVIÇO MENOS VENDIDO (30 dias): ' + (servicoMenosVendido ? (servicoMenosVendido[0] + ' (' + servicoMenosVendido[1] + 'x)') : 'Sem dados') + '\n' +
+    '\n' +
+    'CATÁLOGO DE SERVIÇOS ACTIVOS:\n' +
+    (linhasServicos.length ? linhasServicos.join('\n') : '- Nenhum serviço activo') + '\n' +
+    '\n' +
+    'CLIENTES ACTIVOS (' + clientesActivos.length + '):\n' +
+    (linhasClientes.length ? linhasClientes.join('\n') : '- Nenhum cliente activo') + '\n' +
+    '\n' +
+    'CLIENTES ELIMINADOS (' + clientesEliminados.length + ') — se perguntarem por estes nomes, diz que já foram eliminados:\n' +
+    (linhasEliminados.length ? linhasEliminados.join('\n') : '- Nenhum') + '\n' +
+    '\n' +
+    'PROFISSIONAIS ACTIVOS:\n' +
+    (linhasProfs.length ? linhasProfs.join('\n') : '- Nenhum') + '\n' +
+    '\n' +
+    'AGENDA — PRÓXIMOS 14 DIAS (' + agProximos.length + '):\n' +
+    (linhasAgProx.length ? linhasAgProx.join('\n') : '- Sem marcações') + '\n' +
+    '\n' +
+    'AGENDA — HISTÓRICO 14 DIAS ANTERIORES (amostra):\n' +
+    (linhasAgHist.length ? linhasAgHist.join('\n') : '- Sem histórico recente') + '\n'
+  );
 }
 
 // ====================================================================
@@ -826,79 +939,110 @@ function normalizarPerguntaIA(q) {
  * Devolve string ou null se não houver intenção clara.
  */
 function responderIALocal(pergunta) {
-  const q = normalizarPerguntaIA(pergunta);
-  if (!q || q.length < 3) return null;
-  if (!state.movimentos || !state.agendamentos) return null;
+  var raw = String(pergunta || '').trim();
+  var q = (typeof normalizarPerguntaIA === 'function')
+    ? normalizarPerguntaIA(raw)
+    : raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-  const hojeStr = typeof hoje === 'function' ? hoje() : '';
-  const num = function (v) { return Number(v) || 0; };
-  const vendasHoje = (state.movimentos || []).filter(function (m) {
+  if (!q || q.length < 3) return null;
+  if (!state || !state.movimentos || !state.agendamentos) return null;
+
+  /* ---- Portão inteligente ---- */
+  // Texto longo / várias frases → nunca local (manda para o modelo)
+  if (raw.length > 72) return null;
+  if ((raw.match(/[.?!;]/g) || []).length >= 2) return null;
+  // Muitas palavras → intenção provavelmente complexa
+  var palavras = q.split(/\s+/).filter(Boolean);
+  if (palavras.length > 10) return null;
+  // Mistura de temas (ex.: agenda + estratégia + cliente) → modelo
+  var temas = 0;
+  if (/(fatur|receita|vendeu|venda|vendas)/.test(q)) temas++;
+  if (/(despes|gastou)/.test(q)) temas++;
+  if (/(agenda|marcac)/.test(q)) temas++;
+  if (/(cliente|equipa|profissional|servico)/.test(q)) temas++;
+  if (/(saldo|caixa|fundo)/.test(q)) temas++;
+  if (temas >= 2) return null;
+
+  var hojeStr = typeof hoje === 'function' ? hoje() : '';
+  var num = function (v) { return Number(v) || 0; };
+  var vendasHoje = (state.movimentos || []).filter(function (m) {
     return m.data === hojeStr && m.tipo === 'venda';
   });
-  const despHoje = (state.movimentos || []).filter(function (m) {
+  var despHoje = (state.movimentos || []).filter(function (m) {
     return m.data === hojeStr && m.tipo === 'despesa';
   });
-  const totalVendas = vendasHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
-  const totalDesp = despHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
-  const fundo = num(state.config && state.config.fundo);
-  const saldo = fundo + totalVendas - totalDesp;
-  const agHoje = (state.agendamentos || []).filter(function (a) { return a.data === hojeStr; });
-  const pend = agHoje.filter(function (a) {
-    const st = String(a.status || a.estado || '').toLowerCase();
+  var totalVendas = vendasHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  var totalDesp = despHoje.reduce(function (s, v) { return s + num(v.valor); }, 0);
+  var fundo = num(state.config && state.config.fundo);
+  var saldo = fundo + totalVendas - totalDesp;
+  var agHoje = (state.agendamentos || []).filter(function (a) { return a.data === hojeStr; });
+  var pend = agHoje.filter(function (a) {
+    var st = String(a.status || a.estado || '').toLowerCase();
     return st === 'agendado' || (!st);
   });
-  const ticket = vendasHoje.length ? Math.round(totalVendas / vendasHoje.length) : 0;
+  var ticket = vendasHoje.length ? Math.round(totalVendas / vendasHoje.length) : 0;
+
+  // Padrões ANCORADOS: intenção clara de métrica de HOJE (não palavra solta no meio)
+  var soHoje =
+    /^(quanto|qual|como)\b/.test(q) ||
+    /\bhoje\b/.test(q) ||
+    /^(faturamento|vendas|despesas|agenda|saldo|caixa)\b/.test(q);
+
+  if (!soHoje && !/^(quantos|numero|nº|total de)\b/.test(q)) {
+    return null;
+  }
 
   // Faturamento / vendas hoje
-  if (/(fatur|receita|vendeu|vendas|quanto.*hoje|hoje.*vend|entrada)/.test(q) && !/despes/.test(q)) {
+  if (
+    /^(quanto\s+(faturei|vendi|foi\s+o\s+faturamento)|faturamento(\s+de\s+hoje)?|vendas(\s+de\s+hoje)?|quanto\s+foi\s+hoje|receita\s+de\s+hoje)\b/.test(q) ||
+    (/^(quanto|qual)\b/.test(q) && /(fatur|vendeu|vendas|receita)/.test(q) && /\bhoje\b/.test(q) && !/despes/.test(q))
+  ) {
     return 'Hoje: ' + vendasHoje.length + (vendasHoje.length === 1 ? ' venda' : ' vendas') +
-      ' · total ' + fmtKz(totalVendas) +
-      (ticket ? ' · ticket médio ' + fmtKz(ticket) + '.' : '.');
+      ' · total ' + (typeof fmtKz === 'function' ? fmtKz(totalVendas) : totalVendas + ' Kz') +
+      (ticket ? ' · ticket médio ' + (typeof fmtKz === 'function' ? fmtKz(ticket) : ticket + ' Kz') + '.' : '.');
   }
-  // Despesas
-  if (/despes|gastou|saida|saídas/.test(q)) {
-    return 'Despesas de hoje: ' + fmtKz(totalDesp) +
+
+  // Despesas hoje
+  if (
+    /^(despesas(\s+de\s+hoje)?|quanto\s+(gastei|foi\s+de\s+despesa))\b/.test(q) ||
+    (/^(quanto|qual)\b/.test(q) && /despes|gastei/.test(q))
+  ) {
+    return 'Despesas de hoje: ' + (typeof fmtKz === 'function' ? fmtKz(totalDesp) : totalDesp + ' Kz') +
       (despHoje.length ? ' (' + despHoje.length + (despHoje.length === 1 ? ' registo).' : ' registos).') : '.');
   }
+
   // Saldo / caixa
-  if (/saldo|caixa|fundo/.test(q)) {
-    return 'Fundo ' + fmtKz(fundo) + ' · vendas ' + fmtKz(totalVendas) +
-      ' · despesas ' + fmtKz(totalDesp) + ' → saldo estimado ' + fmtKz(saldo) + '.';
+  if (/^(saldo|caixa|fundo)(\s+de\s+hoje)?\b/.test(q) || (/^(quanto|qual)\b/.test(q) && /(saldo|caixa|fundo)/.test(q))) {
+    return 'Fundo ' + (typeof fmtKz === 'function' ? fmtKz(fundo) : fundo + ' Kz') +
+      ' · vendas ' + (typeof fmtKz === 'function' ? fmtKz(totalVendas) : totalVendas + ' Kz') +
+      ' · despesas ' + (typeof fmtKz === 'function' ? fmtKz(totalDesp) : totalDesp + ' Kz') +
+      ' → saldo estimado ' + (typeof fmtKz === 'function' ? fmtKz(saldo) : saldo + ' Kz') + '.';
   }
-  // Agenda
-  if (/agenda|marcac|pendente|hoje.*hora|quantos.*cliente/.test(q) && /agenda|marc|pendente|atend/.test(q)) {
+
+  // Agenda hoje
+  if (
+    /^(agenda(\s+de\s+hoje)?|marcacoes\s+de\s+hoje|o\s+que\s+tenho\s+hoje)\b/.test(q) ||
+    (/^(quantos|como)\b/.test(q) && /agenda|marcac|pendente/.test(q) && (/\bhoje\b/.test(q) || palavras.length <= 6))
+  ) {
     return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
   }
-  if (/^agenda|marcacoes de hoje|o que tenho hoje/.test(q)) {
-    return 'Agenda de hoje: ' + agHoje.length + ' marcações · ' + pend.length + ' pendentes.';
+
+  // Quantos clientes
+  if (/^(quantos\s+clientes|numero\s+de\s+clientes|nº\s+de\s+clientes|total\s+de\s+clientes)\b/.test(q)) {
+    var nc = (state.clientes || []).filter(function (c) {
+      return c && c.ativo !== false && c.ativo !== 0 && c.ativo !== 'false';
+    }).length;
+    return 'Tem ' + nc + (nc === 1 ? ' cliente activo' : ' clientes activos') + ' na ficha.';
   }
-  // Clientes
-  if (/quantos clientes|numero de clientes|nº de clientes|total de clientes/.test(q)) {
-    const n = (state.clientes || []).length;
-    return 'Tem ' + n + (n === 1 ? ' cliente' : ' clientes') + ' na ficha.';
-  }
+
   // Equipa
-  if (/quantos profissionais|tamanho da equipa|quantos na equipa/.test(q)) {
-    const n = (state.profissionais || []).length;
-    return 'Equipa: ' + n + (n === 1 ? ' profissional.' : ' profissionais.');
+  if (/^(quantos\s+profissionais|tamanho\s+da\s+equipa|quantos\s+na\s+equipa)\b/.test(q)) {
+    var np = (state.profissionais || []).filter(function (p) {
+      return p && p.ativo !== false && p.ativo !== 0 && p.ativo !== 'false';
+    }).length;
+    return 'Equipa: ' + np + (np === 1 ? ' profissional activo.' : ' profissionais activos.');
   }
-  // Top serviço 30d — lightweight
-  if (/servico.*mais|mais vendido|top servico|melhor servico/.test(q)) {
-    const d30 = new Date();
-    d30.setDate(d30.getDate() - 29);
-    const d30str = d30.toISOString().slice(0, 10);
-    const byServ = {};
-    (state.movimentos || []).forEach(function (m) {
-      if (m.tipo !== 'venda' || m.data < d30str || !m.itens) return;
-      (m.itens || []).forEach(function (it) {
-        const nome = it.nome || '—';
-        byServ[nome] = (byServ[nome] || 0) + (Number(it.quantidade) || 1);
-      });
-    });
-    const top = Object.keys(byServ).sort(function (a, b) { return byServ[b] - byServ[a]; })[0];
-    if (!top) return 'Ainda não há vendas com itens nos últimos 30 dias.';
-    return 'Serviço mais frequente (30 dias): ' + top + ' (' + byServ[top] + '×).';
-  }
+
   return null;
 }
 
