@@ -13448,6 +13448,20 @@ function buildContextoIA() {
     '- Agendamentos: ' + agHoje.length + ' (' + agHoje.filter(function (a) { return stAg(a) === 'realizado'; }).length + ' realizados)\n' +
     '- Clientes atendidos (vendas): ' + clientesUnicos + '\n' +
     '\n' +
+    '======== FICHA DE CLIENTES (FONTE DE VERDADE DA ABA CLIENTES) ========\n' +
+    'IMPORTANTE: Esta lista vem da ficha cadastral (state.clientes). NÃO uses só nomes de vendas.\n' +
+    'RESUMO CLIENTES:\n' +
+    '- Total activos na ficha: ' + clientesActivos.length + '\n' +
+    '- Com pelo menos 1 venda: ' + clientesComVenda.length + '\n' +
+    '- SEM nenhuma venda registada: ' + clientesSemVenda.length + '\n' +
+    '\n' +
+    'CLIENTES SEM NENHUMA VENDA (' + clientesSemVenda.length + ') — ESTÃO cadastrados; é PROIBIDO dizer que não existem:\n' +
+    (linhasSemVenda.length ? linhasSemVenda.join('\n') : '- Nenhum (todos os activos já têm venda)') + '\n' +
+    '\n' +
+    'TODOS OS CLIENTES ACTIVOS DA FICHA (' + clientesActivos.length + '):\n' +
+    (linhasClientes.length ? linhasClientes.join('\n') : '- Nenhum') + '\n' +
+    '======== FIM FICHA DE CLIENTES ========\n' +
+    '\n' +
     'ÚLTIMOS 30 DIAS:\n' +
     '- Total faturado: ' + totalVendas30 + ' Kz\n' +
     '- Total vendas: ' + vendas30.length + '\n' +
@@ -14173,7 +14187,68 @@ function responderIALocal(pergunta) {
     : raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
   if (!q || q.length < 3) return null;
-  if (!state || !state.movimentos || !state.agendamentos) return null;
+  if (!state || !state.clientes) return null;
+
+  /* ---- Ficha de clientes (determinístico — nunca LLM) ---- */
+  var _isAct = function (x) {
+    return x && x.ativo !== false && x.ativo !== 0 && x.ativo !== 'false';
+  };
+  var _activos = (state.clientes || []).filter(_isAct);
+  var _gasto = {};
+  (state.movimentos || []).forEach(function (m) {
+    if (!m || m.tipo !== 'venda' || !m.cliente) return;
+    var cn = String(m.cliente).trim();
+    if (!cn) return;
+    _gasto[cn] = (_gasto[cn] || 0) + (Number(m.valor) || 0);
+  });
+  var _semVenda = _activos.filter(function (c) {
+    var n = String(c.nome || '').trim();
+    return n && !(_gasto[n] > 0);
+  });
+  var _comVenda = _activos.filter(function (c) {
+    var n = String(c.nome || '').trim();
+    return n && (_gasto[n] > 0);
+  });
+
+  // Lista todos os clientes da ficha (sem inventar nomes de vendas)
+  if (
+    /(lista|listar|mostra|mostrar|quais|quem sao|quem são|todos).{0,40}clientes/.test(q) ||
+    /^(clientes|todos os clientes|lista de clientes)\b/.test(q) ||
+    /ficha de clientes|aba clientes/.test(q)
+  ) {
+    if (!_activos.length) return 'Não há clientes activos na ficha neste salão.';
+    // Se pede explicitamente sem venda
+    if (/(sem (nenhuma )?venda|sem compra|sem gasto|nunca compr|0 venda|nenhuma venda)/.test(q)) {
+      if (!_semVenda.length) {
+        return 'Na ficha há ' + _activos.length + ' cliente(s) activo(s) e todos já têm pelo menos uma venda registada.';
+      }
+      var linhasS = _semVenda.map(function (c, i) {
+        return (i + 1) + '. ' + (c.nome || '—') + (c.telefone ? ' · ' + c.telefone : '');
+      });
+      return 'Clientes activos SEM nenhuma venda (' + _semVenda.length + ' de ' + _activos.length + '):\n' + linhasS.join('\n');
+    }
+    var linhasT = _activos.map(function (c, i) {
+      var n = String(c.nome || '').trim();
+      var flag = (_gasto[n] > 0) ? '' : ' · sem venda';
+      return (i + 1) + '. ' + (c.nome || '—') + (c.telefone ? ' · ' + c.telefone : '') + flag;
+    });
+    return 'Clientes activos na ficha (' + _activos.length + '):\n' + linhasT.join('\n') +
+      (_semVenda.length ? ('\n\nDestes, ' + _semVenda.length + ' ainda não têm nenhuma venda.') : '');
+  }
+
+  // Só clientes sem venda
+  if (/(clientes?).{0,30}(sem (nenhuma )?venda|sem compra|sem gasto)/.test(q) ||
+      /(sem (nenhuma )?venda|sem compra).{0,30}clientes?/.test(q)) {
+    if (!_semVenda.length) {
+      return 'Na ficha há ' + _activos.length + ' cliente(s) activo(s) e todos já têm pelo menos uma venda registada.';
+    }
+    var linhas2 = _semVenda.map(function (c, i) {
+      return (i + 1) + '. ' + (c.nome || '—') + (c.telefone ? ' · ' + c.telefone : '');
+    });
+    return 'Clientes activos SEM nenhuma venda (' + _semVenda.length + '):\n' + linhas2.join('\n');
+  }
+
+  if (!state.movimentos || !state.agendamentos) return null;
 
   /* ---- Portão inteligente ---- */
   // Texto longo / várias frases → nunca local (manda para o modelo)
