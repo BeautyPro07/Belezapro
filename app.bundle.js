@@ -13345,20 +13345,45 @@ function buildContextoIA() {
   var gastoPorCliente = {};
   var ultimaCompraPorCliente = {};
   state.movimentos.filter(function (m) { return m.tipo === 'venda' && m.cliente; }).forEach(function (v) {
-    gastoPorCliente[v.cliente] = (gastoPorCliente[v.cliente] || 0) + num(v.valor);
-    if (!ultimaCompraPorCliente[v.cliente] || v.data > ultimaCompraPorCliente[v.cliente]) {
-      ultimaCompraPorCliente[v.cliente] = v.data;
+    var cn = String(v.cliente || '').trim();
+    if (!cn) return;
+    gastoPorCliente[cn] = (gastoPorCliente[cn] || 0) + num(v.valor);
+    if (!ultimaCompraPorCliente[cn] || v.data > ultimaCompraPorCliente[cn]) {
+      ultimaCompraPorCliente[cn] = v.data;
     }
   });
 
   var linhasClientes = clientesActivos.map(function (c) {
     var nome = c.nome || '—';
     var tel = c.telefone || 'sem telefone';
-    var gasto = gastoPorCliente[nome] || 0;
-    var ultima = ultimaCompraPorCliente[nome];
+    var nomeKey = String(nome).trim();
+    var gasto = gastoPorCliente[nomeKey] || 0;
+    var ultima = ultimaCompraPorCliente[nomeKey];
     var dias = ultima ? Math.floor((hojeD - new Date(ultima + 'T12:00:00')) / 86400000) : null;
     return '- ' + nome + ' | tel: ' + tel + ' | gasto: ' + gasto + ' Kz | última visita: ' +
       (dias !== null ? 'há ' + dias + ' dias (' + ultima + ')' : 'sem compras registadas');
+  });
+
+  /* Listas explícitas — o modelo não pode “assumir” que só existem clientes com venda */
+  var clientesSemVenda = clientesActivos.filter(function (c) {
+    var nome = (c.nome || '').trim();
+    return nome && !(gastoPorCliente[nome] > 0);
+  });
+  var clientesComVenda = clientesActivos.filter(function (c) {
+    var nome = (c.nome || '').trim();
+    return nome && (gastoPorCliente[nome] > 0);
+  });
+  var linhasSemVenda = clientesSemVenda.map(function (c) {
+    return '- ' + (c.nome || '—') + ' | tel: ' + (c.telefone || 'sem telefone') + ' | 0 Kz | sem nenhuma venda registada';
+  });
+  var linhasComVenda = clientesComVenda.map(function (c) {
+    var nome = c.nome || '—';
+    var nomeKey = String(nome).trim();
+    var gasto = gastoPorCliente[nomeKey] || 0;
+    var ultima = ultimaCompraPorCliente[nomeKey];
+    var dias = ultima ? Math.floor((hojeD - new Date(ultima + 'T12:00:00')) / 86400000) : null;
+    return '- ' + nome + ' | tel: ' + (c.telefone || 'sem telefone') + ' | gasto: ' + gasto + ' Kz | última visita: ' +
+      (dias !== null ? 'há ' + dias + ' dias (' + ultima + ')' : 'desconhecido');
   });
 
   var linhasEliminados = clientesEliminados.map(function (c) {
@@ -13449,7 +13474,19 @@ function buildContextoIA() {
     'CATÁLOGO DE SERVIÇOS ACTIVOS:\n' +
     (linhasServicos.length ? linhasServicos.join('\n') : '- Nenhum serviço activo') + '\n' +
     '\n' +
-    'CLIENTES ACTIVOS (' + clientesActivos.length + '):\n' +
+    'RESUMO CLIENTES:\n' +
+    '- Total activos na ficha: ' + clientesActivos.length + '\n' +
+    '- Com pelo menos 1 venda: ' + clientesComVenda.length + '\n' +
+    '- SEM nenhuma venda registada: ' + clientesSemVenda.length + '\n' +
+    '- Eliminados (não usar como activos): ' + clientesEliminados.length + '\n' +
+    '\n' +
+    'CLIENTES SEM NENHUMA VENDA (' + clientesSemVenda.length + ') — estes ESTÃO cadastrados; NÃO digas que não existem:\n' +
+    (linhasSemVenda.length ? linhasSemVenda.join('\n') : '- Nenhum (todos os activos já têm pelo menos uma venda)') + '\n' +
+    '\n' +
+    'CLIENTES COM VENDAS (' + clientesComVenda.length + '):\n' +
+    (linhasComVenda.length ? linhasComVenda.join('\n') : '- Nenhum com vendas') + '\n' +
+    '\n' +
+    'CLIENTES ACTIVOS — LISTA COMPLETA (' + clientesActivos.length + '):\n' +
     (linhasClientes.length ? linhasClientes.join('\n') : '- Nenhum cliente activo') + '\n' +
     '\n' +
     'CLIENTES ELIMINADOS (' + clientesEliminados.length + ') — se perguntarem por estes nomes, diz que já foram eliminados:\n' +
