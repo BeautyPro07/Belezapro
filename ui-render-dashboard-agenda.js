@@ -285,11 +285,24 @@ function renderDashboard() {
     agStatus.textContent = parts.join(' · ');
   }
 
-  animateKpi('kpi-ticket', fmtKz(ticket));
+  const clientesAll = state.clientes || [];
+  const idsPeriodo = new Set();
+  vendasPeriodo.forEach(function (m) {
+    if (m.cliente_id) idsPeriodo.add(String(m.cliente_id));
+    else if (m.cliente) idsPeriodo.add('n:' + String(m.cliente).toLowerCase().trim());
+  });
+  if (document.getElementById('kpi-clientes')) {
+    animateKpi('kpi-clientes', String(clientesAll.length));
+  }
+  const cliStatus = document.getElementById('kpi-clientes-status');
+  if (cliStatus) {
+    var n = idsPeriodo.size;
+    cliStatus.textContent = n === 1 ? '1 no período' : (n + ' no período');
+  }
+  if (document.getElementById('kpi-ticket')) animateKpi('kpi-ticket', fmtKz(ticket));
   const ticketSub = document.getElementById('kpi-ticket-sub');
   if (ticketSub) ticketSub.textContent = 'por venda';
 
-  // --- Sparkline: receita diária no intervalo (mesma unidade do KPI primário) ---
   const canvas = document.getElementById('ticket-sparkline');
   if (canvas) {
     canvas.style.display = 'block';

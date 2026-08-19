@@ -6107,11 +6107,24 @@ function renderDashboard() {
     agStatus.textContent = parts.join(' · ');
   }
 
-  animateKpi('kpi-ticket', fmtKz(ticket));
+  const clientesAll = state.clientes || [];
+  const idsPeriodo = new Set();
+  vendasPeriodo.forEach(function (m) {
+    if (m.cliente_id) idsPeriodo.add(String(m.cliente_id));
+    else if (m.cliente) idsPeriodo.add('n:' + String(m.cliente).toLowerCase().trim());
+  });
+  if (document.getElementById('kpi-clientes')) {
+    animateKpi('kpi-clientes', String(clientesAll.length));
+  }
+  const cliStatus = document.getElementById('kpi-clientes-status');
+  if (cliStatus) {
+    var n = idsPeriodo.size;
+    cliStatus.textContent = n === 1 ? '1 no período' : (n + ' no período');
+  }
+  if (document.getElementById('kpi-ticket')) animateKpi('kpi-ticket', fmtKz(ticket));
   const ticketSub = document.getElementById('kpi-ticket-sub');
   if (ticketSub) ticketSub.textContent = 'por venda';
 
-  // --- Sparkline: receita diária no intervalo (mesma unidade do KPI primário) ---
   const canvas = document.getElementById('ticket-sparkline');
   if (canvas) {
     canvas.style.display = 'block';
@@ -11632,10 +11645,10 @@ function bpStartPlaceholderRotation(inputId, phrases) {
       el.setAttribute('placeholder', current.slice(0, char));
       if (char >= current.length) {
         phase = 'hold';
-        _bpPhTimers[inputId] = setTimeout(tick, 2660);
+        _bpPhTimers[inputId] = setTimeout(tick, 4200);
         return;
       }
-      _bpPhTimers[inputId] = setTimeout(tick, 70);
+      _bpPhTimers[inputId] = setTimeout(tick, 110);
       return;
     }
     if (phase === 'hold') {
@@ -11651,13 +11664,63 @@ function bpStartPlaceholderRotation(inputId, phrases) {
       idx = (idx + 1) % phrases.length;
       current = phrases[idx];
       phase = 'type';
-      _bpPhTimers[inputId] = setTimeout(tick, 630);
+      _bpPhTimers[inputId] = setTimeout(tick, 900);
       return;
     }
     el.setAttribute('placeholder', current.slice(0, char));
-    _bpPhTimers[inputId] = setTimeout(tick, 47);
+    _bpPhTimers[inputId] = setTimeout(tick, 75);
   }
   _bpPhTimers[inputId] = setTimeout(tick, 1000);
+}
+function bpStartLabelRotation(elId, phrases) {
+  var el = document.getElementById(elId);
+  if (!el || !phrases || !phrases.length) return;
+  if (el.dataset.bpPhBound === '1') return;
+  el.dataset.bpPhBound = '1';
+  if (bpPrefersReducedMotion()) {
+    el.textContent = phrases[0];
+    return;
+  }
+  var idx = 0, char = 0, phase = 'type', current = phrases[0];
+  function tick() {
+    if (!document.body.contains(el)) return;
+    try {
+      var trig = document.getElementById('caixa-localizar-btn');
+      if (trig && trig.getAttribute('aria-expanded') === 'true') {
+        _bpPhTimers[elId] = setTimeout(tick, 1200);
+        return;
+      }
+    } catch (_) {}
+    if (phase === 'type') {
+      char++;
+      el.textContent = current.slice(0, char);
+      if (char >= current.length) {
+        phase = 'hold';
+        _bpPhTimers[elId] = setTimeout(tick, 4800);
+        return;
+      }
+      _bpPhTimers[elId] = setTimeout(tick, 95);
+      return;
+    }
+    if (phase === 'hold') {
+      phase = 'erase';
+      _bpPhTimers[elId] = setTimeout(tick, 40);
+      return;
+    }
+    char--;
+    if (char <= 0) {
+      char = 0;
+      el.textContent = '\u00a0';
+      idx = (idx + 1) % phrases.length;
+      current = phrases[idx];
+      phase = 'type';
+      _bpPhTimers[elId] = setTimeout(tick, 700);
+      return;
+    }
+    el.textContent = current.slice(0, char);
+    _bpPhTimers[elId] = setTimeout(tick, 65);
+  }
+  _bpPhTimers[elId] = setTimeout(tick, 1200);
 }
 function bpInitPlaceholderRotations() {
   bpStartPlaceholderRotation('search-cliente', [
@@ -11670,6 +11733,12 @@ function bpInitPlaceholderRotations() {
     'Nome do cliente...',
     'Localizar no histórico...',
     'Pesquisar venda por cliente...'
+  ]);
+  bpStartLabelRotation('caixa-loc-label-ph', [
+    'Localizar cliente no histórico',
+    'Pesquisar por nome...',
+    'Cliente no histórico...',
+    'Procurar venda por cliente...'
   ]);
 }
 if (document.readyState === 'loading') {

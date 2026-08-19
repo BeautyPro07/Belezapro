@@ -245,56 +245,36 @@
         <div id="tab-dashboard" class="tab-pane active">
           <div class="tab-inner">
             <!-- Data + Ícone de Filtro -->
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button id="dash-filter-icon" style="background:none;border:none;padding:2px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center;transition:color 0.15s;" aria-label="Filtrar período">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                    <line x1="4" y1="6" x2="20" y2="6"/>
-                    <line x1="6" y1="12" x2="18" y2="12"/>
-                    <line x1="8" y1="18" x2="16" y2="18"/>
-                  </svg>
-                </button>
-                <span style="font-size:.8rem;font-weight:600;color:var(--text-secondary);" id="today-date">Hoje</span>
-              </div>
-              <span style="font-size:.7rem;color:var(--text-muted);" id="greeting">Bom dia!</span>
-            </div>
+            <!-- Resumo: período + KPIs (estrutura limpa) -->
+            <header class="dash-period-head">
+              <button type="button" id="dash-filter-icon" class="dash-period-filter-btn" aria-label="Filtrar período">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                  <line x1="4" y1="6" x2="20" y2="6"/>
+                  <line x1="6" y1="12" x2="18" y2="12"/>
+                  <line x1="8" y1="18" x2="16" y2="18"/>
+                </svg>
+                <span id="today-date" class="dash-period-label">Hoje</span>
+              </button>
+              <p id="greeting" class="dash-period-greeting">Bom dia!</p>
+            </header>
 
-            <!-- KPIs -->
-            <div class="kpi-grid">
-              <!-- Card 1: Faturamento -->
-              <div class="kpi-card gold-accent" id="kpi-revenue-card" data-role="admin,gerente">
-                <div class="kpi-label">Faturamento</div>
-                <div class="kpi-value" style="color:var(--gold-dark);" id="kpi-revenue">0 Kz</div>
-                <div class="kpi-sub" id="kpi-revenue-count">0 vendas</div>
-              </div>
-
-              <!-- Card 2: Agendamentos -->
-              <div class="kpi-card green-accent" id="kpi-agenda-card">
-                <div class="kpi-label">Agendamentos</div>
-                <div class="kpi-value" id="kpi-agendamentos">0</div>
-                <div class="kpi-sub" id="kpi-agendamentos-status">0 realizados</div>
-              </div>
-
-              <!-- Card 3: Ticket Médio -->
-              <div class="kpi-card" style="grid-column: span 2; padding: 14px 20px;">
-                <div class="kpi-main-content">
-                  <div class="kpi-left">
-                    <div class="kpi-label">Ticket Médio</div>
-                    <div class="kpi-value" id="kpi-ticket">0 Kz</div>
-                    <div class="kpi-sub" id="kpi-ticket-sub">por venda</div>
-                  </div>
-                  <div class="kpi-right">
-                    <div class="sparkline-wrapper">
-                      <canvas id="ticket-sparkline" width="84" height="28"></canvas>
-                    </div>
-                    <div class="kpi-trend">
-                      <span class="trend-up" id="ticket-trend-percent">—</span>
-                      <span class="trend-period" id="ticket-trend-period">vs período anterior</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <section class="kpi-grid kpi-grid--resumo" aria-label="Indicadores do período">
+              <article class="kpi-card kpi-card--fat bp-motion-enter" id="kpi-revenue-card" data-role="admin,gerente" style="--stagger:0">
+                <p class="kpi-label">Faturamento</p>
+                <p class="kpi-value" id="kpi-revenue">0 Kz</p>
+                <p class="kpi-sub" id="kpi-revenue-count">0 vendas</p>
+              </article>
+              <article class="kpi-card bp-motion-enter" id="kpi-agenda-card" style="--stagger:1">
+                <p class="kpi-label">Agendamentos</p>
+                <p class="kpi-value" id="kpi-agendamentos">0</p>
+                <p class="kpi-sub" id="kpi-agendamentos-status">0 realizados</p>
+              </article>
+              <article class="kpi-card bp-motion-enter" id="kpi-clientes-card" style="--stagger:2">
+                <p class="kpi-label">Clientes</p>
+                <p class="kpi-value" id="kpi-clientes">0</p>
+                <p class="kpi-sub" id="kpi-clientes-status">0 no período</p>
+              </article>
+            </section>
 
             
             <!-- Meta mensal + caixa hoje (admin) -->
@@ -542,8 +522,8 @@
             <div style="margin-bottom:12px;position:relative;">
               <button type="button" id="caixa-localizar-btn" class="bp-caixa-loc-trigger" aria-expanded="false" aria-controls="caixa-localizar-popover">
                 <span class="bp-caixa-loc-main">
-                  <svg class="bp-caixa-loc-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <span class="bp-caixa-loc-label">Localizar cliente no histórico</span>
+                  <svg class="bp-caixa-loc-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <span class="bp-caixa-loc-label" id="caixa-loc-label-ph">Localizar cliente no histórico</span>
                 </span>
               </button>
               <div id="caixa-localizar-popover" class="agenda-filter-popover" style="left:0;right:0;top:calc(100% + 6px);min-width:100%;">

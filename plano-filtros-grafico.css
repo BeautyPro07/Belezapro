@@ -140,23 +140,29 @@
   gap: 4px;
 }
 .dash-periodo-opcao {
-  padding: 8px 6px;
-  font-size: 0.75rem;
-  border: 1px solid transparent;
+  padding: 5px 6px;
+  font-size: .68rem;
+  font-weight: 600;
+  border: var(--border-default);
   border-radius: var(--radius-sm);
   text-align: center;
-  background: var(--bg-soft);
-  color: var(--text-primary);
+  background: var(--card-white);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.1s, border-color 0.1s;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 .dash-periodo-opcao:active {
-  background: var(--bg-soft);
+  transform: scale(0.97);
 }
 .dash-periodo-opcao.active {
+  background: var(--gold);
+  color: var(--card-white);
   border-color: var(--gold);
-  background: var(--gold-light);
-  color: var(--gold-dark);
   font-weight: 600;
 }
 .dash-periodo-opcao:last-of-type {

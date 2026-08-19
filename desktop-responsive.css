@@ -710,3 +710,6 @@ html.bp-popout .bottom-nav { opacity: 0.92; }
   font-weight: 600;
   border-radius: var(--radius-md);
 }
+
+.kpi-grid--resumo { grid-template-columns: 1fr 1fr !important; }
+.kpi-grid--resumo .kpi-card--fat { grid-column: 1 / -1 !important; }
