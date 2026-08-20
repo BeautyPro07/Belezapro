@@ -128,10 +128,10 @@ function buildContextoIA() {
   var servicosOrdenados = Object.keys(byServ).map(function (k) { return [k, byServ[k]]; }).sort(function (a, b) { return a[1] - b[1]; });
   var servicoMenosVendido = servicosOrdenados[0];
 
-  /* ---- Breakdown diário (todos os dias com movimento) ---- */
+  /* ---- Breakdown diário (últimos 30 dias — evita contexto infinito) ---- */
   var porDia = {};
   (state.movimentos || []).forEach(function (m) {
-    if (!m || !m.data) return;
+    if (!m || !m.data || m.data < d30str || m.data > hojeStr) return;
     if (!porDia[m.data]) porDia[m.data] = { vendas: 0, despesas: 0, nVendas: 0, nDespesas: 0 };
     if (m.tipo === 'venda') {
       porDia[m.data].vendas += num(m.valor);
@@ -151,23 +151,42 @@ function buildContextoIA() {
   var clientesActivos = (state.clientes || []).filter(isActivo);
   var clientesEliminados = (state.clientes || []).filter(function (c) { return c && !isActivo(c); });
 
-  var gastoPorCliente = {};
-  var ultimaCompraPorCliente = {};
-  state.movimentos.filter(function (m) { return m.tipo === 'venda' && m.cliente; }).forEach(function (v) {
+  /* Gasto por nome E por cliente_id (evita falso "sem venda" / falso "com venda") */
+  var gastoPorNome = {};
+  var gastoPorId = {};
+  var ultimaPorNome = {};
+  var ultimaPorId = {};
+  (state.movimentos || []).forEach(function (v) {
+    if (!v || v.tipo !== 'venda') return;
+    var val = num(v.valor);
+    if (v.cliente_id) {
+      var idKey = String(v.cliente_id);
+      gastoPorId[idKey] = (gastoPorId[idKey] || 0) + val;
+      if (!ultimaPorId[idKey] || v.data > ultimaPorId[idKey]) ultimaPorId[idKey] = v.data;
+    }
     var cn = String(v.cliente || '').trim();
-    if (!cn) return;
-    gastoPorCliente[cn] = (gastoPorCliente[cn] || 0) + num(v.valor);
-    if (!ultimaCompraPorCliente[cn] || v.data > ultimaCompraPorCliente[cn]) {
-      ultimaCompraPorCliente[cn] = v.data;
+    if (cn) {
+      gastoPorNome[cn] = (gastoPorNome[cn] || 0) + val;
+      if (!ultimaPorNome[cn] || v.data > ultimaPorNome[cn]) ultimaPorNome[cn] = v.data;
     }
   });
+  var gastoDe = function (c) {
+    var byId = c && c.id ? (gastoPorId[String(c.id)] || 0) : 0;
+    var byNome = gastoPorNome[String((c && c.nome) || '').trim()] || 0;
+    return byId > 0 ? byId : byNome;
+  };
+  var ultimaDe = function (c) {
+    var byId = c && c.id ? ultimaPorId[String(c.id)] : null;
+    var byNome = ultimaPorNome[String((c && c.nome) || '').trim()] || null;
+    if (byId && byNome) return byId > byNome ? byId : byNome;
+    return byId || byNome || null;
+  };
 
   var linhasClientes = clientesActivos.map(function (c) {
     var nome = c.nome || '—';
     var tel = c.telefone || 'sem telefone';
-    var nomeKey = String(nome).trim();
-    var gasto = gastoPorCliente[nomeKey] || 0;
-    var ultima = ultimaCompraPorCliente[nomeKey];
+    var gasto = gastoDe(c);
+    var ultima = ultimaDe(c);
     var dias = ultima ? Math.floor((hojeD - new Date(ultima + 'T12:00:00')) / 86400000) : null;
     return '- ' + nome + ' | tel: ' + tel + ' | gasto: ' + gasto + ' Kz | última visita: ' +
       (dias !== null ? 'há ' + dias + ' dias (' + ultima + ')' : 'sem compras registadas');
@@ -176,20 +195,19 @@ function buildContextoIA() {
   /* Listas explícitas — o modelo não pode “assumir” que só existem clientes com venda */
   var clientesSemVenda = clientesActivos.filter(function (c) {
     var nome = (c.nome || '').trim();
-    return nome && !(gastoPorCliente[nome] > 0);
+    return nome && !(gastoDe(c) > 0);
   });
   var clientesComVenda = clientesActivos.filter(function (c) {
     var nome = (c.nome || '').trim();
-    return nome && (gastoPorCliente[nome] > 0);
+    return nome && (gastoDe(c) > 0);
   });
   var linhasSemVenda = clientesSemVenda.map(function (c) {
     return '- ' + (c.nome || '—') + ' | tel: ' + (c.telefone || 'sem telefone') + ' | 0 Kz | sem nenhuma venda registada';
   });
   var linhasComVenda = clientesComVenda.map(function (c) {
     var nome = c.nome || '—';
-    var nomeKey = String(nome).trim();
-    var gasto = gastoPorCliente[nomeKey] || 0;
-    var ultima = ultimaCompraPorCliente[nomeKey];
+    var gasto = gastoDe(c);
+    var ultima = ultimaDe(c);
     var dias = ultima ? Math.floor((hojeD - new Date(ultima + 'T12:00:00')) / 86400000) : null;
     return '- ' + nome + ' | tel: ' + (c.telefone || 'sem telefone') + ' | gasto: ' + gasto + ' Kz | última visita: ' +
       (dias !== null ? 'há ' + dias + ' dias (' + ultima + ')' : 'desconhecido');
@@ -282,7 +300,7 @@ function buildContextoIA() {
     '- Semana anterior: ' + totalSemanaAnterior + ' Kz\n' +
     '- Variação: ' + (totalSemanaAnterior > 0 ? Math.round(((totalSemanaAtual - totalSemanaAnterior) / totalSemanaAnterior) * 100) : 0) + '%\n' +
     '\n' +
-    'FATURAMENTO POR DIA (calendário completo com movimentos):\n' +
+    'FATURAMENTO POR DIA (últimos 30 dias):\n' +
     (linhasDia.length ? linhasDia.join('\n') : '- Sem movimentos registados') + '\n' +
     '\n' +
     'POR PROFISSIONAL (30 dias):\n' +
@@ -296,21 +314,6 @@ function buildContextoIA() {
     '\n' +
     'CATÁLOGO DE SERVIÇOS ACTIVOS:\n' +
     (linhasServicos.length ? linhasServicos.join('\n') : '- Nenhum serviço activo') + '\n' +
-    '\n' +
-    'RESUMO CLIENTES:\n' +
-    '- Total activos na ficha: ' + clientesActivos.length + '\n' +
-    '- Com pelo menos 1 venda: ' + clientesComVenda.length + '\n' +
-    '- SEM nenhuma venda registada: ' + clientesSemVenda.length + '\n' +
-    '- Eliminados (não usar como activos): ' + clientesEliminados.length + '\n' +
-    '\n' +
-    'CLIENTES SEM NENHUMA VENDA (' + clientesSemVenda.length + ') — estes ESTÃO cadastrados; NÃO digas que não existem:\n' +
-    (linhasSemVenda.length ? linhasSemVenda.join('\n') : '- Nenhum (todos os activos já têm pelo menos uma venda)') + '\n' +
-    '\n' +
-    'CLIENTES COM VENDAS (' + clientesComVenda.length + '):\n' +
-    (linhasComVenda.length ? linhasComVenda.join('\n') : '- Nenhum com vendas') + '\n' +
-    '\n' +
-    'CLIENTES ACTIVOS — LISTA COMPLETA (' + clientesActivos.length + '):\n' +
-    (linhasClientes.length ? linhasClientes.join('\n') : '- Nenhum cliente activo') + '\n' +
     '\n' +
     'CLIENTES ELIMINADOS (' + clientesEliminados.length + ') — se perguntarem por estes nomes, diz que já foram eliminados:\n' +
     (linhasEliminados.length ? linhasEliminados.join('\n') : '- Nenhum') + '\n' +
@@ -1214,16 +1217,8 @@ async function perguntarIA(pergunta) {
     return null;
   }
 
-  // 1) Resposta local determinística (não consome cota da API)
-  try {
-    const local = responderIALocal(q);
-    if (local) {
-      iaHistorico.push({ pergunta: q, resposta: local, fonte: 'local' });
-      if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
-      window.__bpIaLastMeta = { fonte: 'local' };
-      return local;
-    }
-  } catch (eLocal) {}
+  // Respostas locais DESACTIVADAS — toda a pergunta vai à Edge (ia-query)
+  // para garantir contexto completo + regras sobre clientes sem venda.
 
   // ET4.2-P0: IA online só admin/gerente (aba já filtrada; reforço operacional)
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para usar o agente IA.')) {
@@ -1314,9 +1309,6 @@ async function perguntarIA(pergunta) {
       if (resp.status === 503) {
         return 'Agente IA temporariamente indisponível. Tente dentro de momentos.';
       }
-      // Fallback local genérico se API falhar
-      const fallback = responderIALocal(q);
-      if (fallback) return fallback;
       return 'Não foi possível contactar o agente IA. Verifique a ligação e tente de novo.';
     }
 
@@ -1329,15 +1321,8 @@ async function perguntarIA(pergunta) {
     window.__bpIaLastMeta = { fonte: 'api' };
     return resposta;
   } catch (e) {
-    try {
-      const offlineLocal = responderIALocal(q);
-      if (offlineLocal) {
-        window.__bpIaLastMeta = { fonte: 'local' };
-        return offlineLocal;
-      }
-    } catch (e2) {}
     window.__bpIaLastMeta = { fonte: 'error' };
-    return 'Sem ligação à internet. Posso responder a perguntas simples sobre vendas, caixa e agenda de hoje com os dados locais — tente reformular (ex.: «quanto faturou hoje?»).';
+    return 'Sem ligação à internet. Tente novamente quando a ligação voltar.';
   } finally {
     _iaBusy = false;
   }
