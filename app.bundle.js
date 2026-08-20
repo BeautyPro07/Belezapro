@@ -14460,6 +14460,66 @@ async function perguntarIA(pergunta) {
   }
   if (_iaBusy) return null;
 
+  /* === CLIENTES SEM VENDA: resposta 100% local (não passa pelo Groq) === */
+  try {
+    var qNorm = String(q).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    var querSemVenda =
+      qNorm.indexOf('sem venda') !== -1 ||
+      qNorm.indexOf('sem registo de venda') !== -1 ||
+      qNorm.indexOf('sem registro de venda') !== -1 ||
+      qNorm.indexOf('sem compra') !== -1 ||
+      qNorm.indexOf('sem gasto') !== -1 ||
+      qNorm.indexOf('nenhuma venda') !== -1 ||
+      qNorm.indexOf('nunca compr') !== -1 ||
+      qNorm.indexOf('0 venda') !== -1 ||
+      qNorm.indexOf('0 visitas') !== -1 ||
+      qNorm.indexOf('zero venda') !== -1 ||
+      (qNorm.indexOf('cadastrad') !== -1 && qNorm.indexOf('sem') !== -1 && qNorm.indexOf('venda') !== -1);
+
+    if (querSemVenda) {
+      var stLoc = (typeof state !== 'undefined' && state) ? state : (typeof window !== 'undefined' ? window.state : null);
+      if (stLoc && Array.isArray(stLoc.clientes)) {
+        var _act = stLoc.clientes.filter(function (c) {
+          return c && c.nome && c.ativo !== false && c.ativo !== 0 && c.ativo !== 'false';
+        });
+        var _gId = {}, _gNome = {};
+        (stLoc.movimentos || []).forEach(function (m) {
+          if (!m || m.tipo !== 'venda') return;
+          var val = Number(m.valor) || 0;
+          if (m.cliente_id) _gId[String(m.cliente_id)] = (_gId[String(m.cliente_id)] || 0) + val;
+          var cn = String(m.cliente || '').trim();
+          if (cn) _gNome[cn] = (_gNome[cn] || 0) + val;
+        });
+        var _sem = _act.filter(function (c) {
+          var byId = c.id ? (_gId[String(c.id)] || 0) : 0;
+          var byNome = _gNome[String(c.nome || '').trim()] || 0;
+          return !((byId > 0 ? byId : byNome) > 0);
+        });
+        var respSem;
+        if (!_act.length) {
+          respSem = 'Na aba Clientes não há clientes activos neste salão.';
+        } else if (!_sem.length) {
+          respSem = 'Na aba Clientes há ' + _act.length +
+            ' activo(s) e todos já têm pelo menos uma venda registada.';
+        } else {
+          respSem = 'Clientes cadastrados SEM nenhuma venda (' +
+            _sem.length + ' de ' + _act.length + '):\n' +
+            _sem.map(function (c, i) {
+              return (i + 1) + '. ' + c.nome + (c.telefone ? ' · ' + c.telefone : '');
+            }).join('\n');
+        }
+        try { console.info('[Benza] sem-venda local', { activos: _act.length, sem: _sem.length }); } catch (_) {}
+        iaHistorico.push({ pergunta: q, resposta: respSem, fonte: 'local' });
+        if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
+        window.__bpIaLastMeta = { fonte: 'local-sem-venda' };
+        return respSem;
+      }
+    }
+  } catch (eLocalSem) {
+    try { console.warn('[Benza] sem-venda local falhou', eLocalSem); } catch (_) {}
+  }
+
+
   const plano = typeof getPlanoAtual === 'function' ? getPlanoAtual() : 'trial';
   const iaDia = (typeof PLANOS !== 'undefined' && PLANOS[plano]) ? PLANOS[plano].iaDia : 0;
   if (iaDia === 0) {
@@ -14478,32 +14538,6 @@ async function perguntarIA(pergunta) {
     }
     return null;
   }
-
-  /* Resposta determinística SÓ para "clientes sem venda" — o modelo alucina
-     mesmo com dados correctos; esta via evita o erro sem consumir cota. */
-  try {
-    var qNorm = (typeof normalizarPerguntaIA === 'function')
-      ? normalizarPerguntaIA(q)
-      : String(q).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    var pedeSemVenda =
-      /\bsem (nenhuma )?venda\b/.test(qNorm) ||
-      /\bsem registo de venda\b/.test(qNorm) ||
-      /\bsem compra\b/.test(qNorm) ||
-      /\bsem gasto\b/.test(qNorm) ||
-      /\bnunca compr/.test(qNorm) ||
-      /\bnenhuma venda\b/.test(qNorm) ||
-      /\b0 venda\b/.test(qNorm) ||
-      /\bcadastrad\w* sem\b/.test(qNorm);
-    if (pedeSemVenda && typeof responderIALocal === 'function') {
-      var localSem = responderIALocal(q);
-      if (localSem) {
-        iaHistorico.push({ pergunta: q, resposta: localSem, fonte: 'local' });
-        if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
-        window.__bpIaLastMeta = { fonte: 'local-sem-venda' };
-        return localSem;
-      }
-    }
-  } catch (eLocalSem) {}
 
   // ET4.2-P0: IA online só admin/gerente (aba já filtrada; reforço operacional)
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para usar o agente IA.')) {

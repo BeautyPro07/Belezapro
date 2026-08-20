@@ -1,6 +1,6 @@
 // BeautyPro Service Worker — alinhado ao index.html (só app.bundle.js)
 // v20260820-benza-sem-venda: força actualização do shell após correcção da Benza (lista = aba Clientes)
-const CACHE_NAME = 'belezapro-shell-v20260820-benza-sem-venda';
+const CACHE_NAME = 'belezapro-shell-v20260820-semvenda-v2';
 
 const APP_SHELL = [
   './',
