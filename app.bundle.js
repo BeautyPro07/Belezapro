@@ -13535,20 +13535,6 @@ function buildContextoIA() {
     '- Agendamentos: ' + agHoje.length + ' (' + agHoje.filter(function (a) { return stAg(a) === 'realizado'; }).length + ' realizados)\n' +
     '- Clientes atendidos (vendas): ' + clientesUnicos + '\n' +
     '\n' +
-    '======== FICHA DE CLIENTES (FONTE DE VERDADE DA ABA CLIENTES) ========\n' +
-    'IMPORTANTE: Esta lista vem da ficha cadastral (state.clientes). NÃO uses só nomes de vendas.\n' +
-    'RESUMO CLIENTES:\n' +
-    '- Total activos na ficha: ' + clientesActivos.length + '\n' +
-    '- Com pelo menos 1 venda: ' + clientesComVenda.length + '\n' +
-    '- SEM nenhuma venda registada: ' + clientesSemVenda.length + '\n' +
-    '\n' +
-    'CLIENTES SEM NENHUMA VENDA (' + clientesSemVenda.length + ') — ESTÃO cadastrados; é PROIBIDO dizer que não existem:\n' +
-    (linhasSemVenda.length ? linhasSemVenda.join('\n') : '- Nenhum (todos os activos já têm venda)') + '\n' +
-    '\n' +
-    'TODOS OS CLIENTES ACTIVOS DA FICHA (' + clientesActivos.length + '):\n' +
-    (linhasClientes.length ? linhasClientes.join('\n') : '- Nenhum') + '\n' +
-    '======== FIM FICHA DE CLIENTES ========\n' +
-    '\n' +
     'ÚLTIMOS 30 DIAS:\n' +
     '- Total faturado: ' + totalVendas30 + ' Kz\n' +
     '- Total vendas: ' + vendas30.length + '\n' +
@@ -13585,7 +13571,21 @@ function buildContextoIA() {
     (linhasAgProx.length ? linhasAgProx.join('\n') : '- Sem marcações') + '\n' +
     '\n' +
     'AGENDA — HISTÓRICO 14 DIAS ANTERIORES (amostra):\n' +
-    (linhasAgHist.length ? linhasAgHist.join('\n') : '- Sem histórico recente') + '\n'
+    (linhasAgHist.length ? linhasAgHist.join('\n') : '- Sem histórico recente') + '\n' +
+    '\n' +
+    '======== FICHA DE CLIENTES (FONTE DE VERDADE DA ABA CLIENTES) ========\n' +
+    'IMPORTANTE: Esta lista vem da ficha cadastral (state.clientes). NÃO uses só nomes de vendas.\n' +
+    'RESUMO CLIENTES:\n' +
+    '- Total activos na ficha: ' + clientesActivos.length + '\n' +
+    '- Com pelo menos 1 venda: ' + clientesComVenda.length + '\n' +
+    '- SEM nenhuma venda registada: ' + clientesSemVenda.length + '\n' +
+    '\n' +
+    'CLIENTES SEM NENHUMA VENDA (' + clientesSemVenda.length + ') — ESTÃO cadastrados; é PROIBIDO dizer que não existem:\n' +
+    (linhasSemVenda.length ? linhasSemVenda.join('\n') : '- Nenhum (todos os activos já têm venda)') + '\n' +
+    '\n' +
+    'TODOS OS CLIENTES ACTIVOS DA FICHA (' + clientesActivos.length + '):\n' +
+    (linhasClientes.length ? linhasClientes.join('\n') : '- Nenhum') + '\n' +
+    '======== FIM FICHA DE CLIENTES ========\n'
   );
 }
 
@@ -14295,9 +14295,10 @@ function responderIALocal(pergunta) {
   var pedeClientes =
     /\bclientes?\b/.test(q) ||
     /\bficha\b/.test(q) ||
-    /\baba\b/.test(q);
+    /\baba\b/.test(q) ||
+    /\bcadastrad/.test(q);
   var pedeLista =
-    /\b(lista|listar|mostra|mostrar|quais|quem|todos|todas|elenca|nomeia|devolve|ver|mostra-me|me de|me dê|manda)\b/.test(q) ||
+    /\b(lista|listar|mostra|mostrar|quais|quem|todos|todas|elenca|nomeia|devolve|ver|mostra-me|me de|me dê|manda|cita)\b/.test(q) ||
     /\bsem (nenhuma )?venda\b/.test(q) ||
     /\bsem compra\b/.test(q) ||
     /\bcadastrad/.test(q);
@@ -14308,10 +14309,11 @@ function responderIALocal(pergunta) {
     /\bnunca compr/.test(q) ||
     /\bnenhuma venda\b/.test(q) ||
     /\b0 venda\b/.test(q) ||
-    /\bsem registo de venda\b/.test(q);
+    /\bsem registo de venda\b/.test(q) ||
+    /\bcadastrad\w* sem\b/.test(q);
 
-  /* Interceptação forte: qualquer pedido de lista/ficha de clientes */
-  if (pedeClientes && (pedeLista || pedeSemVenda)) {
+  /* Interceptação: sem-venda SEMPRE; lista de clientes se pedir clientes/cadastrados */
+  if (pedeSemVenda || (pedeClientes && pedeLista)) {
     try {
       if (typeof console !== 'undefined' && console.info) {
         console.info('[Benza local] ficha clientes', {
@@ -14477,8 +14479,31 @@ async function perguntarIA(pergunta) {
     return null;
   }
 
-  // Respostas locais DESACTIVADAS — toda a pergunta vai à Edge (ia-query)
-  // para garantir contexto completo + regras sobre clientes sem venda.
+  /* Resposta determinística SÓ para "clientes sem venda" — o modelo alucina
+     mesmo com dados correctos; esta via evita o erro sem consumir cota. */
+  try {
+    var qNorm = (typeof normalizarPerguntaIA === 'function')
+      ? normalizarPerguntaIA(q)
+      : String(q).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    var pedeSemVenda =
+      /\bsem (nenhuma )?venda\b/.test(qNorm) ||
+      /\bsem registo de venda\b/.test(qNorm) ||
+      /\bsem compra\b/.test(qNorm) ||
+      /\bsem gasto\b/.test(qNorm) ||
+      /\bnunca compr/.test(qNorm) ||
+      /\bnenhuma venda\b/.test(qNorm) ||
+      /\b0 venda\b/.test(qNorm) ||
+      /\bcadastrad\w* sem\b/.test(qNorm);
+    if (pedeSemVenda && typeof responderIALocal === 'function') {
+      var localSem = responderIALocal(q);
+      if (localSem) {
+        iaHistorico.push({ pergunta: q, resposta: localSem, fonte: 'local' });
+        if (iaHistorico.length > IA_HIST_MAX) iaHistorico = iaHistorico.slice(-IA_HIST_MAX);
+        window.__bpIaLastMeta = { fonte: 'local-sem-venda' };
+        return localSem;
+      }
+    }
+  } catch (eLocalSem) {}
 
   // ET4.2-P0: IA online só admin/gerente (aba já filtrada; reforço operacional)
   if (typeof bpExigirRole === 'function' && !bpExigirRole(['admin', 'gerente'], 'Não tem permissão para usar o agente IA.')) {
