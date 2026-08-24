@@ -127,7 +127,7 @@
   .kpi-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 12px; }
   #clientes-list, #profissionais-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   #clientes-list .list-item, #profissionais-list .list-item {
-    margin: 0; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--card-white);
+    margin: 0; border: 1px solid var(--border-soft); border-radius: var(--radius-md); /* F6-02 */ background: var(--card-white);
   }
   #clientes-list .empty-state, #profissionais-list .empty-state { grid-column: 1 / -1; }
   #tab-agenda.active .tab-inner {
@@ -141,7 +141,7 @@
   .bp-agenda-list-col { min-width: 0; overflow-y: auto; max-height: calc(100vh - 200px); }
   .bp-agenda-workspace #agenda-full-list { max-width: none; }
   .bp-agenda-detail {
-    background: var(--card-white); border: 1px solid var(--border-soft); border-radius: 14px;
+    background: var(--card-white); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); /* F6-02 */
     padding: 20px; max-height: calc(100vh - 200px); overflow-y: auto;
     display: flex; flex-direction: column; gap: 12px;
   }
@@ -166,7 +166,7 @@
   .bp-ad-actions .btn { width: 100%; min-height: 44px; border-radius: 8px; }
   .bp-desk-attention { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
   .bp-att-card {
-    background: var(--card-white); border: 1px solid var(--border-soft); border-radius: 12px; padding: 14px 16px;
+    background: var(--card-white); border: 1px solid var(--border-soft); border-radius: var(--radius-md); /* F6-02 */ padding: 14px 16px;
   }
   .bp-att-label {
     font-size: .65rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
@@ -197,7 +197,7 @@
 @media (min-width: 768px) {
   .modal-overlay { align-items: center !important; justify-content: center !important; padding: 24px; }
   .modal-sheet {
-    max-width: 520px; width: 100%; max-height: min(90vh, 720px); border-radius: 16px !important;
+    max-width: 520px; width: 100%; max-height: min(90vh, 720px); border-radius: var(--radius-lg) !important; /* F6-02 token; !important pré-existente */
   }
   .modal-sheet .handle { display: none; }
   .modal-overlay[id^="modal-bp-"] .bp-sheet { border-radius: 16px; max-width: 580px; }
@@ -292,9 +292,9 @@
   position: relative;
   width: min(560px, 92vw);
   background: var(--card-white, #fff);
-  border-radius: 14px;
+  border-radius: var(--radius-lg); /* F6-02 */
   border: 1px solid var(--border-soft);
-  box-shadow: 0 24px 64px rgba(0,0,0,.18);
+  box-shadow: var(--shadow-floating); /* F6-02 */
   overflow: hidden;
 }
 .bp-cmd-input {
@@ -346,8 +346,8 @@
   min-width: 180px;
   background: var(--card-white, #fff);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.14);
+  border-radius: var(--radius-md); /* F6-02 */
+  box-shadow: var(--shadow-floating); /* F6-02 */
   padding: 6px;
 }
 .bp-ctx-menu[hidden] { display: none !important; }
@@ -383,7 +383,7 @@
   background: var(--card-white);
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  box-shadow: var(--shadow-rest); /* F6-02 */
   font-size: .85rem;
   font-weight: 600;
 }
@@ -424,7 +424,7 @@ html.bp-popout .bottom-nav { opacity: 0.92; }
     width: 100%;
     padding: 12px 10px;
     border: 1px solid var(--border-soft);
-    border-radius: 10px;
+    border-radius: var(--radius-md); /* F6-02 */
     background: var(--bg-soft, #f7f4ef);
     cursor: pointer;
     text-align: left;
@@ -713,3 +713,49 @@ html.bp-popout .bottom-nav { opacity: 0.92; }
 
 .kpi-grid--resumo { grid-template-columns: 1fr 1fr !important; }
 .kpi-grid--resumo .kpi-card--fat { grid-column: 1 / -1 !important; }
+
+
+
+
+/* ====================================================================
+   F7-5 desktop — Agenda controlos abaixo do head; gap filtro/daynav
+   ==================================================================== */
+@media (min-width: 1024px) {
+  #tab-agenda.tab-pane.active .bp-agenda-controls {
+    justify-content: flex-start !important;
+    gap: 20px !important;
+  }
+  #tab-agenda.tab-pane.active .bp-agenda-daynav {
+    margin-left: 8px !important;
+  }
+  #tab-agenda.tab-pane.active #agenda-filter-popover {
+    top: calc(100% + 8px) !important;
+    bottom: auto !important;
+    left: 0 !important;
+    transform: none !important;
+  }
+  #tab-agenda.tab-pane.active #agenda-filter-popover:not([style*="display: block"]):not([style*="display:block"]) {
+    display: none !important;
+  }
+  #tab-agenda.tab-pane.active #agenda-filter-popover[style*="display: block"],
+  #tab-agenda.tab-pane.active #agenda-filter-popover[style*="display:block"] {
+    display: block !important;
+  }
+}
+
+
+@media (min-width: 1024px) {
+  /* F7-6 desktop agenda */
+  #tab-agenda.tab-pane.active .bp-agenda-controls {
+    justify-content: space-between !important;
+  }
+  #tab-agenda.tab-pane.active .bp-agenda-daynav {
+    margin-left: auto !important;
+  }
+  #tab-agenda.tab-pane.active #agenda-filter-icon {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+  }
+}

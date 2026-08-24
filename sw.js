@@ -1,7 +1,7 @@
 // BeautyPro Service Worker — alinhado ao index.html (só app.bundle.js)
-// v20260820-benza-sem-venda: força actualização do shell após correcção da Benza (lista = aba Clientes)
-const CACHE_NAME = 'belezapro-shell-v20260820-semvenda-v2';
-
+// v20260824-f7-7: Agenda título+sticky, IA sticky, gap lista;  força actualização do shell após correcção da Benza (lista = aba Clientes)
+/* P3 perf: precache leve — ícones 1MB+ ficam em runtime (evita install lento) */
+const CACHE_NAME = 'belezapro-shell-v20260824-f7-11';
 const APP_SHELL = [
   './',
   './index.html',
@@ -24,9 +24,9 @@ const APP_SHELL = [
   './bp-premium-panels.css',
   './desktop-responsive.css',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './logo.png'
+  './logo.png',
+  './ia-empty-duo.png',
+  './bp-resumo-kpi.js'
 ];
 
 self.addEventListener('install', (event) => {

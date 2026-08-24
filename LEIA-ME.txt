@@ -1,0 +1,6 @@
+F7-10 — ficheiros-alvo
+1. Ligado: extremo direito (removido flex:1 no conn)
+2. Enviar: #2E9B57, 36x36
+3. Taglines + empty copy actualizados
+4. sw cache belezapro-shell-v20260824-f7-10
+5. Contrato .ia-status-line preservado

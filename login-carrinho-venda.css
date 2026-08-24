@@ -22,7 +22,7 @@
 .login-card { width: 100%; max-width: 400px; }
 
 @media (min-width: 600px) {
-  .app-container { border-left: 1px solid var(--border-soft); border-right: 1px solid var(--border-soft); box-shadow: var(--shadow-strong); }
+  .app-container { border-left: 1px solid var(--border-soft); border-right: 1px solid var(--border-soft); box-shadow: var(--shadow-floating); }
   .fab { right: calc(50% - 220px); }
 }
 input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-appearance: none; }
@@ -43,7 +43,7 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
   min-width: 0;
 }
 .cart-item-row .ci-name {
-  font-size: .88rem;
+  font-size: var(--text-sm, 0.88rem);
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -51,7 +51,7 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
   text-overflow: ellipsis;
 }
 .cart-item-row .ci-prof {
-  font-size: .65rem;
+  font-size: var(--text-xs, 0.65rem);
   color: var(--text-muted);
   margin-top: 1px;
   white-space: nowrap;
@@ -757,8 +757,10 @@ input[type="date"], input[type="datetime-local"] { appearance: none; -webkit-app
 /* Validação venda — destaque de campo (sem toast de risco) */
 .input-field.bp-field-invalid,
 select.bp-field-invalid {
-  border-color: var(--text-secondary, #6b6560) !important;
-  box-shadow: 0 0 0 2px rgba(28, 26, 24, 0.08);
+  /* F5-02: mesma autoridade de erro que modais-toast-fab / DS (token --red) */
+  border-color: var(--red) !important;
+  background: var(--card-white);
+  box-shadow: 0 0 0 2px rgba(179, 58, 74, 0.15);
 }
 
 
@@ -983,4 +985,22 @@ select.bp-field-invalid {
   border-radius: 10px;
   font-size: 0.8125rem;
   font-weight: 600;
+}
+
+
+/* F7-5 — Finalizar: Registar dourado (primary), Cancelar branco/secondary */
+#modal-finalizar #modal-finalizar-save.btn-primary {
+  /* herda .btn-primary do design-system (dourado) */
+}
+#modal-finalizar #modal-finalizar-cancel.btn-secondary {
+  background: var(--card-white);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft);
+}
+/* Detalhe venda — Imprimir recibo = estilo Voltar/Fechar (secondary branco) */
+#modal-detalhe-venda #btn-imprimir-recibo.btn-secondary {
+  background: var(--card-white);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft);
+  box-shadow: none;
 }

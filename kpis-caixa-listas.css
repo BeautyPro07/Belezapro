@@ -11,7 +11,7 @@
   margin-bottom: 20px;
 }
 
-/* ---------- Resumo: grid limpo (Tailwind-like border/radius) ---------- */
+/* ---------- LEGADO P2: kpi-grid--resumo não usado no HTML actual (hero .resumo-hero) ---------- */
 .kpi-grid--resumo {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
@@ -52,7 +52,7 @@
   background: linear-gradient(
     180deg,
     var(--gold-50) 0%,
-    #FFFef8 32%,
+    var(--card-white) 32%,
     var(--card-white) 70%
   );
   border: var(--border-muted);
@@ -152,6 +152,7 @@
   letter-spacing: -0.02em;
   line-height: 1.1;
 }/* ===== AÇÕES DA CAIXA ===== */
+/* P1: tile de acção de contexto (Caixa) — não é .btn; tokens alinhados */
 .caixa-acao {
   display: flex;
   flex-direction: column;
@@ -162,20 +163,21 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--card-white);
-  box-shadow: var(--shadow-premium);
+  box-shadow: var(--shadow-rest);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   font-family: var(--font-sans);
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   color: var(--text-primary);
   min-height: 48px;
   text-align: center;
+  touch-action: manipulation;
 }
 .caixa-acao:active {
   transform: scale(0.96);
   background: var(--bg-soft);
-  box-shadow: var(--shadow-strong);
+  box-shadow: var(--shadow-floating);
 }
 .caixa-acao svg {
   width: 18px;
@@ -221,10 +223,17 @@
   text-overflow: ellipsis; /* rede de segurança: valor futuro maior corta com "…" em vez de quebrar o cartão */
   max-width: 100%;
 }
-/* Ticket Médio: cartão de largura dupla (span 2) tem folga para um valor "herói" maior */
-#kpi-ticket {
+/* Ticket Médio legado (grid KPI) — NÃO aplicar no hero Resumo */
+.kpi-card #kpi-ticket,
+.kpi-value#kpi-ticket {
   font-size: 1.6rem;
   line-height: 1.1;
+}
+.resumo-hero #kpi-ticket,
+.resumo-kpi-acao #kpi-ticket {
+  font-size: 0.72rem;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
 }
 /* Utilitário opcional (relatório §2.5): refinamento "Graphite" para o Ticket Médio */
 .kpi-value.graphite { color: var(--text-primary); }
@@ -263,7 +272,7 @@
   border-radius: var(--radius-md);
   padding: 12px 16px;
   margin-bottom: 8px;
-  box-shadow: var(--shadow-premium);
+  box-shadow: var(--shadow-rest);
   transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
   position: relative;
@@ -304,14 +313,15 @@
 .list-item .info { flex: 1; min-width: 0; }
 .list-item .info .title {
   font-weight: 600;
-  font-size: .95rem;
+  font-size: var(--text-sm, 0.95rem);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .list-item .info .sub {
-  font-size: .75rem;
-  color: var(--text-secondary);
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 /* Perfil do cliente com mais contexto (em vez de "Nome e X visitas") */
@@ -496,24 +506,27 @@
   padding: 2px;
   gap: 0;
 }
+/* P1: segment chip do gráfico — mesma lógica visual dos chips de período */
 .dash-chart-seg .chart-filter {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: .68rem;
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
   font-weight: 600;
-  padding: 5px 11px;
-  min-height: 28px;
-  height: 28px;
-  border-radius: 999px;
+  padding: 6px 12px;
+  min-height: 32px;
+  height: auto;
+  border-radius: var(--radius-full, 9999px);
   cursor: pointer;
-  line-height: 1;
+  line-height: 1.2;
   box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .dash-chart-seg .chart-filter.is-active,
 .dash-chart-seg .chart-filter.btn-primary {
-  background: var(--gold, #c9a227);
-  color: #1c1a18;
+  background: var(--gold);
+  color: var(--card-white);
 }
 .dash-chart-nav {
   display: flex;
@@ -558,12 +571,13 @@
   min-height: 140px;
 }
 .dash-chart-empty {
+  /* F6-01: empty de gráfico — tipografia token; não é .empty-state de lista */
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: .78rem;
+  font-size: var(--text-xs, 0.78rem);
   color: var(--text-muted);
   pointer-events: none;
 }
@@ -579,7 +593,7 @@
   background: var(--card-white);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-premium);
+  box-shadow: var(--shadow-rest);
   min-height: 52px;
 }
 .kpi-temporal-bar-text {
@@ -607,7 +621,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 8px 4px 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-md); /* F6-01 */
   border: 1px solid var(--border-soft);
   background: var(--bg-soft, #f7f4ef);
   cursor: pointer;
@@ -652,7 +666,7 @@
 }
 .kpi-temporal-opt.is-active {
   background: var(--gold, #c9a227);
-  color: #1c1a18;
+  color: var(--text-primary);
   border-color: transparent;
 }
 .kpi-temporal-summary {
@@ -748,10 +762,10 @@
   z-index: 400;
   max-width: min(260px, 80vw);
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md); /* F6-01 */
   background: var(--card-white, #fff);
   border: 1px solid var(--border-soft, #e5e2dc);
-  box-shadow: var(--shadow-premium, 0 8px 24px rgba(0,0,0,.12));
+  box-shadow: var(--shadow-rest);
   font-size: .72rem;
   line-height: 1.35;
   color: var(--text-primary);
@@ -788,7 +802,7 @@
   border-radius: 8px;
   border: none;
   background: var(--gold, #c9a227);
-  color: #1c1a18;
+  color: var(--text-primary);
   font-size: .72rem;
   font-weight: 700;
   cursor: pointer;
@@ -803,7 +817,7 @@
 }
 .chart-drill-kpi {
   background: var(--bg-soft, #f7f4ef);
-  border-radius: 10px;
+  border-radius: var(--radius-md); /* F6-01 */
   padding: 10px;
 }
 .chart-drill-kpi span {
@@ -850,9 +864,11 @@
   font-size: .72rem;
 }
 .chart-drill-empty {
-  font-size: .8rem;
+  /* F5-03: empty de gráfico — especializado (não é .empty-state de lista) */
+  font-size: var(--text-xs, 0.8rem);
   color: var(--text-muted);
-  padding: 12px 0;
+  padding: var(--s1, 8px) 0;
+  text-align: center;
 }
 
 /* Insights + view mode + skeleton (Fase 6–7) */
@@ -1000,7 +1016,7 @@
   min-height: 40px;
   padding: 8px 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-md); /* F6-01 */
   background: var(--bg-soft, #f7f4ef);
   font-family: inherit;
   cursor: pointer;
@@ -1029,7 +1045,7 @@
   background: var(--card-white, #fff);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
-  box-shadow: 0 10px 28px rgba(28,26,24,.12);
+  box-shadow: var(--shadow-floating); /* F6-01 */
 }
 .dash-chart-card .dash-chart-periodo-pop[hidden] { display: none !important; }
 .dash-chart-card .dash-chart-periodo-opcoes {
@@ -1061,24 +1077,32 @@
   gap: 4px;
   flex-shrink: 0;
 }
+/* P1: toolbar ghost — alinhado a tokens ghost (não nova espécie de Button) */
 .dash-chart-card .dash-chart-ghost-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   min-height: 36px;
+  min-width: 36px;
   padding: 6px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.68rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-sans);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .dash-chart-card .dash-chart-ghost-btn:hover {
-  background: var(--bg-soft, #f7f4ef);
+  background: var(--bg-soft);
   color: var(--text-primary);
+}
+.dash-chart-card .dash-chart-ghost-btn:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
 }
 .dash-chart-card .dash-chart-export-wrap,
 .dash-chart-card .dash-chart-more-wrap {
@@ -1313,7 +1337,7 @@
   font-size: 0.76rem;
   font-weight: 500;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-md); /* F6-01 */
   background: var(--bg-soft, #f7f4ef);
   color: var(--text-primary);
   cursor: pointer;
@@ -1563,7 +1587,11 @@
 }
 .dash-chart-card .dash-chart-insights li {
   position: relative;
-  padding-left: 22px !important;
+  padding-left: 12px;
+}
+.dash-chart-card .dash-chart-insights.is-live li {
+  padding-left: 28px !important;
+  padding-right: 10px;
 }
 .dash-chart-card .dash-chart-insights.is-live li::before {
   content: '';
@@ -1577,6 +1605,7 @@
   background: var(--green-500, #22a06b);
   animation: bpChartDotBlink 1.4s ease-in-out infinite;
   pointer-events: none;
+  z-index: 0;
 }
 .dash-chart-card .dash-chart-insights.is-live li:nth-child(2)::before { animation-delay: 0.25s; }
 .dash-chart-card .dash-chart-insights.is-live li:nth-child(3)::before { animation-delay: 0.5s; }
@@ -1979,7 +2008,7 @@
 .dash-chart-exec-item {
   background: var(--bg-soft, #f7f5f1);
   border: 1px solid var(--border-soft, #e8e4de);
-  border-radius: 10px;
+  border-radius: var(--radius-md); /* F6-01 */
   padding: 8px 6px;
   text-align: center;
   min-width: 0;
@@ -2100,29 +2129,370 @@
 }
 
 
-/* Modal faturamento — valor numa linha, sem empilhar */
-#modal-revenue-detail .bp-revenue-row {
-  align-items: center;
-  gap: 10px;
+/* Modal faturamento — valores sóbrios, alinhados; total forte (mono) */
+#modal-revenue-detail .bp-revenue-detail-list {
+  max-height: 400px;
+  overflow-y: auto;
 }
-#modal-revenue-detail .bp-revenue-val,
-#modal-revenue-detail .list-item .action.bp-revenue-val {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--gold-dark, #a7872b);
-  max-width: 42%;
-  text-align: right;
-  line-height: 1.2;
+#modal-revenue-detail .bp-revenue-row,
+#modal-revenue-detail .list-item.bp-revenue-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 #modal-revenue-detail .bp-revenue-row .info {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
 }
-#modal-revenue-detail #revenue-detail-total {
+/* Cascata viva: nome → serviço/data */
+#modal-revenue-detail .bp-revenue-row .info .name,
+#modal-revenue-detail .bp-revenue-row .name {
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+#modal-revenue-detail .bp-revenue-row .info .sub,
+#modal-revenue-detail .bp-revenue-row .sub {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 450;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+/* Valores de cada venda: dourado */
+#modal-revenue-detail .bp-revenue-val,
+#modal-revenue-detail .list-item .action.bp-revenue-val {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
   white-space: nowrap;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  display: inline-block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--gold-dark);
+  text-align: right;
+  line-height: 1;
+  align-self: center;
+}
+/* Total no topo — mesmo padrão visual de .bp-ag-detail-totals (Agenda) */
+#modal-revenue-detail .bp-rev-detail-totals {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border-radius: 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+#modal-revenue-detail .bp-rev-detail-totals-label {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+#modal-revenue-detail .bp-rev-detail-totals-val,
+#modal-revenue-detail #revenue-detail-total {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--green);
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+
+/* ========== Resumo hero — fundo branco, tipografia na escala, sub-KPIs fixos ========== */
+.resumo-hero.card,
+.resumo-hero.card-highlight {
+  background: var(--card-white);
+  border: 1px solid var(--border-soft);
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-rest);
+  margin-bottom: var(--s2);
+  padding: 12px 14px 12px;
+}
+.resumo-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2px;
+  gap: var(--s1);
+}
+.resumo-hero-title-row {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.15;
+}
+.resumo-hero-eyebrow {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+/* Período — mais pequeno que o eyebrow */
+.resumo-hero-period,
+.resumo-hero-title-row .dash-period-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--gold-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* Botão filtro — só ícone funil */
+.resumo-hero-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.resumo-hero-filter .bp-icon-funnel {
+  display: block;
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+}
+.resumo-hero-filter:hover {
+  background: var(--bg-soft);
+  color: var(--gold-dark);
+}
+.resumo-hero-filter:active {
+  background: var(--neutral-50);
+  color: var(--gold-900);
+}
+.resumo-hero-filter:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.resumo-hero-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin: 0 0 10px;
+  gap: 10px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.resumo-hero-main:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+/* Valor de faturamento — maior */
+.resumo-hero-value,
+#kpi-revenue.resumo-hero-value {
+  font-family: var(--font-mono);
+  font-size: clamp(1.85rem, 6.5vw, 2.55rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-dark);
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+.resumo-hero .kpi-pulse,
+.resumo-kpi-acao .kpi-pulse {
+  animation: resumo-kpi-pulse 0.45s ease;
+}
+@keyframes resumo-kpi-pulse {
+  0% { opacity: 0.55; }
+  100% { opacity: 1; }
+}
+.resumo-hero-side {
+  display: none !important;
+}
+.resumo-hero-side-sub {
+  display: none;
+}
+
+/* Grelha 3 — tiles mais baixos; número + texto ao mesmo lado (esquerda) */
+.resumo-hero-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  align-items: center;
+}
+/* Número + label na mesma linha — fundo transparente; setas entre tiles */
+.resumo-hero .resumo-kpi-acao.caixa-acao {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto;
+  align-items: center;
+  column-gap: 5px;
+  row-gap: 0;
+  padding: 8px 16px 8px 4px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  overflow: visible;
+  box-sizing: border-box;
+  text-align: left;
+  position: relative;
+  /* anular .caixa-acao (fundo branco / borda / sombra) só no hero */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.resumo-hero .resumo-kpi-acao.caixa-acao:active {
+  transform: none;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.75;
+}
+/* Seta profissional entre botões (Clientes → Agenda → Serviços) */
+.resumo-hero .resumo-kpi-acao.caixa-acao:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  pointer-events: none;
+  opacity: 0.45;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 24 24' stroke='%236B6560' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18l6-6-6-6'/%3E%3C/svg%3E");
+}
+/* 3 botões — tipografia idêntica a .resumo-hero-side-val ("108 vendas") */
+.resumo-kpi-acao .resumo-kpi-num {
+  grid-column: 1;
+  grid-row: 1;
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--text-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+  max-width: 5.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.resumo-kpi-acao .resumo-kpi-lbl {
+  grid-column: 2;
+  grid-row: 1;
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Subtítulos do bundle (status) — nunca visíveis */
+.resumo-kpi-acao .resumo-kpi-sub {
+  display: none !important;
+}
+.resumo-kpi-acao svg {
+  display: none !important;
+}
+/* Destinos legados do bundle — fora do layout */
+.resumo-kpi-dump,
+.resumo-kpi-source,
+#kpi-clientes-status.resumo-kpi-source,
+#kpi-revenue-count.resumo-kpi-source,
+#kpi-clientes.resumo-kpi-source,
+#kpi-ticket.resumo-kpi-source,
+#kpi-ticket-sub.resumo-kpi-source,
+#kpi-agendamentos-status.resumo-kpi-source {
+  position: absolute !important;
+  left: -9999px !important;
+  top: auto !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  display: block !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+
+/* Greeting residual no Resumo */
+#tab-dashboard .dash-period-greeting {
+  display: none !important;
+}
+
+
+/* Fontes KPI do bundle — no DOM, fora do ecrã, sem clip dos botões */
+#resumo-kpi-sources,
+.resumo-kpi-sources {
+  position: absolute !important;
+  left: -10000px !important;
+  top: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+
+/* === Patch chart: ocultar seta nudge do filtro (sempre) === */
+.dash-chart-card .dash-chart-nudge,
+.dash-chart-card .dash-chart-nudge-arrow,
+.dash-chart-card.nudge-done .dash-chart-nudge {
+  display: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  animation: none !important;
 }

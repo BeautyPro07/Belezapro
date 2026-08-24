@@ -31,7 +31,7 @@
   background: var(--card-white);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-strong);
+  box-shadow: var(--shadow-floating);
   padding: 6px;
   z-index: 500;
   opacity: 0;
@@ -94,14 +94,15 @@
 
 /* ===== EMPTY STATE ===== */
 .empty-state {
+  /* F5-03: alinha a design-system-final (cascata: DS carrega depois; aqui fallback) */
   text-align: center;
-  padding: 40px 20px;
+  padding: var(--s4, 32px) var(--s2, 16px);
   color: var(--text-muted);
   background: var(--card-white);
   border: 1px dashed var(--border-soft);
   border-radius: var(--radius-md);
 }
-.empty-state p { font-weight: 500; font-size: .85rem; }
+.empty-state p { font-weight: 500; font-size: var(--text-sm, 0.85rem); color: var(--text-muted); line-height: 1.45; }
 .empty-state svg { display: block; margin: 0 auto 8px; }
 
 /* ===== AGENDA ===== */
@@ -149,10 +150,14 @@
   margin-top: 10px;
 }
 .timeline-item .event .timeline-actions .btn-success { flex: 1; }
+/* P1: ícone-only = .btn + esta utilidade (não família paralela) */
+.btn.btn-icon-only,
 .btn-icon-only {
-  width: 40px;
-  min-width: 40px;
-  padding: 0 !important;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
   flex: 0 0 auto;
 }
 .pill {
@@ -188,19 +193,90 @@
    já a alternava, mas nada de CSS lhe dava efeito visual), por isso
    depois do primeiro clique o botão "Hoje" continuava sempre dourado
    mesmo com outro período selecionado. Passa a ser tudo via classe. */
+/* ===== POPOVER FILTRO AGENDA — abrir/fechar só via style.display do bundle ===== */
 .agenda-filter-popover {
   display: none;
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
+  left: auto;
+  bottom: auto;
   background: var(--card-white);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-strong);
+  box-shadow: var(--shadow-floating);
   padding: 10px;
-  z-index: 200;
+  z-index: 400;
   min-width: 172px;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 32px));
+  height: auto;
+  max-height: min(70vh, 420px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin: 0;
 }
+
+
+/* Âncora do filtro Agenda — popover alinha ao ícone, não ao header inteiro */
+.bp-agenda-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  position: relative;
+  gap: 4px;
+}
+.bp-agenda-filter-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  z-index: 5;
+}
+
+/* #agenda-filter-popover: FECHADO por defeito com !important;
+   ABERTO só quando o JS define style.display = "block" (inline). */
+#agenda-filter-popover {
+  display: none !important;
+  position: absolute !important;
+  /* Por defeito mobile: abaixo do ícone, alinhado à esquerda da âncora */
+  left: 0 !important;
+  right: auto !important;
+  transform: none !important;
+  top: calc(100% + 6px) !important;
+  bottom: auto !important;
+  width: max-content !important;
+  min-width: 200px !important;
+  max-width: min(280px, calc(100vw - 24px)) !important;
+  height: auto !important;
+  flex: 0 0 auto !important;
+  z-index: 500 !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+}
+#agenda-filter-popover[style*="display: block"],
+#agenda-filter-popover[style*="display:block"] {
+  display: block !important;
+}
+
+/* Organização interna — grelha estável */
+#agenda-filter-popover .agenda-periodo-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 6px !important;
+  width: 100%;
+  margin: 0;
+}
+#agenda-filter-popover .agenda-periodo-filter {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .agenda-periodo-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -211,17 +287,23 @@
   background: var(--border-soft);
   margin: 8px 0;
 }
+/* P1: chip de período — tokens; active = brand (não novo Button) */
 .agenda-periodo-filter {
-  padding: 5px 6px;
-  font-family: inherit;
-  font-size: .68rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 8px;
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
   font-weight: 600;
   border-radius: var(--radius-sm);
   background: var(--card-white);
   color: var(--text-secondary);
   border: 1px solid var(--border-soft);
   cursor: pointer;
-  transition: var(--transition);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  touch-action: manipulation;
 }
 .agenda-periodo-filter.active {
   background: var(--gold);
@@ -263,7 +345,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--green);
   margin-right: 6px;
   vertical-align: middle;
   box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
@@ -277,7 +359,7 @@
 .agenda-periodo-filter--pendentes.has-pending .bp-ag-pulse-dot { opacity: 1; }
 .agenda-periodo-filter--pendentes:not(.has-pending) .bp-ag-pulse-dot {
   animation: none;
-  background: #c5c0b8;
+  background: var(--border-soft);
   box-shadow: none;
 }
 .bp-ag-card--pulse { position: relative; }
@@ -362,3 +444,15 @@
   grid-column: auto !important;
 }
 
+
+
+/* F7-7 agenda list gap — mais perto do filtro */
+#tab-agenda #agenda-full-list {
+  margin-top: 0;
+  padding-top: 0;
+}
+#tab-agenda #agenda-full-list .timeline-item:first-child,
+#tab-agenda #agenda-full-list > .timeline-day:first-child,
+#tab-agenda #agenda-full-list > div:first-child {
+  margin-top: 4px;
+}

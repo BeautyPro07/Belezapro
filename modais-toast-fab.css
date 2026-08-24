@@ -24,7 +24,7 @@
   padding: 24px 20px calc(24px + env(safe-area-inset-bottom, 16px));
   max-height: 92vh;
   overflow-y: auto;
-  box-shadow: var(--shadow-strong);
+  box-shadow: var(--shadow-floating);
   animation: slideUp .35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes slideUp {
@@ -52,9 +52,9 @@
   background: var(--card-white);
   width: min(92vw, 360px);
   max-width: 360px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 22px 22px 18px;
-  box-shadow: 0 12px 40px rgba(28, 26, 24, 0.16);
+  box-shadow: var(--shadow-floating);
   animation: confirmIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   text-align: left;
   margin: auto;
@@ -105,35 +105,11 @@
 }
 #modal-confirm .confirm-actions {
   display: flex;
-  gap: 10px;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   width: 100%;
-}
-#modal-confirm .confirm-actions .btn {
-  flex: 1;
-  min-height: 36px;
-  height: 36px;
-  padding: 6px 12px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  border-radius: var(--radius-sm);
-  text-align: center;
-  justify-content: center;
-}
-#modal-confirm .confirm-actions .btn-secondary {
-  background: var(--bg-soft);
-  border: 1px solid var(--border-soft);
-  color: var(--text-secondary);
-}
-#modal-confirm .confirm-actions .btn-secondary:active {
-  background: var(--border-soft);
-}
-#modal-confirm .confirm-actions .btn-danger {
-  background: var(--red);
-  color: var(--card-white);
-  border: none;
-}
-#modal-confirm .confirm-actions .btn-danger:active {
-  opacity: 0.85;
 }
 #modal-confirm label {
   display: flex;
@@ -173,9 +149,9 @@
   white-space: normal;
   max-width: min(calc(100vw - 32px), 360px);
   width: max-content;
-  box-shadow: 0 4px 20px rgba(28, 26, 24, 0.12);
-  border: 1px solid var(--border-soft, #e5e2dc);
-  border-left: 3px solid var(--text-muted, #8a8580);
+  box-shadow: var(--shadow-raised);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--text-muted);
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -185,12 +161,12 @@
   .toast { max-width: min(calc(100vw - 48px), 420px); }
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast.success { border-left-color: #2f6b4f; }
-.toast.error { border-left-color: #8b3a3a; }
-.toast.warning { border-left-color: #a67c2a; }
-.toast.info { border-left-color: #4a6fa5; }
+.toast.success { border-left-color: var(--green); }
+.toast.error { border-left-color: var(--red); }
+.toast.warning { border-left-color: var(--gold-600); }
+.toast.info { border-left-color: var(--text-secondary); }
 
-/* ===== FAB ===== */
+/* ===== FAB — autoridade única (P0): círculo 56px ===== */
 .fab {
   position: fixed;
   bottom: 100px;
@@ -211,13 +187,13 @@
   font-weight: 300;
   line-height: 1;
   cursor: pointer;
-  transition: var(--transition);
+  transition: opacity var(--transition-fast, 0.15s ease), transform var(--transition-fast, 0.15s ease), box-shadow var(--transition-fast, 0.15s ease);
   z-index: 400;
   touch-action: manipulation;
 }
 .fab.fab-scrolling {
-  opacity: .35;
-  transform: scale(.8);
+  opacity: 0.35;
+  transform: scale(0.8);
   pointer-events: none;
 }
 .fab::before {
@@ -226,16 +202,12 @@
   inset: -8px;
   z-index: -1;
 }
-.fab:active { opacity: .85; box-shadow: var(--shadow-gold); }
-/* Forçar botões do fecho a serem redondos e magros */
-#modal-fecho button {
-  border-radius: var(--radius-full) !important;
-  padding: 4px 14px !important;
-  font-size: 0.7rem !important;
-  height: 30px !important;
-  line-height: 1 !important;
-  white-space: nowrap;
+.fab:active {
+  opacity: 0.9;
+  transform: scale(0.96);
+  box-shadow: var(--shadow-gold);
 }
+/* P1: fecho usa .btn / .btn-sm — não forçar height 30px nem radius-full */
 
 /* ET4.8b — overlays centrados (info / confirm / erro) */
 .modal-overlay--center,
@@ -281,10 +253,10 @@
   flex-direction: row;
   justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   margin: 0;
-  padding-top: 4px;
+  padding-top: 8px;
   border-top: none;
 }
 
@@ -292,58 +264,90 @@
   justify-content: flex-end;
 }
 
-/* Botão compacto — dourado controlado, não barra full-width */
-.btn-modal-compact {
-  flex: 0 0 auto !important;
-  width: auto !important;
-  max-width: none !important;
-  min-width: 88px;
-  min-height: 36px !important;
-  height: auto !important;
-  padding: 8px 16px !important;
-  font-size: 0.8125rem !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.01em;
-  border-radius: 8px !important;
-  line-height: 1.2 !important;
+/*
+  P0 — Acções de diálogo: só tipografia (referência tipo Cancelar / Eliminar).
+  Sem fundo preenchido, sem borda de botão. Família = .btn + variante semântica.
+  .btn-modal-compact / .btn-modal-quiet deixam de forçar “botão caixa”.
+*/
+.confirm-actions .btn,
+.confirm-actions .btn-modal-compact,
+.modal-confirm-sheet .confirm-actions .btn,
+.modal-info-sheet .confirm-actions .btn {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  padding: 10px 14px;
+  margin: 0;
+  background: transparent !important;
+  border: none !important;
+  border-radius: var(--radius-md);
+  box-shadow: none !important;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-align: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* Cancelar / Fechar / secundário — tinta principal */
+.confirm-actions .btn-secondary,
+.modal-confirm-sheet .confirm-actions .btn-secondary,
+.modal-info-sheet .confirm-actions .btn-secondary {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  border: none !important;
+}
+.confirm-actions .btn-secondary:active,
+.modal-confirm-sheet .confirm-actions .btn-secondary:active {
+  opacity: 0.55;
+  background: transparent !important;
+}
+
+/* Eliminar / Sair / destrutivo — só vermelho tipográfico */
+.confirm-actions .btn-danger,
+.modal-confirm-sheet .confirm-actions .btn-danger {
+  color: var(--red) !important;
+  background: transparent !important;
+  border: none !important;
+}
+.confirm-actions .btn-danger:active,
+.modal-confirm-sheet .confirm-actions .btn-danger:active {
+  opacity: 0.7;
+  background: transparent !important;
+}
+
+/* Afirmativo pontual (Entendi, Tentar novamente) — tipografia ink, sem dourado de fundo */
+.confirm-actions .btn-primary,
+.modal-confirm-sheet .confirm-actions .btn-primary,
+.modal-info-sheet .confirm-actions .btn-primary {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  border: none !important;
   box-shadow: none !important;
 }
-
-#modal-confirm .confirm-actions .btn,
-#modal-erro .confirm-actions .btn {
-  flex: 0 0 auto;
-  min-height: 36px;
-  padding: 8px 16px;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  border-radius: 8px;
+.confirm-actions .btn-primary:active,
+.modal-confirm-sheet .confirm-actions .btn-primary:active {
+  opacity: 0.55;
+  background: transparent !important;
 }
 
-/* Primário dourado mais contido nos modais de diálogo */
-.modal-confirm-sheet .btn-primary,
-.modal-info-sheet .btn-primary {
-  background: var(--gold, #c4a035);
-  color: #1c1a18;
-  border: none;
-  box-shadow: none;
-}
-.modal-confirm-sheet .btn-primary:active,
-.modal-info-sheet .btn-primary:active {
-  opacity: 0.9;
+.confirm-actions .btn:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
 }
 
-.modal-confirm-sheet .btn-secondary,
-.modal-info-sheet .btn-secondary {
-  background: transparent;
-  border: 1px solid var(--border-soft, #e5e2dc);
-  color: var(--text-secondary, #5a554c);
-  box-shadow: none;
-}
-
-.modal-confirm-sheet .btn-danger {
-  background: #7a3333;
-  color: #fff;
-  border: none;
+/* P2: bundle ainda atribui btn-modal-compact / btn-modal-quiet no OK —
+   herdam tipografia de .confirm-actions .btn; sem caixa própria */
+.confirm-actions .btn-modal-quiet {
+  color: var(--text-primary);
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 #modal-confirm .confirm-icon {
@@ -354,52 +358,33 @@
   display: none !important;
 }
 
-
-/* ET4.8c — Sair / diálogos quiet: tipografia limpa, sem dourado dominante */
-.modal-confirm--quiet .modal-confirm-sheet {
-  border: 1px solid var(--border-soft, #e8e4dc);
-  box-shadow: 0 8px 28px rgba(28, 26, 24, 0.12);
+/* Título / mensagem — hierarquia limpa (padrão diálogo) */
+.modal-confirm-sheet .confirm-title,
+#modal-confirm .confirm-title {
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+  text-align: left;
 }
-.modal-confirm--quiet .confirm-title {
-  font-size: 1.0625rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--text-primary, #1c1a18);
-}
-.modal-confirm--quiet .confirm-message {
+.modal-confirm-sheet .confirm-message,
+#modal-confirm .confirm-message {
+  font-family: var(--font-sans);
   font-size: 0.9375rem;
   font-weight: 400;
-  line-height: 1.55;
-  color: var(--text-secondary, #5a554c);
-}
-.btn-modal-quiet,
-.modal-confirm--quiet .btn-modal-quiet {
-  background: var(--text-primary, #1c1a18) !important;
-  color: var(--card-white, #fff) !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-.btn-modal-quiet:active {
-  opacity: 0.88;
-}
-.modal-confirm--quiet .btn-secondary {
-  background: transparent !important;
-  border: 1px solid var(--border-soft, #ddd) !important;
-  color: var(--text-secondary, #5a554c) !important;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+  text-align: left;
 }
 
-
-
-/* Offline info — mesmo padrão de modal informativo */
+/* Offline info — mesmo padrão tipográfico */
 #modal-offline-info.modal-overlay {
   align-items: center;
   justify-content: center;
   z-index: 2100;
-}
-#modal-offline-info .btn-primary {
-  background: var(--gold, #c4a035);
-  color: #1c1a18;
-  border: none;
 }
 
 
@@ -421,13 +406,67 @@
 }
 
 
-/* Campo inválido — feedback imediato em formulários */
+/* Campo inválido — F3-05: tokens oficiais; !important pré-existente mantido para aria-invalid */
 .bp-field-invalid,
 [aria-invalid="true"].input-field {
-  border-color: #8b3a3a !important;
-  box-shadow: 0 0 0 2px rgba(139, 58, 58, 0.15);
+  border-color: var(--red) !important;
+  background: var(--card-white);
+  box-shadow: 0 0 0 2px rgba(179, 58, 74, 0.15);
 }
 
+
+
+/* ===== Fundo / Despesa / Agenda — botões .btn (compact 40px), não tipografia pura ===== */
+#modal-fundo .modal-actions.modal-actions--compact,
+#modal-despesa .modal-actions.modal-actions--compact,
+#modal-agenda .modal-actions.modal-actions--compact {
+  display: grid !important;
+  grid-template-columns: 1fr 1.35fr !important;
+  gap: 10px;
+  margin-top: 14px;
+  width: 100%;
+  align-items: stretch;
+}
+/* Botões: família .btn intacta, só escala menor (não 48px) */
+#modal-fundo .modal-actions.modal-actions--compact .btn,
+#modal-despesa .modal-actions.modal-actions--compact .btn,
+#modal-agenda .modal-actions.modal-actions--compact .btn {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 14px !important;
+  margin: 0 !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  /* NÃO forçar transparent — herda .btn-primary / .btn-secondary do design system */
+}
+
+/* Campos densos (mantido) */
+#modal-fundo .input-field,
+#modal-despesa .input-field,
+#modal-agenda .input-field {
+  min-height: 40px !important;
+  height: 40px !important;
+  padding: 8px 12px !important;
+  font-size: 0.875rem !important;
+  border-radius: var(--radius-md);
+}
+#modal-fundo .input-group,
+#modal-despesa .input-group,
+#modal-agenda .input-group {
+  margin-bottom: 12px;
+}
+#modal-agenda #agenda-add-cliente-rapido.btn {
+  min-height: 36px !important;
+  height: 36px !important;
+  font-size: 0.8125rem;
+}
 
 /* Compactação pontual de acções em modais de negócio */
 .modal-actions .btn {

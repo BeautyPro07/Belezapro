@@ -62,7 +62,7 @@
   border-radius: var(--radius-md);
   padding: 12px 16px;
   margin-bottom: 8px;
-  box-shadow: var(--shadow-premium);
+  box-shadow: var(--shadow-rest);
 }
 .prof-avatar {
   width: 40px;
@@ -192,40 +192,16 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
+/* P1: acções do fecho consomem API .btn — só layout de contexto aqui */
 .bp-fecho-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: var(--s1, 8px);
   margin-top: 18px;
 }
-.bp-fecho-btn {
-  min-height: 42px;
-  height: 42px;
-  border-radius: 10px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 12px;
-  box-sizing: border-box;
-  touch-action: manipulation;
-}
-.bp-fecho-btn--ghost {
-  background: var(--card-white, #fff);
-  color: var(--text-primary);
-  border: 1px solid var(--border-soft, #e5e0d8);
-}
-.bp-fecho-btn--ghost:active { background: var(--bg-soft, #f5f2ec); }
-.bp-fecho-btn--primary {
+.bp-fecho-actions .btn-primary {
   grid-column: 1 / -1;
-  background: var(--gold, #C9A227);
-  color: #fff;
-  border: 1px solid var(--gold, #C9A227);
 }
-.bp-fecho-btn--primary:active { filter: brightness(0.96); }
 .fecho-row .fr-val--in { color: var(--green, #1B7A4E); }
 .fecho-row .fr-val--out { color: var(--red, #B33A3A); }
 
@@ -300,4 +276,42 @@
   margin: 0 0 10px;
   padding: 0 2px;
   opacity: 0.88;
+}
+
+
+/* F7-caixa — Dia exacto: linha inteira + input utilizável (bundle faz input.click()) */
+#caixa-filter-popover .agenda-periodo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+#caixa-filter-popover .agenda-periodo-filter[data-periodo="dia"],
+#caixa-filter-popover .caixa-periodo-filter[data-periodo="dia"] {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}
+/* Input visível na linha abaixo — display:none impedia o date picker nativo (input.click no bundle) */
+#caixa-filter-popover #caixa-data-exata,
+#caixa-data-exata.bp-caixa-data-exata {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  margin: 8px 0 0 !important;
+  min-height: 44px !important;
+  height: 44px !important;
+  padding: 0 12px !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: static !important;
+  visibility: visible !important;
+  font-size: 16px !important; /* evita zoom iOS */
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  color: var(--text-primary);
 }

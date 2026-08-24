@@ -30,8 +30,9 @@
     background: var(--neutral-600);
   }
   .venda-cta-bar .cta-icon {
-    background: rgba(212,175,55,0.25);
-    color: var(--gold-400);
+    background: transparent;
+    box-shadow: none;
+    color: var(--neutral-100);
   }
   .venda-cta-bar .cta-text .cta-main {
     color: var(--venda-cta-text);

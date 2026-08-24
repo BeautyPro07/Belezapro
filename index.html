@@ -88,17 +88,17 @@
 
   <link rel="stylesheet" href="base-variaveis.css">
   <link rel="stylesheet" href="componentes-base.css">
-  <link rel="stylesheet" href="layout-nav-tabs.css">
+  <link rel="stylesheet" href="layout-nav-tabs.css?v=20260824-f7-9r">
   <link rel="stylesheet" href="kpis-caixa-listas.css">
-  <link rel="stylesheet" href="menus-agenda.css">
+  <link rel="stylesheet" href="menus-agenda.css?v=20260824-f7-9r">
   <link rel="stylesheet" href="modais-toast-fab.css">
   <link rel="stylesheet" href="login-carrinho-venda.css">
   <link rel="stylesheet" href="historico-fecho-equipa.css">
-  <link rel="stylesheet" href="ia.css">
+  <link rel="stylesheet" href="ia.css?v=20260824-f7-9r">
   <link rel="stylesheet" href="plano-filtros-grafico.css">
   <link rel="stylesheet" href="impressao-acessibilidade.css">
   <link rel="stylesheet" href="design-tokens-extra.css">
-  <link rel="stylesheet" href="design-system-final.css">
+  <link rel="stylesheet" href="design-system-final.css?v=20260824-f7-9r">
   <link rel="stylesheet" href="dark-mode.css">
   <link rel="stylesheet" href="splash-sparkline.css">
   <link rel="stylesheet" href="bp-premium-panels.css">
@@ -228,14 +228,20 @@
 
       <div class="offline-banner" id="offline-banner" role="status" style="display:none!important" hidden aria-hidden="true"><span class="offline-banner-dot" aria-hidden="true"></span><span id="offline-banner-text">Sem ligação · Os dados continuam guardados neste dispositivo</span></div>
 
-      <!-- CTA VENDA -->
-      <button class="venda-cta-bar" id="nova-venda-hero-btn" aria-label="Registar nova venda">
-        <div class="cta-icon">+</div>
-        <div class="cta-text">
-          <div class="cta-main">Registar <span class="gold-word">Venda</span></div>
-          <div class="cta-sub">Toque para iniciar uma nova venda agora</div>
-        </div>
-        <span class="cta-arrow visible">→</span>
+      <!-- CTA serviço: Lucide sparkles (padrão de produto digital) + título só -->
+      <button type="button" class="venda-cta-bar" id="nova-venda-hero-btn" aria-label="Realizar serviço">
+        <span class="cta-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>
+            <path d="M20 2v4"/>
+            <path d="M22 4h-4"/>
+            <circle cx="4" cy="20" r="2"/>
+          </svg>
+        </span>
+        <span class="cta-text">
+          <span class="cta-main">Realizar <span class="gold-word">serviço</span></span>
+        </span>
+        <span class="cta-arrow visible" aria-hidden="true">→</span>
       </button>
 
       <!-- ===== MAIN CONTENT ===== -->
@@ -244,36 +250,52 @@
         <!-- DASHBOARD -->
         <div id="tab-dashboard" class="tab-pane active">
           <div class="tab-inner">
-            <!-- Data + Ícone de Filtro -->
-            <!-- Resumo: período + KPIs (estrutura limpa) -->
-            <header class="dash-period-head">
-              <button type="button" id="dash-filter-icon" class="dash-period-filter-btn" aria-label="Filtrar período">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                  <line x1="4" y1="6" x2="20" y2="6"/>
-                  <line x1="6" y1="12" x2="18" y2="12"/>
-                  <line x1="8" y1="18" x2="16" y2="18"/>
-                </svg>
-                <span id="today-date" class="dash-period-label">Hoje</span>
-              </button>
-              <p id="greeting" class="dash-period-greeting">Bom dia!</p>
-            </header>
+            <p id="greeting" class="dash-period-greeting" hidden aria-hidden="true"></p>
 
-            <section class="kpi-grid kpi-grid--resumo" aria-label="Indicadores do período">
-              <article class="kpi-card kpi-card--fat bp-motion-enter" id="kpi-revenue-card" data-role="admin,gerente" style="--stagger:0">
-                <p class="kpi-label">Faturamento</p>
-                <p class="kpi-value" id="kpi-revenue">0 Kz</p>
-                <p class="kpi-sub" id="kpi-revenue-count">0 vendas</p>
-              </article>
-              <article class="kpi-card bp-motion-enter" id="kpi-agenda-card" style="--stagger:1">
-                <p class="kpi-label">Agendamentos</p>
-                <p class="kpi-value" id="kpi-agendamentos">0</p>
-                <p class="kpi-sub" id="kpi-agendamentos-status">0 realizados</p>
-              </article>
-              <article class="kpi-card bp-motion-enter" id="kpi-clientes-card" style="--stagger:2">
-                <p class="kpi-label">Clientes</p>
-                <p class="kpi-value" id="kpi-clientes">0</p>
-                <p class="kpi-sub" id="kpi-clientes-status">0 no período</p>
-              </article>
+            <!-- Hero Resumo: clone estrutural do card Caixa (não altera #tab-caixa) -->
+            <section class="card card-highlight mb-3 resumo-hero" aria-label="Indicadores do período">
+              <div class="resumo-hero-top">
+                <div class="resumo-hero-title-row">
+                  <span class="resumo-hero-eyebrow">Faturamento</span>
+                  <span id="today-date" class="dash-period-label resumo-hero-period">Hoje</span>
+                </div>
+                <!-- IDs do filtro preservados; só ícone funil (texto do período ao lado de Faturamento) -->
+                <button type="button" id="dash-filter-icon" class="resumo-hero-filter" aria-label="Filtrar período" title="Filtrar período">
+                  <svg class="bp-icon bp-icon-funnel" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <line x1="4" y1="7" x2="20" y2="7"/>
+                    <line x1="7" y1="12" x2="17" y2="12"/>
+                    <line x1="10" y1="17" x2="14" y2="17"/>
+                  </svg>
+                </button>
+              </div>
+              <!-- Área de clique do detalhe faturamento (ID exigido pelo bundle) — valor + meta -->
+              <div class="resumo-hero-main" id="kpi-revenue-card" data-role="admin,gerente" role="button" tabindex="0" aria-label="Detalhe do faturamento">
+                <span id="kpi-revenue" class="resumo-hero-value">0 Kz</span>
+                <div class="resumo-hero-side" aria-hidden="true"></div>
+              </div>
+              <div class="resumo-hero-actions" role="group" aria-label="Indicadores">
+                <button type="button" class="caixa-acao resumo-kpi-acao" id="kpi-clientes-card" aria-label="Clientes">
+                  <span class="resumo-kpi-num" id="kpi-clientes-view">0</span>
+                  <span class="resumo-kpi-lbl">Clientes</span>
+                </button>
+                <button type="button" class="caixa-acao resumo-kpi-acao" id="kpi-agenda-card" aria-label="Agenda">
+                  <span class="resumo-kpi-num" id="kpi-agendamentos">0</span>
+                  <span class="resumo-kpi-lbl">Agenda</span>
+                </button>
+                <button type="button" class="caixa-acao resumo-kpi-acao" id="kpi-ticket-card" aria-label="Serviços">
+                  <span class="resumo-kpi-num" id="kpi-servicos-view">0</span>
+                  <span class="resumo-kpi-lbl">Serviços</span>
+                </button>
+              </div>
+              <!-- Fontes do bundle (fora dos botões; IDs contractuais) -->
+              <div id="resumo-kpi-sources" class="resumo-kpi-sources" aria-hidden="true">
+                <span id="kpi-clientes-status">0</span>
+                <span id="kpi-clientes">0</span>
+                <span id="kpi-agendamentos-status">0</span>
+                <span id="kpi-revenue-count">0</span>
+                <span id="kpi-ticket">0</span>
+                <span id="kpi-ticket-sub">0</span>
+              </div>
             </section>
 
             
@@ -392,11 +414,12 @@
        <!-- AGENDA -->
 <div id="tab-agenda" class="tab-pane">
   <div class="tab-inner">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;position:relative;padding-top:22px;">
-      <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Agenda</span>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;position:relative;">
-        <!-- Filtro: "Filtrar" + ícone, alinhado à direita, acima do hoje -->
-        <button id="agenda-filter-icon" style="background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center;gap:4px;transition:color 0.15s;position:absolute;top:-20px;right:0;font-size:.7rem;" aria-label="Filtrar agenda">
+    <div class="bp-agenda-head">
+      <span class="bp-agenda-title">Agendamentos</span>
+    </div>
+    <div class="bp-agenda-controls">
+        <div class="bp-agenda-filter-anchor">
+        <button id="agenda-filter-icon" style="background:none;border:none;padding:6px;cursor:pointer;color:var(--text-muted);display:inline-flex;align-items:center;justify-content:center;" aria-label="Filtrar agenda">
           <span style="font-size:.55rem;font-weight:500;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-muted);">Filtrar</span>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="2" y1="3" x2="14" y2="3"/>
@@ -404,12 +427,6 @@
             <line x1="5" y1="13" x2="11" y2="13"/>
           </svg>
         </button>
-        <!-- Navegação e label -->
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button id="agenda-prev" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">◀</button>
-          <span style="font-weight:600;font-size:.85rem;color:var(--text-primary);" id="agenda-date-label">Hoje</span>
-          <button id="agenda-next" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">▶</button>
-        </div>
 <!-- POPOVER do filtro (com Dia Exato integrado) -->
 <div id="agenda-filter-popover" class="agenda-filter-popover">
   <!-- 2×2 períodos + Dia exacto (largura total). Todos NÃO fica aqui. -->
@@ -441,8 +458,13 @@
   </div>
   <input type="date" id="agenda-data-exata" class="input-field" style="display:none;width:100%;margin-top:8px;font-size:16px;" aria-label="Escolher dia exacto">
 </div>
+        </div>
+        <div class="bp-agenda-daynav" style="display:flex;gap:8px;align-items:center;">
+          <button id="agenda-prev" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">◀</button>
+          <span style="font-weight:600;font-size:.85rem;color:var(--text-primary);" id="agenda-date-label">Hoje</span>
+          <button id="agenda-next" style="background:none;border:none;font-size:1.2rem;color:var(--text-muted);cursor:pointer;padding:4px 8px;transition:color 0.15s ease;">▶</button>
+        </div>
       </div>
-    </div>
     <div id="agenda-full-list"></div>
   </div>
 </div>
@@ -450,9 +472,12 @@
         <!-- CLIENTES -->
         <div id="tab-clientes" class="tab-pane">
           <div class="tab-inner">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <span style="font-family:var(--font-serif);font-size:1.05rem;font-weight:600;">Clientes</span>
-              <button class="btn btn-sm btn-primary" id="add-cliente-btn">+ Novo</button>
+            <div class="bp-cli-head">
+              <span class="bp-cli-title">Clientes</span>
+            </div>
+            <div class="bp-cli-toolbar" data-bp-lock="cli-toolbar-v1">
+              <span class="bp-cli-toolbar-label">Cliente</span>
+              <button type="button" class="btn btn-sm btn-primary" id="add-cliente-btn">+ Novo</button>
             </div>
             <div class="input-group bp-cli-search-wrap">
               <input type="text" id="search-cliente" class="input-field bp-placeholder-rotating bp-cli-search" placeholder="Nome ou telefone..." data-ph-set="clientes" autocomplete="off">
@@ -516,7 +541,7 @@
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="ano">Este ano</button>
                   <button type="button" class="agenda-periodo-filter caixa-periodo-filter" data-periodo="dia">Dia exacto</button>
                 </div>
-                <input type="date" id="caixa-data-exata" style="display:none;" />
+                <input type="date" id="caixa-data-exata" class="input-field bp-caixa-data-exata" aria-label="Dia exacto" />
               </div>
             </div>
             <div style="margin-bottom:12px;position:relative;">
@@ -572,21 +597,22 @@
         <div id="tab-ia" class="tab-pane" data-role="admin,gerente">
           <div class="tab-inner">
             <div class="ia-header">
-              <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;">
-                <div>
+              <div class="ia-header-top">
+                <img src="logo.png" alt="" aria-hidden="true" class="ia-header-mark">
+                <div class="ia-header-text">
                   <div class="ia-header-title">Benza <span>AI</span></div>
                   <div class="ia-header-sub">Seu consultor inteligente de gestão</div>
                 </div>
-                <img src="logo.png" alt="" aria-hidden="true" class="ia-header-mark">
-              </div>
-              <div class="ia-status-line" data-ia-conn="ok">
-                <span class="ia-status-dot" data-state="ok" aria-hidden="true"></span>
-                <span id="ia-status-line-label">Ligado</span>
-                <span class="ia-status-sep">|</span>
-                <span id="ia-status-line-text">Pronta a analisar o seu negócio</span>
+                <div class="ia-header-conn ia-status-line" data-ia-conn="ok" aria-live="polite">
+                  <span class="ia-status-dot" data-state="ok" aria-hidden="true"></span>
+                  <span id="ia-status-line-label">Ligado</span>
+                </div>
               </div>
               <button id="ia-renomear-btn" style="display:none;"></button>
             </div>
+            <div class="ia-taglines">
+  <p id="ia-status-line-text" class="ia-tagline-main">Pronta a analisar o seu negócio</p>
+</div>
 
             <div class="ia-resumo-grid">
               <div class="ia-resumo-card">
@@ -635,7 +661,7 @@
               </div>
             </div>
 
-            <div class="card" style="padding:16px;position:relative;">
+            <div class="card ia-chat-card" style="padding:16px;position:relative;overflow:visible;">
               <div id="ia-onboarding" style="display:none;text-align:center;padding:8px 4px 4px;">
                 <div style="font-size:1.8rem;margin-bottom:8px;"></div>
                 <div style="font-family:var(--font-serif);font-size:1rem;font-weight:600;margin-bottom:4px;">Antes de começar</div>
@@ -645,36 +671,13 @@
                 <button class="btn btn-primary btn-block" id="ia-onb-comecar">Começar</button>
               </div>
               <div id="ia-chat-container" class="ia-chat-shell" style="position:relative;">
-                <div class="ia-bg-art" aria-hidden="true">
-                  <svg viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-                    <!-- Gestor homem + agente IA em diálogo -->
-                    <ellipse cx="160" cy="175" rx="90" ry="10" fill="#e8e4df" opacity=".5"/>
-                    <!-- Gestor (esquerda) -->
-                    <circle cx="110" cy="78" r="22" fill="#d4c4b0"/>
-                    <ellipse cx="110" cy="78" rx="14" ry="12" fill="#c4a484"/>
-                    <path d="M88 110 Q110 98 132 110 L138 155 Q110 165 82 155 Z" fill="#3d5a80"/>
-                    <rect x="98" y="118" width="24" height="8" rx="2" fill="#e8eef5"/>
-                    <!-- Agente IA (direita) -->
-                    <circle cx="210" cy="76" r="22" fill="#e8e4df"/>
-                    <circle cx="210" cy="76" r="14" fill="#f5f0ea"/>
-                    <circle cx="204" cy="74" r="2.2" fill="#c9a227"/>
-                    <circle cx="216" cy="74" r="2.2" fill="#c9a227"/>
-                    <path d="M203 82 Q210 88 217 82" fill="none" stroke="#c9a227" stroke-width="1.5" stroke-linecap="round"/>
-                    <path d="M188 108 Q210 96 232 108 L236 152 Q210 162 184 152 Z" fill="#2b2b2b"/>
-                    <circle cx="210" cy="122" r="6" fill="#c9a227" opacity=".85"/>
-                    <!-- Balões -->
-                    <ellipse cx="70" cy="48" rx="28" ry="16" fill="#fff" stroke="#e0dcd6" stroke-width="1.5"/>
-                    <path d="M78 62 L82 72 L88 60" fill="#fff" stroke="#e0dcd6" stroke-width="1"/>
-                    <ellipse cx="250" cy="44" rx="30" ry="17" fill="#fff" stroke="#e0dcd6" stroke-width="1.5"/>
-                    <path d="M242 58 L236 70 L248 58" fill="#fff" stroke="#e0dcd6" stroke-width="1"/>
-                    <circle cx="248" cy="42" r="2" fill="#c9a227"/>
-                    <circle cx="256" cy="42" r="2" fill="#c9a227"/>
-                    <circle cx="264" cy="42" r="2" fill="#c9a227"/>
-                  </svg>
-                </div>
+                
                 <div id="ia-chat-empty">
-                  <div class="ia-chat-empty-title">Como posso ajudar hoje?</div>
-                  <div class="ia-chat-empty-sub">Pergunte sobre vendas, clientes, agenda, equipa, caixa ou desempenho.</div>
+                  <div class="ia-empty-art" aria-hidden="true">
+                    <img src="ia-empty-duo.png" alt="" class="ia-empty-duo" width="280" height="180" decoding="async">
+                  </div>
+                  <div class="ia-chat-empty-title">O que quer descobrir?</div>
+<div class="ia-chat-empty-sub">Eu analiso os dados do seu salão e mostro o que merece a sua atenção.</div>
                 </div>
                 <div class="ia-chat" id="ia-chat"></div>
 </div>
@@ -686,7 +689,7 @@
                   </button>
                 </div>
                 <div class="ia-composer-meta">
-                  <span class="ia-limite">Perguntas hoje: <span id="ia-contador">0</span></span>
+                  <span class="ia-limite">Perguntas realizadas: <span id="ia-contador">0</span></span>
                   <span id="ia-status">IA pronta</span>
                 </div>
               </div>
@@ -804,7 +807,7 @@
         <label class="input-label">Preço (Kz)</label>
         <input type="number" id="agenda-preco" class="input-field" placeholder="0" value="5000" min="0" step="500">
       </div>
-      <div class="modal-actions modal-actions--primary-emphasis">
+      <div class="modal-actions modal-actions--compact">
         <button type="button" class="btn btn-secondary" id="modal-agenda-cancel">Cancelar</button>
         <button type="button" class="btn btn-primary" id="modal-agenda-save">Agendar</button>
       </div>
@@ -899,7 +902,7 @@
           </select>
         </div>
       </div>
-      <div class="modal-actions modal-actions--primary-emphasis">
+      <div class="modal-actions modal-actions--compact">
         <button type="button" class="btn btn-secondary" id="modal-despesa-cancel">Cancelar</button>
         <button type="button" class="btn btn-primary" id="modal-despesa-save">Registar despesa</button>
       </div>
@@ -988,7 +991,7 @@
         <label class="input-label" for="fundo-valor">Fundo actual (Kz)</label>
         <input type="number" id="fundo-valor" class="input-field" placeholder="0" min="0" step="1000" inputmode="numeric">
       </div>
-      <div class="modal-actions modal-actions--primary-emphasis">
+      <div class="modal-actions modal-actions--compact">
         <button type="button" class="btn btn-secondary" id="modal-fundo-cancel">Cancelar</button>
         <button type="button" class="btn btn-primary" id="modal-fundo-save">Guardar fundo</button>
       </div>
@@ -1004,7 +1007,7 @@
       <div id="detalhe-venda-conteudo" class="bp-view-body"></div>
       <div class="modal-actions modal-actions--primary-emphasis" style="flex-wrap:wrap;gap:8px;">
         <button type="button" class="btn btn-secondary" id="modal-detalhe-fechar">Fechar</button>
-        <button type="button" class="btn btn-primary" id="btn-imprimir-recibo">Imprimir recibo</button>
+        <button type="button" class="btn btn-secondary" id="btn-imprimir-recibo">Imprimir recibo</button>
         <button type="button" class="btn btn-danger" id="btn-cancelar-venda" style="display:none;">Cancelar venda</button>
       </div>
     </div>
@@ -1018,9 +1021,9 @@
       <p class="bp-fecho-sub">Resumo do dia · valores em Kz</p>
       <div id="fecho-conteudo" class="bp-fecho-conteudo"></div>
       <div class="bp-fecho-actions">
-        <button type="button" class="bp-fecho-btn bp-fecho-btn--ghost" id="modal-fecho-fechar">Voltar</button>
-        <button type="button" class="bp-fecho-btn bp-fecho-btn--ghost" id="btn-imprimir-fecho">Imprimir</button>
-        <button type="button" class="bp-fecho-btn bp-fecho-btn--primary" id="confirmar-fecho-btn">Fechar caixa</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="modal-fecho-fechar">Voltar</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-imprimir-fecho">Imprimir</button>
+        <button type="button" class="btn btn-primary btn-sm" id="confirmar-fecho-btn">Fechar caixa</button>
       </div>
     </div>
   </div>
@@ -1127,7 +1130,7 @@
       <input type="hidden" id="finalizar-ag-id">
       <div class="modal-actions modal-actions--primary-emphasis">
         <button type="button" class="btn btn-secondary" id="modal-finalizar-cancel">Cancelar</button>
-        <button type="button" class="btn btn-success" id="modal-finalizar-save">Confirmar e Registar</button>
+        <button type="button" class="btn btn-primary" id="modal-finalizar-save">Confirmar e Registar</button>
       </div>
     </div>
   </div>
@@ -1218,11 +1221,11 @@
     <div class="modal-sheet">
       <div class="handle"></div>
       <div id="revenue-title" class="modal-title">Detalhe do Faturamento</div>
-      <div id="revenue-detail-list" style="max-height:400px;overflow-y:auto;"></div>
-      <div class="bp-revenue-total-bar" style="margin-top:12px;display:flex;align-items:baseline;justify-content:flex-end;gap:8px;font-weight:700;font-size:1rem;border-top:2px solid var(--gold);padding-top:8px;flex-wrap:nowrap;">
-        <span style="flex-shrink:0;">Total:</span>
-        <span id="revenue-detail-total" class="bp-revenue-total-val" style="color:var(--gold-dark);font-family:var(--font-serif);white-space:nowrap;font-variant-numeric:tabular-nums;">0 Kz</span>
+      <div id="revenue-detail-totals" class="bp-rev-detail-totals">
+        <span class="bp-rev-detail-totals-label">Total</span>
+        <strong id="revenue-detail-total" class="bp-rev-detail-totals-val">0 Kz</strong>
       </div>
+      <div id="revenue-detail-list" class="bp-revenue-detail-list"></div>
       <button class="btn btn-secondary btn-block mt-3" id="modal-revenue-close">Fechar</button>
     </div>
   </div>
@@ -1248,8 +1251,8 @@
       <h2 id="confirm-title" class="confirm-title">Confirmar</h2>
       <p id="confirm-message" class="confirm-message">Tem a certeza?</p>
       <div class="confirm-actions">
-        <button type="button" class="btn btn-secondary btn-modal-compact" id="confirm-cancel-btn">Cancelar</button>
-        <button type="button" class="btn btn-danger btn-modal-compact" id="confirm-ok-btn">Eliminar</button>
+        <button type="button" class="btn btn-secondary" id="confirm-cancel-btn">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="confirm-ok-btn">Eliminar</button>
       </div>
     </div>
   </div>
@@ -1260,8 +1263,8 @@
       <h2 id="erro-title" class="confirm-title">Não foi possível concluir</h2>
       <p id="erro-message" class="confirm-message">Algo impediu esta operação. Podes tentar de novo; se o problema continuar, verifica a ligação ou tenta mais tarde.</p>
       <div class="confirm-actions confirm-actions--end">
-        <button type="button" class="btn btn-secondary btn-modal-compact" id="erro-cancelar-btn">Fechar</button>
-        <button type="button" class="btn btn-primary btn-modal-compact" id="erro-tentar-btn">Tentar novamente</button>
+        <button type="button" class="btn btn-secondary" id="erro-cancelar-btn">Fechar</button>
+        <button type="button" class="btn btn-primary" id="erro-tentar-btn">Tentar novamente</button>
       </div>
     </div>
   </div>
@@ -1403,8 +1406,7 @@
     <div class="modal-confirm-sheet bp-modal-expirar">
       <div class="bp-expirar-header">
         <span id="expirar-title" class="bp-expirar-title">
-          <span class="bp-expirar-title-main">Atenção:</span>
-          <span class="bp-expirar-title-sub">perdendo um cliente</span>
+          <span class="bp-expirar-title-main">Perdendo cliente</span>
         </span>
       </div>
       <p id="expirar-message" class="confirm-message bp-expirar-msg">
@@ -1416,11 +1418,8 @@
             <svg class="bp-ic-wa" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.47 14.3c-.28-.14-1.64-.81-1.9-.9-.25-.1-.44-.14-.62.14-.18.28-.71.9-.87 1.08-.16.18-.32.2-.6.07-.28-.14-1.17-.43-2.23-1.37-.82-.73-1.38-1.64-1.54-1.92-.16-.28-.02-.43.12-.57.13-.13.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.35-.02-.49-.07-.14-.62-1.49-.85-2.04-.22-.53-.45-.46-.62-.47h-.53c-.18 0-.47.07-.71.35-.25.28-.93.91-.93 2.22s.96 2.58 1.09 2.76c.14.18 1.88 2.87 4.56 4.02 1.7.73 2.15.8 2.92.67.45-.08 1.64-.67 1.87-1.32.23-.65.23-1.2.16-1.32-.07-.11-.25-.18-.53-.32z"/><path fill="currentColor" d="M12.04 2C6.5 2 2.01 6.49 2.01 12.03c0 1.85.5 3.57 1.37 5.07L2 22l5.04-1.32A9.96 9.96 0 0 0 12.04 22C17.57 22 22 17.52 22 11.99 22 6.49 17.57 2 12.04 2zm0 18.15c-1.67 0-3.22-.48-4.54-1.32l-.33-.19-3.08.81.82-3-.21-.35a7.94 7.94 0 0 1-1.3-4.38c0-4.4 3.58-7.98 7.99-7.98 4.4 0 7.98 3.58 7.98 7.98 0 4.4-3.58 7.98-7.98 7.98z"/></svg>
             <span>WhatsApp</span>
           </button>
-          <button type="button" class="btn btn-sm bp-btn-call" id="expirar-ligar">
+          <button type="button" class="btn btn-sm bp-btn-call bp-call-anim" id="expirar-ligar">
             <span class="bp-call-icon-wrap" aria-hidden="true">
-              <span class="bp-call-ripple"></span>
-              <span class="bp-call-ripple"></span>
-              <span class="bp-call-ripple"></span>
               <svg class="bp-ic-call" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
             </span>
             <span>Ligar</span>
@@ -1431,7 +1430,9 @@
     </div>
   </div>
 
-  <script src="app.bundle.js?v=20260820-semvenda"></script>
+  <script src="app.bundle.js?v=20260822-p3perf"></script>
+  <script src="bp-resumo-kpi.js?v=20260822-mirror3"></script>
+
 
 
   <!-- Modal limpo: cliente não encontrado -->
@@ -1442,7 +1443,7 @@
       <h2 id="offline-info-title" class="confirm-title">Sem ligação à internet</h2>
       <p class="confirm-message">Estás sem ligação neste momento. As alterações que fizeres ficam guardadas neste dispositivo e serão sincronizadas automaticamente quando a rede voltar.</p>
       <div class="confirm-actions confirm-actions--end">
-        <button type="button" class="btn btn-primary btn-modal-compact" id="modal-offline-info-ok">Entendi</button>
+        <button type="button" class="btn btn-primary" id="modal-offline-info-ok">Entendi</button>
       </div>
     </div>
   </div>
@@ -1452,7 +1453,7 @@
       <h2 id="cliente-nao-encontrado-title" class="confirm-title">Cliente não encontrado</h2>
       <p class="confirm-message">Não encontrei o cliente. Verifica se o nome está correcto ou se o cliente que procura está cadastrado.</p>
       <div class="confirm-actions confirm-actions--end">
-        <button type="button" class="btn btn-primary btn-modal-compact" id="modal-cliente-nao-encontrado-ok">Entendi</button>
+        <button type="button" class="btn btn-primary" id="modal-cliente-nao-encontrado-ok">Entendi</button>
       </div>
     </div>
   </div>
